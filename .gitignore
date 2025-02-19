@@ -1,2 +1,2 @@
-/example/classifier_ckpt/
-/example/classifier_data/
+examples/classifier_ckpt/*
+examples/classifier_data/*

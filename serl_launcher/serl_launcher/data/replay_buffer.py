@@ -25,6 +25,7 @@ def _insert_recursively(
     dataset_dict: DatasetDict, data_dict: DatasetDict, insert_index: int
 ):
     if isinstance(dataset_dict, np.ndarray):
+        # print("dataset_dict[insert_index] = ", dataset_dict[insert_index])
         dataset_dict[insert_index] = data_dict
     elif isinstance(dataset_dict, dict):
         for k in dataset_dict.keys():
@@ -76,6 +77,7 @@ class ReplayBuffer(Dataset):
 
     def __len__(self) -> int:
         return self._size
+
 
     def insert(self, data_dict: DatasetDict):
         _insert_recursively(self.dataset_dict, data_dict, self._insert_index)

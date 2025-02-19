@@ -47,7 +47,6 @@ class ChunkingWrapper(gym.Wrapper):
         self.act_exec_horizon = act_exec_horizon
 
         self.current_obs = deque(maxlen=self.obs_horizon)
-
         self.observation_space = space_stack(
             self.env.observation_space, self.obs_horizon
         )

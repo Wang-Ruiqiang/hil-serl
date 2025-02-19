@@ -9,83 +9,33 @@ import numpy as np
 import optax
 from tqdm import tqdm
 from absl import app, flags
-import gymnasium as gym
-from gymnasium.spaces import flatten_space, flatten
 
 from serl_launcher.data.data_store import ReplayBuffer
 from serl_launcher.utils.train_utils import concat_batches
 from serl_launcher.vision.data_augmentations import batched_random_crop
 from serl_launcher.networks.reward_classifier import create_classifier
 
-from experiments.mappings import NEW_MAPPING
+from experiments.mappings import CONFIG_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 150, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
-# camera_keys = ["front_camera", "side_camera"]
-# classifier_keys = ["front_camera", "side_camera"]
-# observation_space = gym.spaces.Dict(
-#     {
-#         "state": gym.spaces.Dict(
-#             {
-#                 "tcp_pos": gym.spaces.Box(
-#                     -np.inf, np.inf, shape=(3,)
-#                 ),
-#                 "tcp_ori": gym.spaces.Box(
-#                     -np.inf, np.inf, shape=(4,)
-#                 ),
-#                 "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
-#             }
-#         ),
-#         "images": gym.spaces.Dict(
-#             {key: gym.spaces.Box(0, 255, shape=(480, 640, 3), dtype=np.uint8) 
-#                         for key in camera_keys}
-#         ),
-#     }
-# )
-
-# action_space = gym.spaces.Box(
-#         np.ones((23,), dtype=np.float32) * -1,
-#         np.ones((23,), dtype=np.float32),
-#     )
-
-# def space_stack(space: gym.Space, repeat: int):
-#     if isinstance(space, gym.spaces.Box):
-#         return gym.spaces.Box(
-#             low=np.repeat(space.low[None], repeat, axis=0),
-#             high=np.repeat(space.high[None], repeat, axis=0),
-#             dtype=space.dtype,
-#         )
-#     elif isinstance(space, gym.spaces.Discrete):
-#         return gym.spaces.MultiDiscrete([space.n] * repeat)
-#     elif isinstance(space, gym.spaces.Dict):
-#         return gym.spaces.Dict(
-#             {k: space_stack(v, repeat) for k, v in space.spaces.items()}
-#         )
-#     else:
-#         raise TypeError()
-    
 
 def main(_):
-    assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
-    config = NEW_MAPPING[FLAGS.exp_name]()
+    assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
+    config = CONFIG_MAPPING[FLAGS.exp_name]()
     env = config.get_environment(fake_env=True, save_video=False, classifier=False)
 
     devices = jax.local_devices()
     sharding = jax.sharding.PositionalSharding(devices)
     
-    # stack_observation_space = space_stack(observation_space, 1)
-    
     # Create buffer for positive transitions
-    print("ReplayBuffer module:", ReplayBuffer.__module__)
-    print("ReplayBuffer doc:", ReplayBuffer.__doc__)
-    print("env.observation_space = ", env.observation_space)
     pos_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
+        env.observation_space,
+        env.action_space,
         capacity=20000,
         include_label=True,
     )
@@ -94,11 +44,10 @@ def main(_):
     for path in success_paths:
         success_data = pkl.load(open(path, "rb"))
         for trans in success_data:
-            # if "images" in trans['observations'].keys():
-            #     continue
+            if "images" in trans['observations'].keys():
+                continue
             trans["labels"] = 1
-            # trans['actions'] = env.action_space.sample()
-
+            trans['actions'] = env.action_space.sample()
             pos_buffer.insert(trans)
             
     pos_iterator = pos_buffer.get_iterator(
@@ -110,9 +59,9 @@ def main(_):
     
     # Create buffer for negative transitions
     neg_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
-        capacity=20000,
+        env.observation_space,
+        env.action_space,
+        capacity=50000,
         include_label=True,
     )
     failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
@@ -121,11 +70,10 @@ def main(_):
             open(path, "rb")
         )
         for trans in failure_data:
-            # if "images" in trans['observations'].keys():
-            #     continue
+            if "images" in trans['observations'].keys():
+                continue
             trans["labels"] = 0
-            # trans['actions'] = env.action_space.sample()
-
+            trans['actions'] = env.action_space.sample()
             neg_buffer.insert(trans)
             
     neg_iterator = neg_buffer.get_iterator(
