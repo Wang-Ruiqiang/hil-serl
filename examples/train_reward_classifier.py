@@ -82,11 +82,10 @@ def main(_):
     # Create buffer for positive transitions
     print("ReplayBuffer module:", ReplayBuffer.__module__)
     print("ReplayBuffer doc:", ReplayBuffer.__doc__)
-    print("env.observation_space = ", env.observation_space)
     pos_buffer = ReplayBuffer(
         observation_space=env.observation_space,
         action_space=env.action_space,
-        capacity=20000,
+        capacity=10000,
         include_label=True,
     )
 
@@ -112,7 +111,7 @@ def main(_):
     neg_buffer = ReplayBuffer(
         observation_space=env.observation_space,
         action_space=env.action_space,
-        capacity=20000,
+        capacity=10000,
         include_label=True,
     )
     failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))

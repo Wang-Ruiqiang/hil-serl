@@ -335,7 +335,10 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
     for step in pbar:
         timer.tick("total")
-
+        robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+        frame_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
+        obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
+        # obs, _ = env.reset()
         with timer.context("sample_actions"):
             if step < config.random_steps:
                 actions = env.action_space.sample()
@@ -356,20 +359,20 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
             action_read = np.concatenate([tcp_pos, tcp_ori])
             print("action_read = ", action_read)
             next_obs, reward, done, truncated, info = env.step(action_read)
-            if "left" in info:
-                info.pop("left")
-            if "right" in info:
-                info.pop("right")
+            # if "left" in info:
+            #     info.pop("left")
+            # if "right" in info:
+            #     info.pop("right")
 
             # override the action with the intervention action
-            if "intervene_action" in info:
-                actions = info.pop("intervene_action")
-                intervention_steps += 1
-                if not already_intervened:
-                    intervention_count += 1
-                already_intervened = True
-            else:
-                already_intervened = False
+            # if "intervene_action" in info:
+            #     actions = info.pop("intervene_action")
+            #     intervention_steps += 1
+            #     if not already_intervened:
+            #         intervention_count += 1
+            #     already_intervened = True
+            # else:
+            #     already_intervened = False
 
             running_return += reward
             transition = dict(
@@ -792,11 +795,11 @@ def main(_):
         print_green("starting learner loop")
         if FLAGS.test:
             learner_test(
-                agent,
-                data_store,
-                intvn_data_store,
-                env,
                 sampling_rng,
+                agent,
+                replay_buffer,
+                demo_buffer=demo_buffer,
+                wandb_logger=wandb_logger,
             )
         else:
             learner(

@@ -153,7 +153,7 @@ class DensoEnv(gym.Env):
                     }
                 ),
                 "images": gym.spaces.Dict(
-                    {key: gym.spaces.Box(0, 255, shape=(480, 640, 3), dtype=np.uint8) 
+                    {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                 for key in config.REALSENSE_CAMERAS}
                 ),
             }
@@ -332,8 +332,10 @@ class DensoEnv(gym.Env):
         for transition in self.data:
             obs = transition["observations"]
 
-            for key in obs["images"]:
-                img = np.array(obs["images"][key])
+            for key in obs:
+                if key == "state":
+                    continue
+                img = np.array(obs[key])
 
                 if key not in images_dict:
                     images_dict[key] = []
@@ -343,7 +345,6 @@ class DensoEnv(gym.Env):
         # 转换列表为 NumPy 数组，符合 get_im() 预期格式
         for key in images_dict:
             images_dict[key] = np.array(images_dict[key])  # 形状 (N, H, W, C)
-
         return images_dict
 
     def interpolate_move(self, goal: np.ndarray, timeout: float):
@@ -408,9 +409,9 @@ class DensoEnv(gym.Env):
             self.cycle_count = 0
             joint_reset = True
 
-        self._recover()
-        self.go_to_reset(joint_reset=joint_reset)
-        self._recover()
+        # self._recover()
+        # self.go_to_reset(joint_reset=joint_reset)
+        # self._recover()
         self.curr_path_length = 0
 
         self._update_cur_position()
@@ -511,7 +512,7 @@ class DensoEnv(gym.Env):
         # self.cur_oritation = self.arm_orientation
 
         # TODO:保存leap_hand当前关节角
-        # self.curr_gripper_pos = np.array(ps["gripper_pos"])
+        self.curr_gripper_pos = self.data[0]["observations"]["state"][7:]
 
     # def update_cur_position(self):
     #     """
@@ -533,7 +534,7 @@ class DensoEnv(gym.Env):
     def _get_obs(self) -> dict:
         images = self.get_im_test()
         state_observation = {
-            "tcp_pose": self.cur_position,
+            "tcp_pos": self.cur_position,
             "tcp_ori": self.cur_oritation,
             "gripper_pose": self.curr_gripper_pos,
         }

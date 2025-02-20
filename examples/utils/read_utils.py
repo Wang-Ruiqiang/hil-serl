@@ -33,9 +33,14 @@ def get_frame_data(frame_path, robot_urdf_path):
         np.array(hand_joint, dtype=np.float32).flatten()
     ])
 
+    resized_image = cv2.resize(color_image, (128,128))
+    resized_image2 = cv2.resize(color_image2, (128,128))
+    front_camera_image = resized_image[..., ::-1]
+    side_camera_image = resized_image2[..., ::-1]
+
     obs = {
-        "front_camera": color_image,
-        "side_camera": color_image2,
+        "front_camera": front_camera_image,
+        "side_camera": side_camera_image,
         "state": state_flattened
     }
     return obs, is_record_success

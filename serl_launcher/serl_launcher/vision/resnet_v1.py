@@ -99,6 +99,7 @@ class SpatialLearnedEmbeddings(nn.Module):
         )
 
         # add batch dim if missing
+        print("features shape before SpatialLearnedEmbeddings:", features.shape)
         no_batch_dim = len(features.shape) < 4
         if no_batch_dim:
             features = features[None]
@@ -221,6 +222,7 @@ class ResNetEncoder(nn.Module):
             observations = resize(observations, self.image_size)
 
         # imagenet mean and std # TODO: add this back
+        print("observations.shape11 = ", observations.shape[2])
         mean = jnp.array([0.485, 0.456, 0.406])
         std = jnp.array([0.229, 0.224, 0.225])
         x = (observations.astype(jnp.float32) / 255.0 - mean) / std
@@ -340,6 +342,7 @@ class PreTrainedResNetEncoder(nn.Module):
         train: bool = True,
     ):
         x = observations
+        print("observations shape= ", observations.shape)
         if encode:
             x = self.pretrained_encoder(x, train=train)
 

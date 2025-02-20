@@ -114,13 +114,13 @@ class RAMEnv(DensoEnv):
             self.regrasp()
             self.should_regrasp = False
 
-        self._recover()
-        self.go_to_reset(joint_reset=False)
-        self._recover()
+        # self._recover()
+        # self.go_to_reset(joint_reset=False)
+        # self._recover()
         self.curr_path_length = 0
 
-        self._update_currpos()
+        self._update_cur_position()
         obs = self._get_obs()
-        requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
+        # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         self.terminate = False
         return obs, {}
