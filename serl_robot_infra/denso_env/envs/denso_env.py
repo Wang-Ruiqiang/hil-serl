@@ -20,7 +20,7 @@ from franka_env.utils.rotations import euler_2_quat, quat_2_euler
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float32MultiArray
 from geometry_msgs.msg import PoseStamped
 
 from examples.utils import read_utils
@@ -202,9 +202,9 @@ class DensoEnv(gym.Env):
         rclpy.init(args=None)
         self.node = rclpy.create_node("ros_publisher_node")
 
-        self.publisher_arm = self.node.create_publisher(Float64MultiArray, 'wrist_cmd', 1)
+        self.publisher_arm = self.node.create_publisher(Float32MultiArray, 'wrist_cmd', 1)
 
-        self.publisher_hand = self.node.create_publisher(Float64MultiArray, 'hand_cmd', 1)
+        self.publisher_hand = self.node.create_publisher(Float32MultiArray, 'hand_cmd', 1)
 
         self.robot_subscription = self.node.create_subscription(
             PoseStamped,
@@ -244,21 +244,21 @@ class DensoEnv(gym.Env):
         start_time = time.time()
         action = np.clip(action, self.action_space.low, self.action_space.high)
         xyz_delta = action[:3]
-
+        
         arm_action = action[:7]
-        wrist_cmd = Float64MultiArray()
-        wrist_cmd.data = arm_action
-        wrist_cmd.header.stamp = self.get_clock().now().to_msg()
+        wrist_cmd = Float32MultiArray()
+        wrist_cmd.data = np.array(arm_action, dtype=np.float32).tolist()
+        # wrist_cmd.header.stamp = self.get_clock().now().to_msg()
         self.publisher_arm.publish(wrist_cmd)
 
         hand_action = action[7:]
-        hand_cmd = Float64MultiArray()
-        hand_cmd.data = hand_action
-        hand_cmd.header.stamp = self.get_clock().now().to_msg()
+        hand_cmd = Float32MultiArray()
+        hand_cmd.data = np.array(hand_action, dtype=np.float32).tolist()
+        # hand_cmd.header.stamp = self.get_clock().now().to_msg()
         self.publisher_hand.publish(hand_cmd)
 
 
-        self.nextpos = self.cur_position.copy()
+        self.nextpos = np.concatenate([self.cur_position.copy(), np.zeros(4)])
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
         # GET ORIENTATION FROM ACTION
@@ -279,9 +279,9 @@ class DensoEnv(gym.Env):
         return ob, int(reward), done, False, {"succeed": reward}
 
     def compute_reward(self, obs) -> bool:
-        current_pose = obs["state"]["tcp_pose"]
+        current_pose = obs["state"]
         # convert from quat to euler first
-        current_rot = Rotation.from_quat(current_pose[3:]).as_matrix()
+        current_rot = Rotation.from_quat(current_pose[3:7]).as_matrix()
         target_rot = Rotation.from_euler("xyz", self._TARGET_POSE[3:]).as_matrix()
         diff_rot = current_rot.T  @ target_rot
         diff_euler = Rotation.from_matrix(diff_rot).as_euler("xyz")
@@ -328,23 +328,14 @@ class DensoEnv(gym.Env):
     def get_im_test(self) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
         images_dict = {} 
+        obs = self.data[0]["observations"]
+        for key in obs:
+            if key == "state":
+                continue
+            img = np.array(obs[key])
 
-        for transition in self.data:
-            obs = transition["observations"]
+            images_dict[key] = copy.deepcopy(img)
 
-            for key in obs:
-                if key == "state":
-                    continue
-                img = np.array(obs[key])
-
-                if key not in images_dict:
-                    images_dict[key] = []
-                
-                images_dict[key].append(copy.deepcopy(img))
-
-        # 转换列表为 NumPy 数组，符合 get_im() 预期格式
-        for key in images_dict:
-            images_dict[key] = np.array(images_dict[key])  # 形状 (N, H, W, C)
         return images_dict
 
     def interpolate_move(self, goal: np.ndarray, timeout: float):
@@ -533,12 +524,23 @@ class DensoEnv(gym.Env):
 
     def _get_obs(self) -> dict:
         images = self.get_im_test()
-        state_observation = {
-            "tcp_pos": self.cur_position,
-            "tcp_ori": self.cur_oritation,
-            "gripper_pose": self.curr_gripper_pos,
-        }
-        return copy.deepcopy(dict(images=images, state=state_observation))
+        front_camera_image = images["front_camera"]
+        side_camera_image = images["side_camera"]
+        state_flattened = np.concatenate([
+            np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
+            np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
+            np.array(self.curr_gripper_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
+        ])
+        # state_observation = {
+        #     "tcp_pos": self.cur_position,
+        #     "tcp_ori": self.cur_oritation,
+        #     "gripper_pose": self.curr_gripper_pos,
+        # }
+        return copy.deepcopy({
+            "front_camera": front_camera_image,
+            "side_camera": side_camera_image,
+            "state": state_flattened
+        })
 
     def close(self):
         if hasattr(self, 'listener'):

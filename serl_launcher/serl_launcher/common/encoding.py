@@ -34,11 +34,9 @@ class EncodingWrapper(nn.Module):
         # encode images with encoder
         encoded = []
         # print("observations.keys = ", observations.keys())
-        print("self.image_keys = ", self.image_keys)
         for image_key in self.image_keys:
             # print("image_key = ", image_key)
             image = observations[image_key]
-            print("Before rearrange:", image.shape)
             if not is_encoded:
                 if self.enable_stacking:
                     # Combine stacking and channels into a single dimension
@@ -46,7 +44,6 @@ class EncodingWrapper(nn.Module):
                         image = rearrange(image, "T H W C -> H W (T C)")
                     if len(image.shape) == 5:
                         image = rearrange(image, "B T H W C -> B H W (T C)")
-            print("After rearrange:", image.shape)
             image = self.encoder[image_key](image, train=train, encode=not is_encoded)
 
             if stop_gradient:

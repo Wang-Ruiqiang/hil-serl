@@ -87,7 +87,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             obs, _ = env.reset()
             done = False
             start_time = time.time()
+
             while not done:
+
                 sampling_rng, key = jax.random.split(sampling_rng)
                 actions = agent.sample_actions(
                     observations=jax.device_put(obs),
@@ -246,7 +248,6 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
-    print("actor_test-----------------------------")
     if FLAGS.eval_checkpoint_step:
         success_counter = 0
         time_list = []
@@ -264,6 +265,7 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
             start_time = time.time()
             while not done:
                 sampling_rng, key = jax.random.split(sampling_rng)
+
                 actions = agent.sample_actions(
                     observations=jax.device_put(obs),
                     argmax=False,
@@ -301,7 +303,6 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
         "actor_env_intvn": intvn_data_store,
     }
 
-    print("actor_test1-----------------------------")
     client = TrainerClient(
         "actor_env",
         FLAGS.ip,
@@ -311,7 +312,6 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
         timeout_ms=3000,
     )
 
-    print("actor_test2-----------------------------")
     # Function to update the agent with new params
     def update_params(params):
         nonlocal agent
@@ -337,8 +337,8 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
         timer.tick("total")
         robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
         frame_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
-        obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
-        # obs, _ = env.reset()
+        # obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
+        obs, _ = env.reset()
         with timer.context("sample_actions"):
             if step < config.random_steps:
                 actions = env.action_space.sample()
@@ -354,10 +354,7 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
         # Step environment
         with timer.context("step_env"):
             data = read_utils.read_data(env, robot_urdf_path)
-            tcp_pos = data[0]["observations"]["state"]["tcp_pos"]
-            tcp_ori = data[0]["observations"]["state"]["tcp_ori"]
-            action_read = np.concatenate([tcp_pos, tcp_ori])
-            print("action_read = ", action_read)
+            action_read = data[0]["observations"]["state"]
             next_obs, reward, done, truncated, info = env.step(action_read)
             # if "left" in info:
             #     info.pop("left")
