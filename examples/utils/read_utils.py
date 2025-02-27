@@ -48,7 +48,7 @@ def get_frame_data(frame_path, robot_urdf_path):
 def read_data(env, robot_urdf_path):
     data = []
     actions = np.zeros(env.action_space.sample().shape) 
-    data_dir = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data"
+    data_dir = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/demo_data"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
@@ -56,26 +56,36 @@ def read_data(env, robot_urdf_path):
 
         frame_dirs = sorted(os.listdir(collect_data_path))
 
-        for i in range(len(frame_dirs) - 1):
-        # for i in list(range(start_frame, end_frame+1)):
-            current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
-            next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-            if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
-                continue
+        clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
+        with open(clip_marks_json, 'r') as f:
+                    clip_marks = json.load(f)
 
-            obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
-            next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
 
-            transition = copy.deepcopy(
-                dict(
-                    observations=obs,
-                    next_observations=next_obs,
-                    actions=actions,
-                    rewards=0,
-                    masks=1.0,
-                    dones=0,
+        for clip in clip_marks:
+            start_frame = int(clip['start'].split('_')[-1])
+            end_frame = int(clip['end'].split('_')[-1])
+            
+            for i in list(range(start_frame, end_frame+1)):
+            # for i in range(len(frame_dirs) - 1):
+            # for i in list(range(start_frame, end_frame+1)):
+                current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
+                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
+                if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
+                    continue
+
+                obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
+                next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
+
+                transition = copy.deepcopy(
+                    dict(
+                        observations=obs,
+                        next_observations=next_obs,
+                        actions=actions,
+                        rewards=0,
+                        masks=1.0,
+                        dones=0,
+                    )
                 )
-            )
-            data.append(transition)
-            break
+                data.append(transition)
+
     return data

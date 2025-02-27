@@ -161,6 +161,7 @@ class DensoEnv(gym.Env):
         self.cycle_count = 0
 
         robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+        self.data_count = 0
         self.data = read_utils.read_data(self, robot_urdf_path)
         self._update_cur_position()
 
@@ -328,7 +329,7 @@ class DensoEnv(gym.Env):
     def get_im_test(self) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
         images_dict = {} 
-        obs = self.data[0]["observations"]
+        obs = self.data[self.data_count]["observations"]
         for key in obs:
             if key == "state":
                 continue
@@ -390,6 +391,7 @@ class DensoEnv(gym.Env):
         requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
 
     def reset(self, joint_reset=False, **kwargs):
+        self.data_count = 0
         self.last_gripper_act = time.time()
         requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         if self.save_video:
@@ -497,13 +499,13 @@ class DensoEnv(gym.Env):
         Internal function to get the latest state of the robot and its gripper.
         """
         # self.spin_ros()
-        self.cur_position = self.data[0]["observations"]["state"][:3]
-        self.cur_oritation = self.data[0]["observations"]["state"][3:7]
+        self.cur_position = self.data[self.data_count]["observations"]["state"][:3]
+        self.cur_oritation = self.data[self.data_count]["observations"]["state"][3:7]
         # self.cur_position = self.arm_position
         # self.cur_oritation = self.arm_orientation
 
         # TODO:保存leap_hand当前关节角
-        self.curr_gripper_pos = self.data[0]["observations"]["state"][7:]
+        self.curr_gripper_pos = self.data[self.data_count]["observations"]["state"][7:]
 
     # def update_cur_position(self):
     #     """
@@ -555,6 +557,9 @@ class DensoEnv(gym.Env):
     def spin_ros(self):
         rclpy.spin_once(self.node, timeout_sec=0.1)  # 每次只 spin 一次，这样可以在任务中间运行 ROS
         time.sleep(1)
+
+    def set_data_count(self, data_count):
+        self.data_count = data_count
 
 
     def pose_callback(self, msg):

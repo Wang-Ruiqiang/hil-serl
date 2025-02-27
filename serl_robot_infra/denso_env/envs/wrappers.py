@@ -57,7 +57,9 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         info['succeed'] = bool(rew)
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
-            
+        
+        
+        print("reward = ", rew)
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):

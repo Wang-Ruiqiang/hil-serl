@@ -333,10 +333,13 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
     intervention_steps = 0
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
+    data_count = 0
+    robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+    frame_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
+    data = read_utils.read_data(env, robot_urdf_path)
+
     for step in pbar:
         timer.tick("total")
-        robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
-        frame_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
         # obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
         obs, _ = env.reset()
         with timer.context("sample_actions"):
@@ -353,9 +356,13 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
 
         # Step environment
         with timer.context("step_env"):
-            data = read_utils.read_data(env, robot_urdf_path)
-            action_read = data[0]["observations"]["state"]
+            if data_count >= len(data):
+                break
+            action_read = data[data_count]["observations"]["state"]
+            env.set_data_count(data_count)
             next_obs, reward, done, truncated, info = env.step(action_read)
+
+            print("done = ", done)
             # if "left" in info:
             #     info.pop("left")
             # if "right" in info:
@@ -424,6 +431,7 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
         if step % config.log_period == 0:
             stats = {"timer": timer.get_average_times()}
             client.request("send-stats", stats)
+        data_count += 1
 
 
 ##############################################################################
