@@ -25,7 +25,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
 
-robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -99,7 +99,7 @@ def main(_):
     batch_size = 500
     
     actions = np.zeros(action_space.sample().shape) 
-    data_dir = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/demo_data"
+    data_dir = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/demo_data"
 
     classifier = load_classifier_func(
         key=jax.random.PRNGKey(0),

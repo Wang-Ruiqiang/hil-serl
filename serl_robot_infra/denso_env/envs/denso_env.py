@@ -160,7 +160,7 @@ class DensoEnv(gym.Env):
         )
         self.cycle_count = 0
 
-        robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+        robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
         self.data_count = 0
         self.data = read_utils.read_data(self, robot_urdf_path)
         self._update_cur_position()

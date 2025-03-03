@@ -54,7 +54,7 @@ flags.DEFINE_boolean(
     "debug", False, "Debug mode."
 )  # debug mode will disable wandb logging
 
-robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 devices = jax.local_devices()
 num_devices = len(devices)
@@ -334,8 +334,8 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
     data_count = 0
-    robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
-    frame_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
+    robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+    frame_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
     data = read_utils.read_data(env, robot_urdf_path)
 
     for step in pbar:

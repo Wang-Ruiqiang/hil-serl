@@ -17,7 +17,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
 
-robot_urdf_path = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 is_first_run = True
 
@@ -51,7 +51,7 @@ def main(_):
     batch_size = 500
     
     actions = np.zeros(env.action_space.sample().shape) 
-    data_dir = "/home/ruiqiang/workspace/HK_TACTEXO_DATA/wrq_project_data"
+    data_dir = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/wrq_project_data"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
