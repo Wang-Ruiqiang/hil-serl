@@ -5,7 +5,6 @@ import numpy as np
 import pickle as pkl
 import datetime
 from absl import app, flags
-from pynput import keyboard
 import cv2
 
 from experiments.mappings import CONFIG_MAPPING
@@ -16,19 +15,9 @@ flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions
 
 
 success_key = False
-def on_press(key):
-    global success_key
-    try:
-        if str(key) == 'Key.space':
-            success_key = True
-    except AttributeError:
-        pass
 
 def main(_):
     global success_key
-    listener = keyboard.Listener(
-        on_press=on_press)
-    listener.start()
     assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
     config = CONFIG_MAPPING[FLAGS.exp_name]()
     env = config.get_environment(fake_env=False, save_video=False, classifier=False)

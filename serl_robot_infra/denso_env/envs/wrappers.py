@@ -43,9 +43,14 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         super().__init__(env)
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
+        self.log_file_path = "classifier_test.txt"
 
     def compute_reward(self, obs):
         if self.reward_classifier_func is not None:
+            with open(self.log_file_path, "w") as f:
+                log_msg = f"obs = {obs}\n"
+                f.write(log_msg)
+                f.flush()
             return self.reward_classifier_func(obs)
         return 0
 
@@ -59,7 +64,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
         
-        print("reward = ", rew)
+        # print("reward = ", rew)
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):

@@ -14,14 +14,7 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import Dict
 
-from franka_env.camera.video_capture import VideoCapture
-from franka_env.camera.rs_capture import RSCapture
 from franka_env.utils.rotations import euler_2_quat, quat_2_euler
-
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray
-from geometry_msgs.msg import PoseStamped
 
 from examples.utils import read_utils
 
@@ -106,6 +99,7 @@ class DensoEnv(gym.Env):
         self.gripper_sleep = config.GRIPPER_SLEEP
 
 
+
         # convert last 3 elements from euler to quat, from size (6,) to (7,)
         self.resetpos = np.concatenate(
             [config.RESET_POSE[:3], euler_2_quat(config.RESET_POSE[3:])]
@@ -160,9 +154,9 @@ class DensoEnv(gym.Env):
         )
         self.cycle_count = 0
 
-        robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+        robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
         self.data_count = 0
-        self.data = read_utils.read_data(self, robot_urdf_path)
+        self.data = read_utils.read_data(robot_urdf_path, True)
         self._update_cur_position()
 
         if fake_env:
@@ -194,26 +188,26 @@ class DensoEnv(gym.Env):
 
         self.position_data = []
         self.oritation_data = []
-        self.ros_param_init()
+        # self.ros_param_init()
 
         print("Initialized Denso")
 
 
-    def ros_param_init(self):
-        rclpy.init(args=None)
-        self.node = rclpy.create_node("ros_publisher_node")
+    # def ros_param_init(self):
+    #     rclpy.init(args=None)
+    #     self.node = rclpy.create_node("ros_publisher_node")
 
-        self.publisher_arm = self.node.create_publisher(Float32MultiArray, 'wrist_cmd', 1)
+    #     self.publisher_arm = self.node.create_publisher(Float32MultiArray, 'wrist_cmd', 1)
 
-        self.publisher_hand = self.node.create_publisher(Float32MultiArray, 'hand_cmd', 1)
+    #     self.publisher_hand = self.node.create_publisher(Float32MultiArray, 'hand_cmd', 1)
 
-        self.robot_subscription = self.node.create_subscription(
-            PoseStamped,
-            '/cartesian_compliance_controller/current_pose',
-            self.pose_callback,
-            10)
+    #     self.robot_subscription = self.node.create_subscription(
+    #         PoseStamped,
+    #         '/cartesian_compliance_controller/current_pose',
+    #         self.pose_callback,
+    #         10)
         
-        # TODO:订阅leap_hand关节角话题
+    #     # TODO:订阅leap_hand关节角话题
     
 
     def clip_safety_box(self, pose: np.ndarray) -> np.ndarray:
@@ -246,17 +240,17 @@ class DensoEnv(gym.Env):
         action = np.clip(action, self.action_space.low, self.action_space.high)
         xyz_delta = action[:3]
         
-        arm_action = action[:7]
-        wrist_cmd = Float32MultiArray()
-        wrist_cmd.data = np.array(arm_action, dtype=np.float32).tolist()
-        # wrist_cmd.header.stamp = self.get_clock().now().to_msg()
-        self.publisher_arm.publish(wrist_cmd)
+        # arm_action = action[:7]
+        # wrist_cmd = Float32MultiArray()
+        # wrist_cmd.data = np.array(arm_action, dtype=np.float32).tolist()
+        # # wrist_cmd.header.stamp = self.get_clock().now().to_msg()
+        # self.publisher_arm.publish(wrist_cmd)
 
-        hand_action = action[7:]
-        hand_cmd = Float32MultiArray()
-        hand_cmd.data = np.array(hand_action, dtype=np.float32).tolist()
-        # hand_cmd.header.stamp = self.get_clock().now().to_msg()
-        self.publisher_hand.publish(hand_cmd)
+        # hand_action = action[7:]
+        # hand_cmd = Float32MultiArray()
+        # hand_cmd.data = np.array(hand_action, dtype=np.float32).tolist()
+        # # hand_cmd.header.stamp = self.get_clock().now().to_msg()
+        # self.publisher_hand.publish(hand_cmd)
 
 
         self.nextpos = np.concatenate([self.cur_position.copy(), np.zeros(4)])
@@ -294,37 +288,37 @@ class DensoEnv(gym.Env):
             # print(f'Goal not reached, the difference is {delta}, the desired threshold is {self._REWARD_THRESHOLD}')
             return False
 
-    def get_im(self) -> Dict[str, np.ndarray]:
-        """Get images from the realsense cameras."""
-        images = {}
-        display_images = {}
-        full_res_images = {}  # New dictionary to store full resolution cropped images
-        for key, cap in self.cap.items():
-            try:
-                rgb = cap.read()
-                cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
-                resized = cv2.resize(
-                    cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
-                )
-                images[key] = resized[..., ::-1]
-                display_images[key] = resized
-                display_images[key + "_full"] = cropped_rgb
-                full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
-            except queue.Empty:
-                input(
-                    f"{key} camera frozen. Check connect, then press enter to relaunch..."
-                )
-                cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS)
-                return self.get_im()
+    # def get_im(self) -> Dict[str, np.ndarray]:
+    #     """Get images from the realsense cameras."""
+    #     images = {}
+    #     display_images = {}
+    #     full_res_images = {}  # New dictionary to store full resolution cropped images
+    #     for key, cap in self.cap.items():
+    #         try:
+    #             rgb = cap.read()
+    #             cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
+    #             resized = cv2.resize(
+    #                 cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
+    #             )
+    #             images[key] = resized[..., ::-1]
+    #             display_images[key] = resized
+    #             display_images[key + "_full"] = cropped_rgb
+    #             full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
+    #         except queue.Empty:
+    #             input(
+    #                 f"{key} camera frozen. Check connect, then press enter to relaunch..."
+    #             )
+    #             cap.close()
+    #             self.init_cameras(self.config.REALSENSE_CAMERAS)
+    #             return self.get_im()
 
-        # Store full resolution cropped images separately
-        if self.save_video:
-            self.recording_frames.append(full_res_images)
+    #     # Store full resolution cropped images separately
+    #     if self.save_video:
+    #         self.recording_frames.append(full_res_images)
 
-        if self.display_image:
-            self.img_queue.put(display_images)
-        return images
+    #     if self.display_image:
+    #         self.img_queue.put(display_images)
+    #     return images
     
     def get_im_test(self) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
@@ -447,17 +441,17 @@ class DensoEnv(gym.Env):
         except Exception as e:
             print(f"Failed to save video: {e}")
 
-    def init_cameras(self, name_serial_dict=None):
-        """Init both wrist cameras."""
-        if self.cap is not None:  # close cameras if they are already open
-            self.close_cameras()
+    # def init_cameras(self, name_serial_dict=None):
+    #     """Init both wrist cameras."""
+    #     if self.cap is not None:  # close cameras if they are already open
+    #         self.close_cameras()
 
-        self.cap = OrderedDict()
-        for cam_name, kwargs in name_serial_dict.items():
-            cap = VideoCapture(
-                RSCapture(name=cam_name, **kwargs)
-            )
-            self.cap[cam_name] = cap
+    #     self.cap = OrderedDict()
+    #     for cam_name, kwargs in name_serial_dict.items():
+    #         cap = VideoCapture(
+    #             RSCapture(name=cam_name, **kwargs)
+    #         )
+    #         self.cap[cam_name] = cap
 
     def close_cameras(self):
         """Close both wrist cameras."""
@@ -554,13 +548,12 @@ class DensoEnv(gym.Env):
             self.displayer.join()
 
 
-    def spin_ros(self):
-        rclpy.spin_once(self.node, timeout_sec=0.1)  # 每次只 spin 一次，这样可以在任务中间运行 ROS
-        time.sleep(1)
+    # def spin_ros(self):
+    #     rclpy.spin_once(self.node, timeout_sec=0.1)  # 每次只 spin 一次，这样可以在任务中间运行 ROS
+    #     time.sleep(1)
 
     def set_data_count(self, data_count):
         self.data_count = data_count
-
 
     def pose_callback(self, msg):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])

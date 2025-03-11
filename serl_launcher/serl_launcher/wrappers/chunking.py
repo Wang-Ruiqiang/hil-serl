@@ -68,7 +68,8 @@ class ChunkingWrapper(gym.Wrapper):
         for i in range(act_exec_horizon):
             obs, reward, done, trunc, info = self.env.step(action[i], *args)
             self.current_obs.append(obs)
-        return (stack_obs(self.current_obs), reward, done, trunc, info)
+        return (stack_obs(self.current_obs), 1, done, trunc, info)
+        # return (stack_obs(self.current_obs), reward, done, trunc, info)
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)

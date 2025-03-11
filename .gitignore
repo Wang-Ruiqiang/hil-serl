@@ -1,4 +1,6 @@
 examples/classifier_ckpt/*
 examples/classifier_data/*
 examples/demo_data/*
+examples/test_data/*
 examples/experiments/tennis_ball_pick/first_run/*
+examples/experiments/tennis_ball_pick/second_run/*

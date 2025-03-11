@@ -46,7 +46,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 0, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_n_trajs", 10000, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 
@@ -54,12 +54,35 @@ flags.DEFINE_boolean(
     "debug", False, "Debug mode."
 )  # debug mode will disable wandb logging
 
-robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 devices = jax.local_devices()
 num_devices = len(devices)
 sharding = jax.sharding.PositionalSharding(devices)
+is_end = False
 
+# cam_front_translation = [1.2367936975704506, 0.032497565951025945, 0.5359742126690214]
+# cam_front_quaternion = [0.012480230443529135, 0.27804828390806924, -0.026321127948753298, -0.960125301139054]  # [w, x, y, z]
+# # Convert quaternion to rotation matrix
+# cam_front_rotation_matrix = quat2mat([cam_front_quaternion[0], cam_front_quaternion[1],
+#                                       cam_front_quaternion[2], cam_front_quaternion[3]])
+
+# self.camfront2robot = np.eye(4)
+# self.camfront2robot[:3, :3] = cam_front_rotation_matrix
+# self.camfront2robot[:3, 3] = cam_front_translation
+# T = np.array([
+# [0, 0, 1, 0], # Maps z -> x
+# [-1, 0, 0, 0], # Maps -x -> y
+# [0, -1, 0, 0], # Maps -y -> z
+# [0, 0, 0, 1],  # Homogeneous coordinate unchanged
+#  ])
+
+# self.camfront2robot = self.camfront2robot @ T
+
+# cam_side_translation = [0.8191031027617821, 0.7523905863952166, 0.5717842949076667]
+# cam_side_quaternion = [0.6814160180896522, 0.17193089301379363, 0.20154558868356742, -0.6822692679584189]  # [w, x, y, z]
+# # Convert quaternion to rotation matrix
+# cam_side_rotation_matrix = quat2mat([cam_side_quaternion[0], cam_side_quaternion[1],
+#                                      cam_side_quaternion[2], cam_side_quaternion[3]])
 
 def print_green(x):
     return print("\033[92m {}\033[00m".format(x))
@@ -248,6 +271,8 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
+
+    robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
     if FLAGS.eval_checkpoint_step:
         success_counter = 0
         time_list = []
@@ -259,38 +284,64 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
         )
         agent = agent.replace(state=ckpt)
 
-        for episode in range(FLAGS.eval_n_trajs):
-            # obs, _ = env.reset()
-            done = False
-            start_time = time.time()
-            while not done:
-                sampling_rng, key = jax.random.split(sampling_rng)
+        data = read_utils.read_data(robot_urdf_path, True)
+        data_count = 0 
 
-                actions = agent.sample_actions(
-                    observations=jax.device_put(obs),
-                    argmax=False,
-                    seed=key
-                )
+        obs, _ = env.reset()
+        log_file = "classifier_log_in_training.txt"
 
+        try:
+            with open(log_file, "w") as f:
+                for episode in range(FLAGS.eval_n_trajs):
+                    done = False
+                    start_time = time.time()
+                    # data_count = 0
 
-                actions = np.asarray(jax.device_get(actions))
+                    while not done:
+                        env.unwrapped.set_data_count(data_count)
+                        sampling_rng, key = jax.random.split(sampling_rng)
 
-                next_obs, reward, done, truncated, info = env.step(actions)
-                obs = next_obs
+                        # is_record_success = data[data_count]["is_record_success"]
+                        # action_read = data[data_count]["observations"]["state"]
 
-                if done:
-                    if reward:
-                        dt = time.time() - start_time
-                        time_list.append(dt)
-                        print(dt)
+                        actions = agent.sample_actions(
+                            observations=jax.device_put(obs),
+                            argmax=False,
+                            seed=key
+                        )
 
-                    success_counter += reward
-                    print(reward)
-                    print(f"{success_counter}/{episode + 1}")
+                        actions = np.asarray(jax.device_get(actions))
 
-        print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
-        print(f"average time: {np.mean(time_list)}")
-        return  # after done eval, return and exit
+                        next_obs, reward, done, truncated, info = env.step(actions)
+                        # obs = next_obs
+
+                        if done:
+                            if reward:
+                                dt = time.time() - start_time
+                                time_list.append(dt)
+                                print(dt)
+
+                            success_counter += reward
+                            # print(reward)
+                            # print(f"{success_counter}/{episode + 1}")
+                        data_count += 1
+                    f.flush()
+
+        except KeyboardInterrupt:
+            # 捕获 Ctrl+C 异常
+            print("\nUser interrupted the program. Printing final logs...")
+        
+        finally:
+            # print("success_count:", success_count)
+            # print("data_count:", data_count)
+            # print("fail_as_success:", fail_as_success)
+            # print("success_as_fail:", success_as_fail)
+            # print("record_success_count:", record_success_count)
+            # print("success rate of classifier:", {success_count / record_success_count})
+            # print("success_as_fail rate of classifier:", {success_as_fail / record_success_count})
+            # print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
+            # print(f"average time: {np.mean(time_list)}")
+            return  # after done eval, return and exit
     
     start_step = (
         int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
@@ -331,85 +382,68 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
     already_intervened = False
     intervention_count = 0
     intervention_steps = 0
+    data_count = 0
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
-    data_count = 0
-    robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
-    frame_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/wrq_project_data/collect_data-2025-01-08-07/frame_9"
-    data = read_utils.read_data(env, robot_urdf_path)
+    data = read_utils.read_data(robot_urdf_path)
 
     for step in pbar:
         timer.tick("total")
         # obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
+        env.unwrapped.set_data_count(data_count)
         obs, _ = env.reset()
-        with timer.context("sample_actions"):
-            if step < config.random_steps:
-                actions = env.action_space.sample()
-            else:
-                sampling_rng, key = jax.random.split(sampling_rng)
-                actions = agent.sample_actions(
-                    observations=jax.device_put(obs),
-                    seed=key,
-                    argmax=False,
-                )
-                actions = np.asarray(jax.device_get(actions))
+        # with timer.context("sample_actions"):
+        #     if step < config.random_steps:
+        #         actions = env.action_space.sample()
+        #     else:
+        #         sampling_rng, key = jax.random.split(sampling_rng)
+        #         actions = agent.sample_actions(
+        #             observations=jax.device_put(obs),
+        #             seed=key,
+        #             argmax=False,
+        #         )
+        #         actions = np.asarray(jax.device_get(actions))
 
         # Step environment
         with timer.context("step_env"):
-            if data_count >= len(data):
-                break
-            action_read = data[data_count]["observations"]["state"]
-            env.set_data_count(data_count)
-            next_obs, reward, done, truncated, info = env.step(action_read)
+            if data_count < len(data):
+                action_read = data[data_count]["observations"]["state"]
+                next_obs, reward, done, truncated, info = env.step(action_read)
 
-            print("done = ", done)
-            # if "left" in info:
-            #     info.pop("left")
-            # if "right" in info:
-            #     info.pop("right")
+                # print("done = ", done)
 
-            # override the action with the intervention action
-            # if "intervene_action" in info:
-            #     actions = info.pop("intervene_action")
-            #     intervention_steps += 1
-            #     if not already_intervened:
-            #         intervention_count += 1
-            #     already_intervened = True
-            # else:
-            #     already_intervened = False
+                running_return += reward
+                transition = dict(
+                    observations=obs,
+                    actions=action_read,
+                    next_observations=next_obs,
+                    rewards=reward,
+                    masks=1.0 - done,
+                    dones=done,
+                )
+                if 'grasp_penalty' in info:
+                    transition['grasp_penalty']= info['grasp_penalty']
+                data_store.insert(transition)
+                transitions.append(copy.deepcopy(transition))
+                if already_intervened:
+                    intvn_data_store.insert(transition)
+                    demo_transitions.append(copy.deepcopy(transition))
 
-            running_return += reward
-            transition = dict(
-                observations=obs,
-                actions=actions,
-                next_observations=next_obs,
-                rewards=reward,
-                masks=1.0 - done,
-                dones=done,
-            )
-            if 'grasp_penalty' in info:
-                transition['grasp_penalty']= info['grasp_penalty']
-            data_store.insert(transition)
-            transitions.append(copy.deepcopy(transition))
-            if already_intervened:
-                intvn_data_store.insert(transition)
-                demo_transitions.append(copy.deepcopy(transition))
+                obs = next_obs
+                if done or truncated:
+                    info["episode"]["intervention_count"] = intervention_count
+                    info["episode"]["intervention_steps"] = intervention_steps
+                    stats = {"environment": info}  # send stats to the learner to log
+                    client.request("send-stats", stats)
+                    pbar.set_description(f"last return: {running_return}")
+                    running_return = 0.0
+                    intervention_count = 0
+                    intervention_steps = 0
+                    already_intervened = False
+                    client.update()
+                    # obs, _ = env.reset()
 
-            obs = next_obs
-            if done or truncated:
-                info["episode"]["intervention_count"] = intervention_count
-                info["episode"]["intervention_steps"] = intervention_steps
-                stats = {"environment": info}  # send stats to the learner to log
-                client.request("send-stats", stats)
-                pbar.set_description(f"last return: {running_return}")
-                running_return = 0.0
-                intervention_count = 0
-                intervention_steps = 0
-                already_intervened = False
-                client.update()
-                # obs, _ = env.reset()
-
-        if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
+        if (step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0) or data_count >= len(data):
             # dump to pickle file
             buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
             demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
@@ -428,11 +462,15 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
 
         timer.tock("total")
 
-        if step % config.log_period == 0:
+        if (step % config.log_period == 0) or data_count >= len(data):
             stats = {"timer": timer.get_average_times()}
             client.request("send-stats", stats)
         data_count += 1
 
+        if data_count >= len(data):
+            print("data_count max")
+            is_end = True
+            break
 
 ##############################################################################
 
@@ -543,7 +581,7 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
             step > 0
             and config.checkpoint_period
             and step % config.checkpoint_period == 0
-        ):
+        ) or is_end:
             checkpoints.save_checkpoint(
                 os.path.abspath(FLAGS.checkpoint_path), agent.state, step=step, keep=100
             )
@@ -581,9 +619,12 @@ def learner_test(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
         position=0,
         leave=True,
     )
-    while len(replay_buffer) < config.training_starts:
+    while len(replay_buffer) < 100:
         pbar.update(len(replay_buffer) - pbar.n)  # Update progress bar
+        # print("replay_buffer len= ", len(replay_buffer))
         time.sleep(1)
+    
+    # print("replay_buffer len= ", len(replay_buffer))
     pbar.update(len(replay_buffer) - pbar.n)  # Update progress bar
     pbar.close()
 
@@ -655,10 +696,15 @@ def learner_test(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
             step > 0
             and config.checkpoint_period
             and step % config.checkpoint_period == 0
-        ):
+        ) or is_end:
             checkpoints.save_checkpoint(
                 os.path.abspath(FLAGS.checkpoint_path), agent.state, step=step, keep=100
             )
+
+        
+        if is_end:
+            print("learner end")
+            break
 ##############################################################################
 
 

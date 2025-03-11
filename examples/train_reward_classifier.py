@@ -22,52 +22,9 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("num_epochs", 150, "Number of training epochs.")
+flags.DEFINE_integer("num_epochs", 200, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
-# camera_keys = ["front_camera", "side_camera"]
-# classifier_keys = ["front_camera", "side_camera"]
-# observation_space = gym.spaces.Dict(
-#     {
-#         "state": gym.spaces.Dict(
-#             {
-#                 "tcp_pos": gym.spaces.Box(
-#                     -np.inf, np.inf, shape=(3,)
-#                 ),
-#                 "tcp_ori": gym.spaces.Box(
-#                     -np.inf, np.inf, shape=(4,)
-#                 ),
-#                 "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
-#             }
-#         ),
-#         "images": gym.spaces.Dict(
-#             {key: gym.spaces.Box(0, 255, shape=(480, 640, 3), dtype=np.uint8) 
-#                         for key in camera_keys}
-#         ),
-#     }
-# )
-
-# action_space = gym.spaces.Box(
-#         np.ones((23,), dtype=np.float32) * -1,
-#         np.ones((23,), dtype=np.float32),
-#     )
-
-# def space_stack(space: gym.Space, repeat: int):
-#     if isinstance(space, gym.spaces.Box):
-#         return gym.spaces.Box(
-#             low=np.repeat(space.low[None], repeat, axis=0),
-#             high=np.repeat(space.high[None], repeat, axis=0),
-#             dtype=space.dtype,
-#         )
-#     elif isinstance(space, gym.spaces.Discrete):
-#         return gym.spaces.MultiDiscrete([space.n] * repeat)
-#     elif isinstance(space, gym.spaces.Dict):
-#         return gym.spaces.Dict(
-#             {k: space_stack(v, repeat) for k, v in space.spaces.items()}
-#         )
-#     else:
-#         raise TypeError()
-    
 
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'

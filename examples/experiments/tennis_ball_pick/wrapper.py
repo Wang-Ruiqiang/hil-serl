@@ -4,7 +4,6 @@ from franka_env.utils.rotations import euler_2_quat
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 import requests
-from pynput import keyboard
 
 from denso_env.envs.denso_env import DensoEnv
 
@@ -15,13 +14,6 @@ class RAMEnv(DensoEnv):
         super().__init__(**kwargs)
         self.should_regrasp = False
 
-        def on_press(key):
-            if str(key) == "Key.f1":
-                self.should_regrasp = True
-
-        listener = keyboard.Listener(
-            on_press=on_press)
-        listener.start()
 
     def go_to_reset(self, joint_reset=False):
         """

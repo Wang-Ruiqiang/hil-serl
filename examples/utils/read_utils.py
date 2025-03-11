@@ -4,6 +4,7 @@ import cv2
 import os
 from tqdm import tqdm
 import numpy as np
+import gymnasium as gym
 from examples.utils import kinematics_utils
 
 def get_frame_data(frame_path, robot_urdf_path):
@@ -16,14 +17,17 @@ def get_frame_data(frame_path, robot_urdf_path):
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
-    record_success_failed_file = os.path.join(frame_path, "record_success_failed.txt")
-    robot_joint = None
+    record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
     if os.path.exists(joint_file_path):
+
         with open(joint_file_path, "r") as f:
             all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
-            robot_joint = all_joint_values[:6]
+            # Change the order of robot arm joint data
+            wrist_joint_index = [2,0,1,3,4,5]
+            all_joint_values[:6] = all_joint_values[wrist_joint_index]
+            
             hand_joint = all_joint_values[6:]
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
 
@@ -45,10 +49,17 @@ def get_frame_data(frame_path, robot_urdf_path):
     }
     return obs, is_record_success
 
-def read_data(env, robot_urdf_path):
+def read_data(robot_urdf_path, is_evaluate_classifier=False):
     data = []
-    actions = np.zeros(env.action_space.sample().shape) 
-    data_dir = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/demo_data"
+    action_space = gym.spaces.Box(
+        np.ones((23,), dtype=np.float32) * -1,
+        np.ones((23,), dtype=np.float32),
+    )
+    actions = np.zeros(action_space.sample().shape)
+    if is_evaluate_classifier:
+        data_dir = "/home/qiangqiang/workspaces/data/test_data"
+    else:
+        data_dir = "/home/qiangqiang/workspaces/data/demo_data"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
@@ -81,6 +92,7 @@ def read_data(env, robot_urdf_path):
                         observations=obs,
                         next_observations=next_obs,
                         actions=actions,
+                        is_record_success=is_record_success,
                         rewards=0,
                         masks=1.0,
                         dones=0,

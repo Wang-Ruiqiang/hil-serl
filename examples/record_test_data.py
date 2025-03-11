@@ -23,7 +23,7 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
-flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/demo_data", "demo data dir")
+flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 # camera_keys = ["front_camera", "side_camera"]
@@ -64,10 +64,10 @@ def main(_):
             np.ones((23,), dtype=np.float32) * -1,
             np.ones((23,), dtype=np.float32),
         )
-    if not os.path.exists("./demo_data"):
-        os.makedirs("./demo_data")
+    if not os.path.exists("./test_data"):
+        os.makedirs("./test_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+    file_name = f"./test_data/{FLAGS.exp_name}_{success_needed}_test_data_{uuid}.pkl"
     batch_size = 500
     
     actions = np.zeros(action_space.sample().shape) 

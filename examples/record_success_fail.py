@@ -5,7 +5,6 @@ import numpy as np
 import pickle as pkl
 import datetime
 from absl import app, flags
-from pynput import keyboard
 import gymnasium as gym
 import pinocchio as pin
 
@@ -16,8 +15,8 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-
-robot_urdf_path = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/classifier_data", "classifier data dir")
+flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 is_first_run = True
 
@@ -51,7 +50,7 @@ def main(_):
     batch_size = 500
     
     actions = np.zeros(env.action_space.sample().shape) 
-    data_dir = "/home/qiangqiang/workspace/HK_TACTEXO_DATA/wrq_project_data"
+    data_dir = FLAGS.data_dir
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
@@ -66,8 +65,8 @@ def main(_):
             if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                 continue
 
-            obs, is_record_success= read_utils.get_frame_data(current_frame_path, robot_urdf_path)
-            next_obs, _ = read_utils.get_frame_data(next_frame_path, robot_urdf_path)
+            obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+            next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
 
             transition = copy.deepcopy(
                 dict(
