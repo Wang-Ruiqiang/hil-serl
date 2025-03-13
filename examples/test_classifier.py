@@ -48,7 +48,7 @@ def main(_):
         sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
         # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
         # added check for z position to further robustify classifier, but should work without as well
-        return int(sigmoid(classifier(obs)).item() > 0.65)
+        return int(sigmoid(classifier(obs)).item() > 0.95)
     
     try:
         with open(log_file, "w") as f:

@@ -7,6 +7,7 @@ import datetime
 from absl import app, flags
 import gymnasium as gym
 import pinocchio as pin
+import re
 
 from examples.utils import read_utils
 
@@ -56,7 +57,10 @@ def main(_):
         if not os.path.isdir(collect_data_path):
             continue
 
-        frame_dirs = sorted(os.listdir(collect_data_path))
+        frame_dirs = sorted(
+            [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
+            key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
+        )
 
         for i in range(len(frame_dirs) - 1):
         # for i in list(range(start_frame, end_frame+1)):

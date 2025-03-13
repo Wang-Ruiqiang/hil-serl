@@ -60,30 +60,6 @@ num_devices = len(devices)
 sharding = jax.sharding.PositionalSharding(devices)
 is_end = False
 
-# cam_front_translation = [1.2367936975704506, 0.032497565951025945, 0.5359742126690214]
-# cam_front_quaternion = [0.012480230443529135, 0.27804828390806924, -0.026321127948753298, -0.960125301139054]  # [w, x, y, z]
-# # Convert quaternion to rotation matrix
-# cam_front_rotation_matrix = quat2mat([cam_front_quaternion[0], cam_front_quaternion[1],
-#                                       cam_front_quaternion[2], cam_front_quaternion[3]])
-
-# self.camfront2robot = np.eye(4)
-# self.camfront2robot[:3, :3] = cam_front_rotation_matrix
-# self.camfront2robot[:3, 3] = cam_front_translation
-# T = np.array([
-# [0, 0, 1, 0], # Maps z -> x
-# [-1, 0, 0, 0], # Maps -x -> y
-# [0, -1, 0, 0], # Maps -y -> z
-# [0, 0, 0, 1],  # Homogeneous coordinate unchanged
-#  ])
-
-# self.camfront2robot = self.camfront2robot @ T
-
-# cam_side_translation = [0.8191031027617821, 0.7523905863952166, 0.5717842949076667]
-# cam_side_quaternion = [0.6814160180896522, 0.17193089301379363, 0.20154558868356742, -0.6822692679584189]  # [w, x, y, z]
-# # Convert quaternion to rotation matrix
-# cam_side_rotation_matrix = quat2mat([cam_side_quaternion[0], cam_side_quaternion[1],
-#                                      cam_side_quaternion[2], cam_side_quaternion[3]])
-
 def print_green(x):
     return print("\033[92m {}\033[00m".format(x))
 

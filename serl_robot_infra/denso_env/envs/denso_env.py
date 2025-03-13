@@ -147,7 +147,7 @@ class DensoEnv(gym.Env):
                     }
                 ),
                 "images": gym.spaces.Dict(
-                    {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
+                    {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
                                 for key in config.REALSENSE_CAMERAS}
                 ),
             }
@@ -237,8 +237,8 @@ class DensoEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
-        action = np.clip(action, self.action_space.low, self.action_space.high)
-        xyz_delta = action[:3]
+        # action = np.clip(action, self.action_space.low, self.action_space.high)
+        # xyz_delta = action[:3]
         
         # arm_action = action[:7]
         # wrist_cmd = Float32MultiArray()
@@ -254,7 +254,8 @@ class DensoEnv(gym.Env):
 
 
         self.nextpos = np.concatenate([self.cur_position.copy(), np.zeros(4)])
-        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
+        # self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
+        self.nextpos[:3] = action
 
         # GET ORIENTATION FROM ACTION
         # self.nextpos[3:] = (
@@ -553,7 +554,7 @@ class DensoEnv(gym.Env):
     #     time.sleep(1)
 
     def set_data_count(self, data_count):
-        self.data_count = data_count
+        self.data_count = data_count + 1
 
     def pose_callback(self, msg):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])

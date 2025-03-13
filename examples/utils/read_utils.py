@@ -6,6 +6,7 @@ from tqdm import tqdm
 import numpy as np
 import gymnasium as gym
 from examples.utils import kinematics_utils
+import re
 
 def get_frame_data(frame_path, robot_urdf_path):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
@@ -20,6 +21,7 @@ def get_frame_data(frame_path, robot_urdf_path):
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
+
     if os.path.exists(joint_file_path):
 
         with open(joint_file_path, "r") as f:
@@ -27,7 +29,7 @@ def get_frame_data(frame_path, robot_urdf_path):
             # Change the order of robot arm joint data
             wrist_joint_index = [2,0,1,3,4,5]
             all_joint_values[:6] = all_joint_values[wrist_joint_index]
-            
+
             hand_joint = all_joint_values[6:]
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
 
@@ -37,8 +39,8 @@ def get_frame_data(frame_path, robot_urdf_path):
         np.array(hand_joint, dtype=np.float32).flatten()
     ])
 
-    resized_image = cv2.resize(color_image, (128,128))
-    resized_image2 = cv2.resize(color_image2, (128,128))
+    resized_image = cv2.resize(color_image, (320,240))
+    resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
     side_camera_image = resized_image2[..., ::-1]
 
@@ -65,8 +67,11 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
         if not os.path.isdir(collect_data_path):
             continue
 
-        frame_dirs = sorted(os.listdir(collect_data_path))
-
+        # 获取 collect_data_path 目录下所有名为 frame_xxx 的子目录，并按照 xxx 数值大小排序。
+        frame_dirs = sorted(
+            [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
+            key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
+        )
         clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         with open(clip_marks_json, 'r') as f:
                     clip_marks = json.load(f)
@@ -78,7 +83,6 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
             
             for i in list(range(start_frame, end_frame+1)):
             # for i in range(len(frame_dirs) - 1):
-            # for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):

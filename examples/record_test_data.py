@@ -12,6 +12,7 @@ import gymnasium as gym
 import pinocchio as pin
 import jax
 import jax.numpy as jnp
+import re
 
 
 from serl_launcher.networks.reward_classifier import load_classifier_func
@@ -85,7 +86,10 @@ def main(_):
         if not os.path.isdir(collect_data_path):
             continue
 
-        frame_dirs = sorted(os.listdir(collect_data_path))
+        frame_dirs = sorted(
+            [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
+            key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
+        )
 
         clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         with open(clip_marks_json, 'r') as f:
