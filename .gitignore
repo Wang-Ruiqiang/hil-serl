@@ -4,3 +4,6 @@ examples/demo_data/*
 examples/test_data/*
 examples/experiments/tennis_ball_pick/first_run/*
 examples/experiments/tennis_ball_pick/second_run/*
+examples/experiments/tennis_ball_pick/first_*/*
+examples/experiments/tennis_ball_pick/second_*/*
+examples/experiments/tennis_ball_pick/third_*/*

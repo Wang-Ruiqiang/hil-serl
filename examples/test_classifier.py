@@ -21,8 +21,8 @@ classifier_keys = ["front_camera", "side_camera"]
 robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 observation_space = gym.spaces.Dict({
-    "front_camera": gym.spaces.Box(low=0, high=255, shape=(128, 128, 3), dtype=np.uint8),
-    "side_camera": gym.spaces.Box(low=0, high=255, shape=(128, 128, 3), dtype=np.uint8),
+    "front_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
+    "side_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
     "state": gym.spaces.Box(-np.inf, np.inf, shape=(23,), dtype=np.float32)
 })
 
@@ -48,7 +48,7 @@ def main(_):
         sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
         # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
         # added check for z position to further robustify classifier, but should work without as well
-        return int(sigmoid(classifier(obs)).item() > 0.95)
+        return int(sigmoid(classifier(obs)).item() > 0.4)
     
     try:
         with open(log_file, "w") as f:

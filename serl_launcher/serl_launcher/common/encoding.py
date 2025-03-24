@@ -33,9 +33,7 @@ class EncodingWrapper(nn.Module):
     ) -> jnp.ndarray:
         # encode images with encoder
         encoded = []
-        # print("observations.keys = ", observations.keys())
         for image_key in self.image_keys:
-            # print("image_key = ", image_key)
             image = observations[image_key]
             if not is_encoded:
                 if self.enable_stacking:
@@ -52,6 +50,7 @@ class EncodingWrapper(nn.Module):
             encoded.append(image)
 
         encoded = jnp.concatenate(encoded, axis=-1)
+        # print(f"Concatenated encoded shape: {encoded.shape}")
 
         if self.use_proprio:
             # project state to embeddings as well

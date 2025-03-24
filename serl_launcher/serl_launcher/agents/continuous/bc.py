@@ -37,7 +37,8 @@ class BCAgent(flax.struct.PyTreeNode):
     def update(self, batch: Batch, pmap_axis: str = None):
         if self.config["image_keys"][0] not in batch["next_observations"]:
             batch = _unpack(batch)
-
+        print("self.config['action_mean'] = ", self.config["action_mean"])
+        print("self.config['action_std'] = ", self.config["action_std"])
         rng, aug_rng = jax.random.split(self.state.rng)
         if "augmentation_function" in self.config.keys() and self.config["augmentation_function"] is not None:
             batch = self.config["augmentation_function"](batch, aug_rng)
@@ -56,7 +57,10 @@ class BCAgent(flax.struct.PyTreeNode):
             if self.config["tanh_squash_distribution"]:
                 batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
             else:
-                batch_actions = batch["actions"]
+                normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
+                batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
+                # batch_actions = (batch["actions"] - self.config["action_mean"])/ self.config["action_std"]
+            # batch_actions = batch["actions"]
             log_probs = dist.log_prob(batch_actions)
             mse = ((pi_actions - batch_actions) ** 2).sum(-1)
             actor_loss = -(log_probs).mean()
@@ -103,6 +107,7 @@ class BCAgent(flax.struct.PyTreeNode):
             actions = dist.mode()
         else:
             actions = dist.sample(seed=seed)
+        # print("actions = ", actions)
         return actions
 
     @jax.jit
@@ -146,6 +151,8 @@ class BCAgent(flax.struct.PyTreeNode):
         # Optimizer
         learning_rate: float = 3e-4,
         augmentation_function: Optional[callable] = None,
+        action_mean = [ 0.6289433, -0.02980271, 0.2980561 ],
+        action_std = [0.03720388, 0.10612131, 0.07740753]
     ):
         if encoder_type == "resnet":
             from serl_launcher.vision.resnet_v1 import resnetv1_configs
@@ -218,6 +225,8 @@ class BCAgent(flax.struct.PyTreeNode):
             image_keys=image_keys,
             augmentation_function=augmentation_function,
             tanh_squash_distribution=policy_kwargs["tanh_squash_distribution"],
+            action_mean=action_mean,
+            action_std=action_std,
         )
 
         agent = cls(state, config)

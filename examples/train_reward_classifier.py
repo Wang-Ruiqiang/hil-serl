@@ -22,7 +22,7 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("num_epochs", 200, "Number of training epochs.")
+flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
 
@@ -37,8 +37,6 @@ def main(_):
     # stack_observation_space = space_stack(observation_space, 1)
     
     # Create buffer for positive transitions
-    print("ReplayBuffer module:", ReplayBuffer.__module__)
-    print("ReplayBuffer doc:", ReplayBuffer.__doc__)
     pos_buffer = ReplayBuffer(
         observation_space=env.observation_space,
         action_space=env.action_space,
@@ -48,14 +46,21 @@ def main(_):
 
     success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
     for path in success_paths:
-        success_data = pkl.load(open(path, "rb"))
-        for trans in success_data:
-            # if "images" in trans['observations'].keys():
-            #     continue
-            trans["labels"] = 1
-            # trans['actions'] = env.action_space.sample()
+        success_data = []
+        with open(path, "rb") as f:
+            while True:
+                try:
+                    success_data.extend(pkl.load(f))
+                except EOFError:  # 读取完毕
+                        break
+            
+            for trans in success_data:
+                # if "images" in trans['observations'].keys():
+                #     continue
+                trans["labels"] = 1
+                # trans['actions'] = env.action_space.sample()
 
-            pos_buffer.insert(trans)
+                pos_buffer.insert(trans)
             
     pos_iterator = pos_buffer.get_iterator(
         sample_args={
@@ -73,16 +78,20 @@ def main(_):
     )
     failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
     for path in failure_paths:
-        failure_data = pkl.load(
-            open(path, "rb")
-        )
-        for trans in failure_data:
-            # if "images" in trans['observations'].keys():
-            #     continue
-            trans["labels"] = 0
-            # trans['actions'] = env.action_space.sample()
+         failure_data = []
+         with open(path, "rb") as f:
+            while True:
+                try:
+                    failure_data.extend(pkl.load(f))
+                except EOFError:  # 读取完毕
+                    break
+            for trans in failure_data:
+                # if "images" in trans['observations'].keys():
+                #     continue
+                trans["labels"] = 0
+                # trans['actions'] = env.action_space.sample()
 
-            neg_buffer.insert(trans)
+                neg_buffer.insert(trans)
             
     neg_iterator = neg_buffer.get_iterator(
         sample_args={
@@ -130,7 +139,7 @@ def main(_):
         logits = state.apply_fn(
             {"params": state.params}, batch["observations"], train=False, rngs={"dropout": key}
         )
-        train_accuracy = jnp.mean((nn.sigmoid(logits) >= 0.5) == batch["labels"])
+        train_accuracy = jnp.mean((nn.sigmoid(logits) >= 0.85) == batch["labels"])
 
         return state.apply_gradients(grads=grads), loss, train_accuracy
 

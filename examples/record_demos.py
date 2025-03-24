@@ -25,6 +25,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
 flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/demo_data", "demo data dir")
+# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 # camera_keys = ["front_camera", "side_camera"]
@@ -47,7 +48,7 @@ def comupute_reward(obs, classifier):
 
     # 使用索引提取标量值
     classifier_score = classifier_output[0]
-    return int(classifier_score > 0.85)
+    return int(classifier_score > 0.4)
 
 def main(_):
 
@@ -65,6 +66,11 @@ def main(_):
             np.ones((23,), dtype=np.float32) * -1,
             np.ones((23,), dtype=np.float32),
         )
+    
+    # action_space = gym.spaces.Box(
+    #         np.ones((7,), dtype=np.float32) * -1,
+    #         np.ones((7,), dtype=np.float32),
+    #     )
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -93,8 +99,7 @@ def main(_):
 
         clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         with open(clip_marks_json, 'r') as f:
-                    clip_marks = json.load(f)
-
+            clip_marks = json.load(f)
 
         for clip in clip_marks:
             start_frame = int(clip['start'].split('_')[-1])
@@ -103,7 +108,7 @@ def main(_):
             # print("end_frame = ", end_frame)
             # clip_length = end_frame - start_frame + 1 # include frame 0
 
-            # for i in range(len(frame_dirs) - 1):
+            # for i in range(50):
             for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
@@ -114,6 +119,9 @@ def main(_):
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
                 reward = comupute_reward(obs, classifier)
                 done = reward or terminate
+                actions[:3] = next_obs["state"][:3]  # xyz坐标
+                actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
+                actions[7:] = next_obs["state"][7:]  # 四元数姿态
 
                 transition = copy.deepcopy(
                     dict(
@@ -132,17 +140,17 @@ def main(_):
                 pbar.set_description(f"Return: {returns}")
 
                 obs = next_obs
-                if done:
-                    if reward:
-                        for transition in trajectory:
-                            transitions.append(copy.deepcopy(transition))
-                        pbar.update(1)
+                if (done and reward) or i == end_frame:
+                    for transition in trajectory:
+                        transitions.append(copy.deepcopy(transition))
+                    pbar.update(1)
                     trajectory = []
                     returns = 0
                     terminate = False
                     if len(transitions) >= batch_size:
                         save_batch_to_pickle(transitions, file_name)
                         transitions = []
+
 
     if transitions:
         save_batch_to_pickle(transitions, file_name)

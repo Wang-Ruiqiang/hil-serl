@@ -133,6 +133,11 @@ class DensoEnv(gym.Env):
             np.ones((23,), dtype=np.float32) * -1,
             np.ones((23,), dtype=np.float32),
         )
+
+        # self.action_space = gym.spaces.Box(
+        #     np.ones((7,), dtype=np.float32) * -1,
+        #     np.ones((7,), dtype=np.float32),
+        # )
         self.observation_space = gym.spaces.Dict(
             {
                 "state": gym.spaces.Dict(
@@ -156,7 +161,7 @@ class DensoEnv(gym.Env):
 
         robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
         self.data_count = 0
-        self.data = read_utils.read_data(robot_urdf_path, True)
+        self.data = read_utils.read_data(robot_urdf_path,True)
         self._update_cur_position()
 
         if fake_env:
@@ -255,7 +260,7 @@ class DensoEnv(gym.Env):
 
         self.nextpos = np.concatenate([self.cur_position.copy(), np.zeros(4)])
         # self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
-        self.nextpos[:3] = action
+        self.nextpos[:3] = action[:3]
 
         # GET ORIENTATION FROM ACTION
         # self.nextpos[3:] = (
@@ -270,9 +275,11 @@ class DensoEnv(gym.Env):
 
         self._update_cur_position()
         ob = self._get_obs()
-        reward = self.compute_reward(ob)
-        done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
-        return ob, int(reward), done, False, {"succeed": reward}
+        # reward = self.compute_reward(ob)
+        # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
+        # return ob, int(reward), done, False, {"succeed": reward}
+        done = 0
+        return ob, 0, done, False, {"succeed": 0}
 
     def compute_reward(self, obs) -> bool:
         current_pose = obs["state"]
@@ -500,7 +507,7 @@ class DensoEnv(gym.Env):
         # self.cur_oritation = self.arm_orientation
 
         # TODO:保存leap_hand当前关节角
-        self.curr_gripper_pos = self.data[self.data_count]["observations"]["state"][7:]
+        # self.curr_gripper_pos = self.data[self.data_count]["observations"]["state"][7:]
 
     # def update_cur_position(self):
     #     """
@@ -526,7 +533,7 @@ class DensoEnv(gym.Env):
         state_flattened = np.concatenate([
             np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
             np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-            np.array(self.curr_gripper_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
+            # np.array(self.curr_gripper_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
         ])
         # state_observation = {
         #     "tcp_pos": self.cur_position,

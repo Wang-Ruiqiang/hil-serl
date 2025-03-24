@@ -204,8 +204,8 @@ class ResNetEncoder(nn.Module):
     num_spatial_blocks: int = 8
     use_film: bool = False
     bottleneck_dim: Optional[int] = None
-    pre_pooling: bool = True
-    image_size: tuple = (128, 128)
+    pre_pooling: bool = False
+    image_size: tuple = (240, 320)
 
     @nn.compact
     def __call__(
@@ -214,6 +214,7 @@ class ResNetEncoder(nn.Module):
         train: bool = True,
         cond_var=None,
         stop_gradient=False,
+        encode: bool = True,
     ):
         # put inputs in [-1, 1]
         # x = observations.astype(jnp.float32) / 127.5 - 1.0
@@ -381,7 +382,7 @@ class PreTrainedResNetEncoder(nn.Module):
 
 resnetv1_configs = {
     "resnetv1-10": ft.partial(
-        ResNetEncoder, stage_sizes=(1, 1, 1, 1), block_cls=ResNetBlock
+        ResNetEncoder, stage_sizes=(1, 1, 1, 1), block_cls=ResNetBlock,
     ),
     "resnetv1-10-frozen": ft.partial(
         ResNetEncoder, stage_sizes=(1, 1, 1, 1), block_cls=ResNetBlock, pre_pooling=True

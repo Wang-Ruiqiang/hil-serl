@@ -289,7 +289,7 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
                         actions = np.asarray(jax.device_get(actions))
 
                         next_obs, reward, done, truncated, info = env.step(actions)
-                        # obs = next_obs
+                        obs = next_obs
 
                         if done:
                             if reward:
@@ -361,13 +361,14 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
     data_count = 0
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
-    data = read_utils.read_data(robot_urdf_path)
+    data = read_utils.read_data(robot_urdf_path, True)
+    
+    obs, _ = env.reset()
 
     for step in pbar:
         timer.tick("total")
         # obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
         env.unwrapped.set_data_count(data_count)
-        obs, _ = env.reset()
         # with timer.context("sample_actions"):
         #     if step < config.random_steps:
         #         actions = env.action_space.sample()
@@ -382,11 +383,9 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
 
         # Step environment
         with timer.context("step_env"):
-            if data_count < len(data):
+            if data_count < len(data) - 1:
                 action_read = data[data_count]["observations"]["state"]
                 next_obs, reward, done, truncated, info = env.step(action_read)
-
-                # print("done = ", done)
 
                 running_return += reward
                 transition = dict(
@@ -406,7 +405,8 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
                     demo_transitions.append(copy.deepcopy(transition))
 
                 obs = next_obs
-                if done or truncated:
+                # if done or truncated:
+                if  data_count == len(data) - 2:
                     info["episode"]["intervention_count"] = intervention_count
                     info["episode"]["intervention_steps"] = intervention_steps
                     stats = {"environment": info}  # send stats to the learner to log
@@ -419,7 +419,7 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
                     client.update()
                     # obs, _ = env.reset()
 
-        if (step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0) or data_count >= len(data):
+        if (step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0) or data_count >= len(data) - 1:
             # dump to pickle file
             buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
             demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
@@ -443,10 +443,11 @@ def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
             client.request("send-stats", stats)
         data_count += 1
 
-        if data_count >= len(data):
-            print("data_count max")
-            is_end = True
-            break
+        if data_count >= len(data) - 1:
+            # print("data_count max")
+            # is_end = True
+            # break
+            data_count = 0
 
 ##############################################################################
 
@@ -644,7 +645,6 @@ def learner_test(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
                 batch = next(replay_iterator)
                 demo_batch = next(demo_iterator)
                 batch = concat_batches(batch, demo_batch, axis=0)
-
             with timer.context("train_critics"):
                 agent, critics_info = agent.update(
                     batch,
@@ -784,10 +784,16 @@ def main(_):
         assert FLAGS.demo_path is not None
         for path in FLAGS.demo_path:
             with open(path, "rb") as f:
-                transitions = pkl.load(f)
+                transitions = []
+                while True:
+                    try:
+                        transitions.extend(pkl.load(f))  # 读取并扩展列表
+                    except EOFError:
+                        break  # 读取结束
+                print("len trans = ", len(transitions))
                 for transition in transitions:
-                    if 'infos' in transition and 'grasp_penalty' in transition['infos']:
-                        transition['grasp_penalty'] = transition['infos']['grasp_penalty']
+                    # if 'infos' in transition and 'grasp_penalty' in transition['infos']:
+                    #     transition['grasp_penalty'] = transition['infos']['grasp_penalty']
                     demo_buffer.insert(transition)
         print_green(f"demo buffer size: {len(demo_buffer)}")
         print_green(f"online buffer size: {len(replay_buffer)}")

@@ -42,13 +42,17 @@ def main(_):
 
     success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
     for path in success_paths:
-        success_data = pkl.load(open(path, "rb"))
-        for trans in success_data:
-            if "images" in trans['observations'].keys():
-                continue
-            trans["labels"] = 1
-            trans['actions'] = env.action_space.sample()
-            pos_buffer.insert(trans)
+        while True:
+            try:
+                success_data = pkl.load(open(path, "rb"))
+                for trans in success_data:
+                    if "images" in trans['observations'].keys():
+                        continue
+                    trans["labels"] = 1
+                    trans['actions'] = env.action_space.sample()
+                    pos_buffer.insert(trans)
+            except EOFError:  # 读取完毕
+                    break
             
     pos_iterator = pos_buffer.get_iterator(
         sample_args={
@@ -66,15 +70,19 @@ def main(_):
     )
     failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
     for path in failure_paths:
-        failure_data = pkl.load(
-            open(path, "rb")
-        )
-        for trans in failure_data:
-            if "images" in trans['observations'].keys():
-                continue
-            trans["labels"] = 0
-            trans['actions'] = env.action_space.sample()
-            neg_buffer.insert(trans)
+        while True:
+            try:
+                failure_data = pkl.load(
+                    open(path, "rb")
+                )
+                for trans in failure_data:
+                    if "images" in trans['observations'].keys():
+                        continue
+                    trans["labels"] = 0
+                    trans['actions'] = env.action_space.sample()
+                    neg_buffer.insert(trans)
+            except EOFError:  # 读取完毕
+                    break
             
     neg_iterator = neg_buffer.get_iterator(
         sample_args={

@@ -49,6 +49,9 @@ def get_frame_data(frame_path, robot_urdf_path):
         "side_camera": side_camera_image,
         "state": state_flattened
     }
+    # print("state_flattened = ", state_flattened)
+    # cv2.imwrite("front_camera_image.jpg", front_camera_image)
+    # input("enter")
     return obs, is_record_success
 
 def read_data(robot_urdf_path, is_evaluate_classifier=False):
@@ -57,6 +60,10 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
         np.ones((23,), dtype=np.float32) * -1,
         np.ones((23,), dtype=np.float32),
     )
+    # action_space = gym.spaces.Box(
+    #     np.ones((7,), dtype=np.float32) * -1,
+    #     np.ones((7,), dtype=np.float32),
+    # )
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
         data_dir = "/home/qiangqiang/workspaces/data/test_data"

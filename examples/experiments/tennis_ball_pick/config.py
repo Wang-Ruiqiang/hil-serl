@@ -91,8 +91,9 @@ class TrainConfig(DefaultTrainingConfig):
     image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera", "side_camera"]
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
+    # proprio_keys = ["tcp_pos", "tcp_ori"]
     buffer_period = 1000
-    checkpoint_period = 5000 
+    checkpoint_period = 1000 
     steps_per_update = 50
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
@@ -123,7 +124,7 @@ class TrainConfig(DefaultTrainingConfig):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
                 # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.95)
+                return int(sigmoid(classifier(obs)).item() > 0.5)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env

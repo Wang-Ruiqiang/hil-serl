@@ -21,7 +21,7 @@ from serl_launcher.utils.launcher import (
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
-from experiments.mappings import NEW_MAPPING
+from experiments.mappings import CONFIG_MAPPING
 from experiments.config import DefaultTrainingConfig
 FLAGS = flags.FLAGS
 
@@ -30,9 +30,8 @@ flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_string("bc_checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_integer("eval_n_trajs", 0, "Number of trajectories to evaluate.")
-flags.DEFINE_integer("train_steps", 20000, "Number of pretraining steps.")
+flags.DEFINE_integer("train_steps", 20_000, "Number of pretraining steps.")
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
-flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 
 
 flags.DEFINE_boolean(
@@ -104,7 +103,7 @@ def train(
             "batch_size": config.batch_size,
             "pack_obs_and_next_obs": False,
         },
-        device=sharding.replicate(), 
+        device=sharding.replicate(),
     )
     
     # Pretrain BC policy to get started
@@ -117,18 +116,9 @@ def train(
         bc_agent, bc_update_info = bc_agent.update(batch)
         if step % config.log_period == 0 and wandb_logger:
             wandb_logger.log({"bc": bc_update_info}, step=step)
-        # if step > FLAGS.train_steps - 100 and step % 10 == 0:
-        #     checkpoints.save_checkpoint(
-        #         os.path.abspath(FLAGS.bc_checkpoint_path), bc_agent.state, step=step, keep=5
-        #     )
-
-        if (
-            step > 0
-            and config.checkpoint_period
-            and step % config.checkpoint_period == 0
-        ):
+        if step > FLAGS.train_steps - 100 and step % 10 == 0:
             checkpoints.save_checkpoint(
-                os.path.abspath(FLAGS.bc_checkpoint_path), bc_agent.state, step=step, keep=100
+                os.path.abspath(FLAGS.bc_checkpoint_path), bc_agent.state, step=step, keep=5
             )
     print_green("bc pretraining done and saved checkpoint")
 
@@ -137,10 +127,10 @@ def train(
 
 
 def main(_):
-    config: DefaultTrainingConfig = NEW_MAPPING[FLAGS.exp_name]()
+    config: DefaultTrainingConfig = CONFIG_MAPPING[FLAGS.exp_name]()
 
     assert config.batch_size % num_devices == 0
-    assert FLAGS.exp_name in NEW_MAPPING, "Experiment folder not found."
+    assert FLAGS.exp_name in CONFIG_MAPPING, "Experiment folder not found."
     eval_mode = FLAGS.eval_n_trajs > 0
     env = config.get_environment(
         fake_env=not eval_mode,
@@ -148,6 +138,20 @@ def main(_):
         classifier=True,
     )
     env = RecordEpisodeStatistics(env)
+
+    bc_agent: BCAgent = make_bc_agent(
+        seed=FLAGS.seed,
+        sample_obs=env.observation_space.sample(),
+        sample_action=env.action_space.sample(),
+        image_keys=config.image_keys,
+        encoder_type=config.encoder_type,
+    )
+
+    # replicate agent across devices
+    # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
+    bc_agent: BCAgent = jax.device_put(
+        jax.tree_map(jnp.array, bc_agent), sharding.replicate()
+    )
 
     if not eval_mode:
         assert not os.path.isdir(
@@ -168,60 +172,17 @@ def main(_):
             debug=FLAGS.debug,
         )
 
+        demo_path = glob.glob(os.path.join(os.getcwd(), "demo_data", "*.pkl"))
+        
+        assert demo_path is not []
 
-        all_actions = []  # 存储所有动作
-        assert FLAGS.demo_path is not None
-        for path in FLAGS.demo_path:
+        for path in demo_path:
             with open(path, "rb") as f:
-                transitions = []
-                while True:
-                    try:
-                        transitions.extend(pkl.load(f))  # 读取并扩展列表
-                    except EOFError:
-                        break  # 读取结束
+                transitions = pkl.load(f)
                 for transition in transitions:
-                    bc_replay_buffer.insert(transition)
-                    # print("transition keys = ", transition.keys())
-                    # print("transition[observation]state = ", transition["observations"]["state"][:3])
-                    # print("transition[actions] = ", transition["actions"][:3])
-                    all_actions.append(transition["actions"])
-                    # input("debug")
-        print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
-
-
-
-        bc_replay_iterator = bc_replay_buffer.get_iterator(
-            sample_args={
-                "batch_size": config.batch_size,
-                "pack_obs_and_next_obs": False,
-            },
-            device=sharding.replicate(), 
-        )
-        all_actions = []
-        for _ in range(len(bc_replay_buffer) // config.batch_size):
-            batch = next(bc_replay_iterator)
-            all_actions.append(batch["actions"])  # 应该已经是(batch_size, 7)
-        all_actions = np.concatenate(all_actions, axis=0)
-        action_mean = np.mean(all_actions[:,:3], axis=0)
-        action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
-        print("action_mean = ", action_mean)
-        print("action_std = ", action_std)
-
-        bc_agent: BCAgent = make_bc_agent(
-            seed=FLAGS.seed,
-            sample_obs=env.observation_space.sample(),
-            sample_action=env.action_space.sample(),
-            image_keys=config.image_keys,
-            encoder_type=config.encoder_type,
-            action_mean=action_mean,
-            action_std=action_std
-        )
-
-        # replicate agent across devices
-        # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
-        bc_agent: BCAgent = jax.device_put(
-            jax.tree_map(jnp.array, bc_agent), sharding.replicate()
-    )   
+                    if np.linalg.norm(transition['actions']) > 0.0:
+                        bc_replay_buffer.insert(transition)
+        print(f"bc replay buffer size: {len(bc_replay_buffer)}")
 
         # learner loop
         print_green("starting learner loop")
@@ -236,22 +197,8 @@ def main(_):
         rng = jax.random.PRNGKey(FLAGS.seed)
         sampling_rng = jax.device_put(rng, sharding.replicate())
 
-        bc_agent: BCAgent = make_bc_agent(
-            seed=FLAGS.seed,
-            sample_obs=env.observation_space.sample(),
-            sample_action=env.action_space.sample(),
-            image_keys=config.image_keys,
-            encoder_type=config.encoder_type,
-        )
-
-        # replicate agent across devices
-        # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
-        bc_agent: BCAgent = jax.device_put(
-            jax.tree_map(jnp.array, bc_agent), sharding.replicate()
-        )
-
         bc_ckpt = checkpoints.restore_checkpoint(
-             os.path.abspath(FLAGS.bc_checkpoint_path),
+            FLAGS.bc_checkpoint_path,
             bc_agent.state,
         )
         bc_agent = bc_agent.replace(state=bc_ckpt)

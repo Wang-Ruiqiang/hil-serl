@@ -71,7 +71,6 @@ class MemoryEfficientReplayBuffer(ReplayBuffer):
         for pixel_key in self.pixel_keys:
             obs_pixels[pixel_key] = data_dict["observations"].pop(pixel_key)
             next_obs_pixels[pixel_key] = data_dict["next_observations"].pop(pixel_key)
-
         if self._first:
             for i in range(self._num_stack):
                 for pixel_key in self.pixel_keys:
