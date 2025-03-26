@@ -12,6 +12,11 @@ import os
 import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped
+import threading
+
 from serl_launcher.agents.continuous.bc import BCAgent
 
 from serl_launcher.utils.launcher import (
@@ -29,7 +34,7 @@ flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folde
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_string("bc_checkpoint_path", None, "Path to save checkpoints.")
-flags.DEFINE_integer("eval_n_trajs", 0, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_n_trajs", 1000, "Number of trajectories to evaluate.")
 flags.DEFINE_integer("train_steps", 20000, "Number of pretraining steps.")
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
@@ -75,6 +80,7 @@ def eval(
             actions = bc_agent.sample_actions(observations=obs, seed=key)
             actions = np.asarray(jax.device_get(actions))
             next_obs, reward, done, truncated, info = env.step(actions)
+            input("debug")
             obs = next_obs
             if done:
                 if reward:
