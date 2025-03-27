@@ -24,6 +24,7 @@ from sensor_msgs.msg import JointState
 import threading
 from denso_env.camera.video_capture import VideoCapture
 from denso_env.camera.rs_capture import RSCapture
+from leap_hand.srv import LeapPosition, LeapPosVelEff
 
 from examples.utils import read_utils
 
@@ -91,16 +92,15 @@ class ROSNodeInterface(Node):
         super().__init__('denso_env_node')
 
         # Publishers（发送）
-
-        self.get_logger().info("__init__")
         self.arm_pub = self.create_publisher(
             PoseStamped,
             '/cloth_folding/robot_control',
             10
         )
-        self.hand_pub = self.create_publisher(
-            Float64MultiArray,
-            '/leap_hand/send_cmd',  # 正确的发送关节角的话题
+
+        self.publisher_hand = self.create_publisher(
+            JointState, 
+            '/cmd_leap', 
             10
         )
 
@@ -109,14 +109,14 @@ class ROSNodeInterface(Node):
             PoseStamped,
             '/cartesian_compliance_controller/current_pose',  # 接收机械臂关节角
             self.joint_callback,
-            1
-        )
-        self.hand_joint_sub = self.create_subscription(
-            Float64MultiArray,
-            '/leap_hand/position',  # 正确的接收灵巧手关节角的话题
-            self.hand_joint_callback,
             10
         )
+        
+        self.leap_position_client = self.create_client(LeapPosition, '/leap_position')
+
+        # Wait for the service to be available
+        while not self.leap_position_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().info('Waiting for /leap_position service...')
 
         # 同步事件
         self.joint_event = threading.Event()
@@ -141,12 +141,6 @@ class ROSNodeInterface(Node):
         # 设置事件为已收到数据
         self.joint_event.set()
 
-    def hand_joint_callback(self, msg):
-        # self.get_logger().info("ROS回调已接收到灵巧手位姿数据")
-        self.current_hand_joints = msg
-        self.hand_joint_event.set()
-
-
     def publish_arm_action(self, pose):
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -154,10 +148,13 @@ class ROSNodeInterface(Node):
         msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = pose[3:7]
         self.arm_pub.publish(msg)
 
+
     def publish_hand_action(self, hand_joints):
-        msg = Float64MultiArray()
-        msg.data = hand_joints.tolist()
-        self.hand_pub.publish(msg)
+        stater = JointState()
+        stater.name = [f"joint_{i}" for i in range(len(hand_joints))]
+        stater.position = hand_joints
+        self.publisher_hand.publish(stater)
+        
 
     def get_current_joints(self, timeout=5.0):
         # success = self.joint_event.wait(timeout=timeout)
@@ -167,10 +164,16 @@ class ROSNodeInterface(Node):
         self.joint_event.clear()
         return self.cur_position, self.cur_oritation
 
-    def get_current_hand_joints(self):
-        self.hand_joint_event.wait()
-        self.hand_joint_event.clear()
-        return self.current_hand_joints
+    def get_current_leap_position(self):
+        # Create a request for the LeapPosition service
+        req = LeapPosition.Request()
+        future = self.leap_position_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        if future.result() is not None:
+            return list(future.result().position)
+        else:
+            self.get_logger().info("Failed to get current position, using zeros")
+            return [0.0] * 16
 
 ##############################################################################
 
@@ -252,6 +255,13 @@ class DensoEnv(gym.Env):
                 ),
             }
         )
+        
+        self.hand_joint_offset = np.array([3.14, 3.14, 3.14, 3.14,
+            3.14, 3.14, 3.14, 0,
+            3.14, 3.14, 3.14, 3.14,
+            3.14, 3.14, 3.14, 3.14
+        ] )
+        
         self.cycle_count = 0
 
         # robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
@@ -299,6 +309,9 @@ class DensoEnv(gym.Env):
         executor_thread = threading.Thread(target=executor.spin, daemon=True)
         executor_thread.start()
 
+        self.interpolation_thread = None
+        self.thread_lock = threading.Lock()
+
         print("Initialized Denso")
     
 
@@ -337,8 +350,11 @@ class DensoEnv(gym.Env):
         # self.ros_interface.publish_arm_action(arm_action)
 
         # 后16维为灵巧手关节角
-        hand_action = action[7:]
+        leap_hand_action = action[7:]
         # self.ros_interface.publish_hand_action(hand_action)
+        self._send_leap_hand_command(leap_hand_action)
+
+        input("debug")
 
         self.curr_path_length += 1
         dt = time.time() - start_time
@@ -399,44 +415,6 @@ class DensoEnv(gym.Env):
             self.img_queue.put(display_images)
         return images
     
-
-    def go_to_reset(self, joint_reset=False):
-        """
-        The concrete steps to perform reset should be
-        implemented each subclass for the specific task.
-        Should override this method if custom reset procedure is needed.
-        """
-        # Change to precision mode for reset        # Use compliance mode for coupled reset
-        self._update_cur_position()
-        self._send_pos_command(self.cur_position)
-        time.sleep(0.3)
-        requests.post(self.url + "update_param", json=self.config.PRECISION_PARAM)
-        time.sleep(0.5)
-
-        # Perform joint reset if needed
-        if joint_reset:
-            print("JOINT RESET")
-            requests.post(self.url + "jointreset")
-            time.sleep(0.5)
-
-        # Perform Carteasian reset
-        if self.randomreset:  # randomize reset position in xy plane
-            reset_pose = self.resetpos.copy()
-            reset_pose[:2] += np.random.uniform(
-                -self.random_xy_range, self.random_xy_range, (2,)
-            )
-            euler_random = self._RESET_POSE[3:].copy()
-            euler_random[-1] += np.random.uniform(
-                -self.random_rz_range, self.random_rz_range
-            )
-            reset_pose[3:] = euler_2_quat(euler_random)
-            self.interpolate_move(reset_pose, timeout=1)
-        else:
-            reset_pose = self.resetpos.copy()
-            self.interpolate_move(reset_pose, timeout=1)
-
-        # Change to compliance mode
-        requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
 
     def reset(self, joint_reset=False, **kwargs):
         self.data_count = 0
@@ -526,37 +504,57 @@ class DensoEnv(gym.Env):
         data = {"arr": arr.tolist()}
         requests.post(self.url + "pose", json=data)
 
-    def _send_gripper_command(self, pos: float, mode="binary"):
-        """Internal function to send gripper command to the robot."""
-        if mode == "binary":
-            if (pos <= -0.5) and (self.curr_gripper_pos > 0.85) and (time.time() - self.last_gripper_act > self.gripper_sleep):  # close gripper
-                requests.post(self.url + "close_gripper")
-                self.last_gripper_act = time.time()
-                time.sleep(self.gripper_sleep)
-            elif (pos >= 0.5) and (self.curr_gripper_pos < 0.85) and (time.time() - self.last_gripper_act > self.gripper_sleep):  # open gripper
-                requests.post(self.url + "open_gripper")
-                self.last_gripper_act = time.time()
-                time.sleep(self.gripper_sleep)
-            else: 
-                return
-        elif mode == "continuous":
-            raise NotImplementedError("Continuous gripper control is optional")
+    def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
+        """Internal function to send leap hand command to the robot."""
+        index = leap_hand_action[:4]
+        index[:2] = index[1::-1]    # Flip the first two elements 
+        thumb = leap_hand_action[4:8]
+        middle = leap_hand_action[8:12]
+        middle[:2] = middle[1::-1]
+        ring = leap_hand_action[12:]
+        ring[:2] = ring[1::-1]
+
+        leap_hand_j_cmd = np.concatenate((index, middle, ring, thumb))
+        hand_action = leap_hand_j_cmd + self.hand_joint_offset
+        step_time = 0.05  # Example step time
+        steps = 5       # Example number of steps
+
+        if self.interpolation_thread and self.interpolation_thread.is_alive():
+            return
+
+        with self.thread_lock:
+            self.interpolation_thread = threading.Thread(
+                target=self.leap_interpolate_and_publish,
+                args=(self.curr_leap_hand_pos, hand_action, step_time, steps),
+                daemon=True
+            )
+            self.interpolation_thread.start()
+
+
+    def leap_interpolate_and_publish(self, start_position, end_position, step_time, steps):
+        for i in range(steps + 1):
+            # Interpolate between start and end positions
+            interpolated_position = [
+                start + (end - start) * (i / steps)
+                for start, end in zip(start_position, end_position)
+            ]
+            # Publish the interpolated position
+            self.ros_interface.publish_hand_action(interpolated_position)
+            time.sleep(step_time)
+            
 
     def _update_cur_position(self):
         """
         Internal function to get the latest state of the robot and its gripper.
         """
-        # self.spin_ros()
-        rclpy.spin_once(self.ros_interface, timeout_sec=0.5) 
         position, orientation = self.ros_interface.get_current_joints()
         self.cur_position = position
         self.cur_oritation = orientation
-        print("self.cur_position = ", self.cur_position)
-        print("self.cur_oritation = ", self.cur_oritation)
-        hand_joint_msg = self.ros_interface.get_current_hand_joints()
+        hand_joint_msg = self.ros_interface.get_current_leap_position()
+        print("hand_joint_msg = ", hand_joint_msg)
 
         if hand_joint_msg is not None:
-            self.curr_gripper_pos = np.array(hand_joint_msg.data)
+            self.curr_leap_hand_pos = np.array(hand_joint_msg)
         else:
             print("Warning: Hand joint data unavailable.")
 
@@ -568,7 +566,7 @@ class DensoEnv(gym.Env):
         state_flattened = np.concatenate([
             np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
             np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-            np.array(self.curr_gripper_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
+            np.array(self.curr_leap_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
         ])
 
         return copy.deepcopy({

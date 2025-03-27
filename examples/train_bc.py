@@ -35,6 +35,9 @@ from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
 from experiments.mappings import NEW_MAPPING
 from experiments.config import DefaultTrainingConfig
+from examples.utils import read_utils
+
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
@@ -46,6 +49,7 @@ flags.DEFINE_integer("train_steps", 20000, "Number of pretraining steps.")
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 
+robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -78,28 +82,36 @@ def eval(
     print("evaluating")
     success_counter = 0
     time_list = []
-    for episode in range(FLAGS.eval_n_trajs):
-        obs, _ = env.reset()
-        done = False
-        start_time = time.time()
-        while not done:
-            rng, key = jax.random.split(sampling_rng)
-            actions = bc_agent.sample_actions(observations=obs, seed=key)
-            actions = np.asarray(jax.device_get(actions))
-            next_obs, reward, done, truncated, info = env.step(actions)
-            input("debug")
-            obs = next_obs
-            if done:
-                if reward:
-                    dt = time.time() - start_time
-                    time_list.append(dt)
-                    print(dt)
-                success_counter += reward
-                print(reward)
-                print(f"{success_counter}/{episode + 1}")
+    data = read_utils.read_data(robot_urdf_path, True)
+    data_count = 0
+    
+    obs, _ = env.reset()
+    done = False
+    start_time = time.time()
+    while not done:
+        rng, key = jax.random.split(sampling_rng)
+        # actions = bc_agent.sample_actions(observations=obs, seed=key)
+        # actions = np.asarray(jax.device_get(actions))
+        
+        obs = data[data_count]["observations"]
+        sampling_rng, key = jax.random.split(sampling_rng)
+        actions_read = data[data_count]["observations"]["state"]
 
-    print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
-    print(f"average time: {np.mean(time_list)}")
+
+
+        next_obs, reward, done, truncated, info = env.step(actions_read)
+        obs = next_obs
+        if done:
+            if reward:
+                dt = time.time() - start_time
+                time_list.append(dt)
+                print(dt)
+            success_counter += reward
+            print(reward)
+        data_count += 1
+        if data_count >= len(data):
+            print("eval failed")
+            break
 
 
 ##############################################################################
