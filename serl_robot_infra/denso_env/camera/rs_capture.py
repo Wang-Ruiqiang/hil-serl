@@ -5,6 +5,8 @@ import pyrealsense2 as rs  # Intel RealSense cross-platform open-source API
 class RSCapture:
     def get_device_serial_numbers(self):
         devices = rs.context().devices
+        for d in devices:
+            print(d.get_info(rs.camera_info.serial_number))
         return [d.get_info(rs.camera_info.serial_number) for d in devices]
 
     def __init__(self, name, serial_number, dim=(640, 480), fps=15, depth=False, exposure=40000):

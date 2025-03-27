@@ -2,6 +2,7 @@
 
 import glob
 import time
+import sys
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,11 +12,15 @@ from flax.training import checkpoints
 import os
 import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 import threading
+from std_msgs.msg import Float64MultiArray
+from sensor_msgs.msg import JointState
 
 from serl_launcher.agents.continuous.bc import BCAgent
 
@@ -24,6 +29,8 @@ from serl_launcher.utils.launcher import (
     make_trainer_config,
     make_wandb_logger,
 )
+
+# print(sys.path)
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
 from experiments.mappings import NEW_MAPPING
@@ -68,6 +75,7 @@ def eval(
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
+    print("evaluating")
     success_counter = 0
     time_list = []
     for episode in range(FLAGS.eval_n_trajs):
@@ -76,7 +84,6 @@ def eval(
         start_time = time.time()
         while not done:
             rng, key = jax.random.split(sampling_rng)
-
             actions = bc_agent.sample_actions(observations=obs, seed=key)
             actions = np.asarray(jax.device_get(actions))
             next_obs, reward, done, truncated, info = env.step(actions)
@@ -148,6 +155,7 @@ def main(_):
     assert config.batch_size % num_devices == 0
     assert FLAGS.exp_name in NEW_MAPPING, "Experiment folder not found."
     eval_mode = FLAGS.eval_n_trajs > 0
+ 
     env = config.get_environment(
         fake_env=not eval_mode,
         save_video=FLAGS.save_video,

@@ -51,85 +51,6 @@ class ImageDisplayer(threading.Thread):
 
 ##############################################################################
 
-class ROSNodeInterface(Node):
-    def __init__(self):
-        super().__init__('denso_env_node')
-
-        # Publishers（发送）
-        self.arm_pub = self.create_publisher(
-            PoseStamped,
-            '/cloth_folding/robot_control',
-            10
-        )
-        self.hand_pub = self.create_publisher(
-            Float64MultiArray,
-            '/leap_hand/send_cmd',  # 正确的发送关节角的话题
-            10
-        )
-
-        # Subscribers（接收）
-        self.joint_sub = self.create_subscription(
-            JointState,
-            '/cartesian_compliance_controller/current_pose',  # 接收机械臂关节角
-            self.joint_callback,
-            10
-        )
-        self.hand_joint_sub = self.create_subscription(
-            Float64MultiArray,
-            '/leap_hand/position',  # 正确的接收灵巧手关节角的话题
-            self.hand_joint_callback,
-            10
-        )
-
-        # 同步事件
-        self.joint_event = threading.Event()
-        self.hand_joint_event = threading.Event()
-
-        # 数据存储
-        self.current_joints = None
-        self.current_hand_joints = None
-
-    def joint_callback(self, msg):
-        position = msg.pose.position
-        self.cur_position = np.array([position.x, position.y, position.z])
-
-        # 从 msg 中提取四元数方向数据（xyzw）
-        orientation = msg.pose.orientation
-        self.cur_oritation = np.array([
-            orientation.x, orientation.y, orientation.z, orientation.w
-        ])
-
-        # 设置事件为已收到数据
-        self.joint_event.set()
-
-    def hand_joint_callback(self, msg):
-        self.current_hand_joints = msg
-        self.hand_joint_event.set()
-
-    def publish_arm_action(self, pose):
-        msg = PoseStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = pose[:3]
-        msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = pose[3:7]
-        self.arm_pub.publish(msg)
-
-    def publish_hand_action(self, hand_joints):
-        msg = Float64MultiArray()
-        msg.data = hand_joints.tolist()
-        self.hand_pub.publish(msg)
-
-    def get_current_joints(self):
-        self.joint_event.wait()
-        self.joint_event.clear()
-        return self.cur_position, self.cur_oritation
-
-    def get_current_hand_joints(self):
-        self.hand_joint_event.wait()
-        self.hand_joint_event.clear()
-        return self.current_hand_joints
-    
-
-
 class DefaultEnvConfig:
     """Default configuration for FrankaEnv. Fill in the values below."""
 
@@ -165,6 +86,93 @@ class DefaultEnvConfig:
 
 ##############################################################################
 
+class ROSNodeInterface(Node):
+    def __init__(self):
+        super().__init__('denso_env_node')
+
+        # Publishers（发送）
+
+        self.get_logger().info("__init__")
+        self.arm_pub = self.create_publisher(
+            PoseStamped,
+            '/cloth_folding/robot_control',
+            10
+        )
+        self.hand_pub = self.create_publisher(
+            Float64MultiArray,
+            '/leap_hand/send_cmd',  # 正确的发送关节角的话题
+            10
+        )
+
+        # Subscribers（接收）
+        self.joint_sub = self.create_subscription(
+            PoseStamped,
+            '/cartesian_compliance_controller/current_pose',  # 接收机械臂关节角
+            self.joint_callback,
+            1
+        )
+        self.hand_joint_sub = self.create_subscription(
+            Float64MultiArray,
+            '/leap_hand/position',  # 正确的接收灵巧手关节角的话题
+            self.hand_joint_callback,
+            10
+        )
+
+        # 同步事件
+        self.joint_event = threading.Event()
+        self.hand_joint_event = threading.Event()
+
+        # 数据存储
+        self.current_joints = None
+        self.current_hand_joints = None
+
+    def joint_callback(self, msg):
+        #用ros2 INFO打印接收到的数据 
+        # self.get_logger().info("ROS回调已接收到机械臂位姿数据")
+        position = msg.pose.position
+        self.cur_position = np.array([position.x, position.y, position.z])
+
+        # 从 msg 中提取四元数方向数据（xyzw）
+        orientation = msg.pose.orientation
+        self.cur_oritation = np.array([
+            orientation.x, orientation.y, orientation.z, orientation.w
+        ])
+
+        # 设置事件为已收到数据
+        self.joint_event.set()
+
+    def hand_joint_callback(self, msg):
+        # self.get_logger().info("ROS回调已接收到灵巧手位姿数据")
+        self.current_hand_joints = msg
+        self.hand_joint_event.set()
+
+
+    def publish_arm_action(self, pose):
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = pose[:3]
+        msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = pose[3:7]
+        self.arm_pub.publish(msg)
+
+    def publish_hand_action(self, hand_joints):
+        msg = Float64MultiArray()
+        msg.data = hand_joints.tolist()
+        self.hand_pub.publish(msg)
+
+    def get_current_joints(self, timeout=5.0):
+        # success = self.joint_event.wait(timeout=timeout)
+        # if not success:
+        #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
+        self.joint_event.wait()
+        self.joint_event.clear()
+        return self.cur_position, self.cur_oritation
+
+    def get_current_hand_joints(self):
+        self.hand_joint_event.wait()
+        self.hand_joint_event.clear()
+        return self.current_hand_joints
+
+##############################################################################
 
 class DensoEnv(gym.Env):
     def __init__(
@@ -283,13 +291,13 @@ class DensoEnv(gym.Env):
         self.next_hand_pos = np.zeros(16)
 
         rclpy.init(args=None)
+
         self.ros_interface = ROSNodeInterface()
 
-        self.executor = rclpy.executors.MultiThreadedExecutor()
-        self.executor.add_node(self.ros_interface)
-
-        self.executor_thread = threading.Thread(target=self.executor.spin, daemon=True)
-        self.executor_thread.start()
+        executor = rclpy.executors.MultiThreadedExecutor()
+        executor.add_node(self.ros_interface)
+        executor_thread = threading.Thread(target=executor.spin, daemon=True)
+        executor_thread.start()
 
         print("Initialized Denso")
     
@@ -539,6 +547,7 @@ class DensoEnv(gym.Env):
         Internal function to get the latest state of the robot and its gripper.
         """
         # self.spin_ros()
+        rclpy.spin_once(self.ros_interface, timeout_sec=0.5) 
         position, orientation = self.ros_interface.get_current_joints()
         self.cur_position = position
         self.cur_oritation = orientation

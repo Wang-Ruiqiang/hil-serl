@@ -110,7 +110,6 @@ class RAMEnv(DensoEnv):
         # self.go_to_reset(joint_reset=False)
         # self._recover()
         self.curr_path_length = 0
-
         self._update_cur_position()
         obs = self._get_obs()
         # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)

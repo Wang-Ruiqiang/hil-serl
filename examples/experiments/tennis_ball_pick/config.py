@@ -19,13 +19,13 @@ class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
         "front_camera": {
-            "serial_number": "127122270146",
-            "dim": (1280, 720),
+            "serial_number": "242422303461",
+            "dim": (640, 480),
             "exposure": 40000,
         },
         "side_camera": {
-            "serial_number": "127122270350",
-            "dim": (1280, 720),
+            "serial_number": "234222300515",
+            "dim": (640, 480),
             "exposure": 40000,
         },
     }
