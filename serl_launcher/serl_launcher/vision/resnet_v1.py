@@ -222,8 +222,13 @@ class ResNetEncoder(nn.Module):
             observations = resize(observations, self.image_size)
 
         # imagenet mean and std # TODO: add this back
-        mean = jnp.array([0.485, 0.456, 0.406])
-        std = jnp.array([0.229, 0.224, 0.225])
+        channels = observations.shape[-1]  # 获得当前通道数，例如9
+        assert channels % 3 == 0, "通道数应该为3的整数倍！"
+        num_frames  = channels // 3
+        # mean = jnp.array([0.485, 0.456, 0.406], repeat)
+        # std = jnp.array([0.229, 0.224, 0.225], repeat)
+        mean = jnp.tile(jnp.array([0.485, 0.456, 0.406]), num_frames)
+        std = jnp.tile(jnp.array([0.229, 0.224, 0.225]), num_frames)
         x = (observations.astype(jnp.float32) / 255.0 - mean) / std
 
         if self.add_spatial_coordinates:
@@ -250,13 +255,38 @@ class ResNetEncoder(nn.Module):
 
         act = getattr(nn, self.act)
 
-        x = conv(
-            self.num_filters,
-            (7, 7),
-            (2, 2),
+        # x = conv(
+        #     self.num_filters,
+        #     (7, 7),
+        #     (2, 2),
+        #     padding=[(3, 3), (3, 3)],
+        #     name="conv_init",
+        # )(x)
+
+        conv_init = conv(
+            features=self.num_filters,  # 64个输出通道
+            kernel_size=(7, 7),
+            strides=(2, 2),
             padding=[(3, 3), (3, 3)],
             name="conv_init",
+        )
+
+        # 每一帧单独卷积
+        frame_features = []
+        for i in range(num_frames):
+            frame = x[..., i*3:(i+1)*3]
+            f = conv_init(frame)
+            frame_features.append(f)
+
+        x = jnp.concatenate(frame_features, axis=-1)
+        x = nn.Conv(
+            features=self.num_filters,
+            kernel_size=(1,1),
+            strides=(1,1),
+            padding='SAME',
+            name='conv_proj'
         )(x)
+
 
         x = norm(name="norm_init")(x)
         x = act(x)

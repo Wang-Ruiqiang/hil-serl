@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 from flax.core import FrozenDict
+import distrax 
 
 from serl_launcher.common.common import JaxRLTrainState, ModuleDict, nonpytree_field
 from serl_launcher.common.encoding import EncodingWrapper
@@ -59,16 +60,38 @@ class BCAgent(flax.struct.PyTreeNode):
             else:
                 normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
                 batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
-                # batch_actions = (batch["actions"] - self.config["action_mean"])/ self.config["action_std"]
-            # batch_actions = batch["actions"]
-            log_probs = dist.log_prob(batch_actions)
+
+            pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
+            batch_arm, batch_hand = batch_actions[:, :7], batch_actions[:, 7:]
+
+            arm_std = dist.scale_diag[:, :7]
+            hand_std = dist.scale_diag[:, 7:]
+
+            arm_dist = distrax.MultivariateNormalDiag(pi_arm, arm_std)
+            hand_dist = distrax.MultivariateNormalDiag(pi_hand, hand_std)
+
+            arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
+            hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
+
+            arm_weight = 1.0
+            hand_weight = 0.5
+            weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
+            actor_loss = -(weighted_log_prob).mean()
             mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-            actor_loss = -(log_probs).mean()
 
             return actor_loss, {
                 "actor_loss": actor_loss,
                 "mse": mse.mean(),
             }
+
+            # log_probs = dist.log_prob(batch_actions)
+            # mse = ((pi_actions - batch_actions) ** 2).sum(-1)
+            # actor_loss = -(log_probs).mean()
+
+            # return actor_loss, {
+            #     "actor_loss": actor_loss,
+            #     "mse": mse.mean(),
+            # }
 
         # compute gradients and update params
         new_state, info = self.state.apply_loss_fns(

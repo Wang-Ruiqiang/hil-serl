@@ -119,9 +119,9 @@ def main(_):
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
                 reward = comupute_reward(obs, classifier)
                 done = reward or terminate
-                actions[:3] = next_obs["state"][:3]  # xyz坐标
-                actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
-                actions[7:] = next_obs["state"][7:]  # 四元数姿态
+                actions[:3] = obs["state"][:3]  # xyz坐标
+                actions[3:7] = obs["state"][3:7]  # 四元数姿态
+                actions[7:] = obs["state"][7:]  # 四元数姿态
 
                 transition = copy.deepcopy(
                     dict(

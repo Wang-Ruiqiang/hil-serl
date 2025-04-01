@@ -110,7 +110,7 @@ class TrainConfig(DefaultTrainingConfig):
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
-        env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
+        env = ChunkingWrapper(env, obs_horizon=3, act_exec_horizon=None)
         if classifier:
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
