@@ -1,9 +1,12 @@
 examples/classifier_ckpt/*
 examples/classifier_data/*
 examples/demo_data/*
+examples/demo_data copy/*
 examples/test_data/*
 examples/experiments/tennis_ball_pick/first_run/*
 examples/experiments/tennis_ball_pick/second_run/*
 examples/experiments/tennis_ball_pick/first_*/*
 examples/experiments/tennis_ball_pick/second_*/*
 examples/experiments/tennis_ball_pick/third_*/*
+examples/experiments/tennis_ball_pick/fourth_*/*
+examples/experiments/tennis_ball_pick/fifth_*/*
