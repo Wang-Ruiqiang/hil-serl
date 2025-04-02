@@ -94,7 +94,7 @@ class ROSNodeInterface(Node):
         # Publishers（发送）
         self.arm_pub = self.create_publisher(
             PoseStamped,
-            '/cloth_folding/robot_control',
+            '/tactexo/robot_control',
             10
         )
 
@@ -145,11 +145,13 @@ class ROSNodeInterface(Node):
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = pose[:3]
-        msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = pose[3:7]
+        msg.pose.orientation.w, msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z = pose[3:7]
+        print("msg.pose = ", msg.pose)
         self.arm_pub.publish(msg)
 
 
     def publish_hand_action(self, hand_joints):
+        self.get_logger().info('publish_hand_action')
         stater = JointState()
         stater.name = [f"joint_{i}" for i in range(len(hand_joints))]
         stater.position = hand_joints
@@ -257,7 +259,7 @@ class DensoEnv(gym.Env):
         )
         
         self.hand_joint_offset = np.array([3.14, 3.14, 3.14, 3.14,
-            3.14, 3.14, 3.14, 0,
+            3.14, 3.14, 3.14, 3.14,
             3.14, 3.14, 3.14, 3.14,
             3.14, 3.14, 3.14, 3.14
         ] )
@@ -347,14 +349,17 @@ class DensoEnv(gym.Env):
 
         # 前7维为机械臂位姿
         arm_action = action[:7]
-        # self.ros_interface.publish_arm_action(arm_action)
+        print("arm_action = ", arm_action)
+        self.ros_interface.publish_arm_action(arm_action)
+        input("debug")
 
         # 后16维为灵巧手关节角
         leap_hand_action = action[7:]
-        # self.ros_interface.publish_hand_action(hand_action)
         self._send_leap_hand_command(leap_hand_action)
-
-        input("debug")
+        leap_hand_action[3] = leap_hand_action[3]-3.14
+        leap_hand_action[7] = leap_hand_action[7]-1.57
+        
+        # self._send_leap_hand_command(self.curr_leap_hand_pos + 0.1)
 
         self.curr_path_length += 1
         dt = time.time() - start_time
@@ -506,16 +511,27 @@ class DensoEnv(gym.Env):
 
     def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
         """Internal function to send leap hand command to the robot."""
-        index = leap_hand_action[:4]
-        index[:2] = index[1::-1]    # Flip the first two elements 
-        thumb = leap_hand_action[4:8]
-        middle = leap_hand_action[8:12]
-        middle[:2] = middle[1::-1]
-        ring = leap_hand_action[12:]
-        ring[:2] = ring[1::-1]
+        print("_send_leap_hand_command")
+        # index = leap_hand_action[:4]
+        # index[:2] = index[1::-1]    # Flip the first two elements 
+        # thumb = leap_hand_action[4:8]
+        # middle = leap_hand_action[8:12]
+        # middle[:2] = middle[1::-1]
+        # ring = leap_hand_action[12:]
+        # ring[:2] = ring[1::-1]
 
-        leap_hand_j_cmd = np.concatenate((index, middle, ring, thumb))
-        hand_action = leap_hand_j_cmd + self.hand_joint_offset
+        # index = leap_hand_action[:4]
+        # index[:2] = index[1::-1]    # Flip the first two elements 
+        # middle = leap_hand_action[4:8]
+        # middle[:2] = middle[1::-1]
+        # ring = leap_hand_action[8:12]
+        # ring[:2] = ring[1::-1]
+        # thumb = leap_hand_action[12:]
+
+        # leap_hand_j_cmd = np.concatenate((index, middle, ring, thumb))
+        # hand_action = leap_hand_action + self.hand_joint_offset
+        # hand_action = leap_hand_j_cmd
+        hand_action = leap_hand_action
         step_time = 0.05  # Example step time
         steps = 5       # Example number of steps
 
@@ -532,6 +548,8 @@ class DensoEnv(gym.Env):
 
 
     def leap_interpolate_and_publish(self, start_position, end_position, step_time, steps):
+        print("leap_interpolate_and_publish")
+        print("end_position = ", end_position)
         for i in range(steps + 1):
             # Interpolate between start and end positions
             interpolated_position = [
@@ -551,7 +569,6 @@ class DensoEnv(gym.Env):
         self.cur_position = position
         self.cur_oritation = orientation
         hand_joint_msg = self.ros_interface.get_current_leap_position()
-        print("hand_joint_msg = ", hand_joint_msg)
 
         if hand_joint_msg is not None:
             self.curr_leap_hand_pos = np.array(hand_joint_msg)

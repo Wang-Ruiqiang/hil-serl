@@ -49,7 +49,7 @@ flags.DEFINE_integer("train_steps", 20000, "Number of pretraining steps.")
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 
-robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf"
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -94,8 +94,9 @@ def eval(
         # actions = np.asarray(jax.device_get(actions))
         
         obs = data[data_count]["observations"]
+        # print("obs state = ", obs[data_count]["observations"]["state"])
         sampling_rng, key = jax.random.split(sampling_rng)
-        actions_read = data[data_count]["observations"]["state"]
+        actions_read = data[data_count]["actions"]
 
 
 

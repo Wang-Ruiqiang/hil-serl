@@ -2,11 +2,18 @@ import copy
 import json
 import cv2
 import os
-from tqdm import tqdm
 import numpy as np
 import gymnasium as gym
 from examples.utils import kinematics_utils
 import re
+
+
+palm_lower2denso_end_tf = np.array([
+    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
+    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
+    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
+    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
+])
 
 def get_frame_data(frame_path, robot_urdf_path):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
@@ -27,11 +34,16 @@ def get_frame_data(frame_path, robot_urdf_path):
         with open(joint_file_path, "r") as f:
             all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
             # Change the order of robot arm joint data
+
+            # print("all_joint_values ori = ", all_joint_values)
             wrist_joint_index = [2,0,1,3,4,5]
             all_joint_values[:6] = all_joint_values[wrist_joint_index]
 
             hand_joint = all_joint_values[6:]
+            # print("all_joint_values = ", all_joint_values)
+            # input("enter")
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
+    tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
 
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
@@ -66,7 +78,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
     # )
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
-        data_dir = "/home/qiangqiang/workspaces/data/test_data"
+        data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"
     else:
         data_dir = "/home/qiangqiang/workspaces/data/demo_data"
     for collect_data_dir in sorted(os.listdir(data_dir)):
@@ -97,6 +109,11 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
 
                 obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
                 next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
+                # print("next_obs['state'][3:7] = ", next_obs["state"][3:7])
+                
+                actions[:3] = next_obs["state"][:3]  # xyz坐标
+                actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
+                actions[7:] = next_obs["state"][7:]  # leap_hand
 
                 transition = copy.deepcopy(
                     dict(

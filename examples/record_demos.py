@@ -121,7 +121,7 @@ def main(_):
                 done = reward or terminate
                 actions[:3] = next_obs["state"][:3]  # xyz坐标
                 actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
-                actions[7:] = next_obs["state"][7:]  # 四元数姿态
+                actions[7:] = next_obs["state"][7:]  # leap_hand
 
                 transition = copy.deepcopy(
                     dict(
