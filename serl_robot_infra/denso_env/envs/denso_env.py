@@ -49,7 +49,7 @@ class DefaultEnvConfig:
     SERVER_URL: str = "http://127.0.0.1:5000/"
     REALSENSE_CAMERAS: Dict = {
         "front_camera": "130322274175",
-        "side_camera": "127122270572",
+        # "side_camera": "127122270572",
     }
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((6,))
@@ -529,7 +529,7 @@ class DensoEnv(gym.Env):
     def _get_obs(self) -> dict:
         images = self.get_im_test()
         front_camera_image = images["front_camera"]
-        side_camera_image = images["side_camera"]
+        # side_camera_image = images["side_camera"]
         state_flattened = np.concatenate([
             np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
             np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
@@ -542,7 +542,7 @@ class DensoEnv(gym.Env):
         # }
         return copy.deepcopy({
             "front_camera": front_camera_image,
-            "side_camera": side_camera_image,
+            # "side_camera": side_camera_image,
             "state": state_flattened
         })
 

@@ -56,6 +56,7 @@ def main(_):
             
             for trans in success_data:
                 trans["labels"] = 1
+                # print("trans keys= ",trans["observations"].keys())
                 pos_buffer.insert(trans)
             
     pos_iterator = pos_buffer.get_iterator(

@@ -123,7 +123,6 @@ def main(_):
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
 
-
                 if i == start_frame:
                     history_obs.reset(obs)
                     history_next_obs.reset(next_obs)

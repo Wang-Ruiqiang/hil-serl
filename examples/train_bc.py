@@ -209,11 +209,6 @@ def main(_):
         action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
         print("action_mean = ", action_mean)
         print("action_std = ", action_std)
-        print("env.observation_space.sample() side camera shape = ", env.observation_space.sample()["side_camera"].shape)
-        print("env.observation_space.sample() front camera shape = ", env.observation_space.sample()["front_camera"].shape)
-        print("env.observation_space.sample() state shape = ", env.observation_space.sample()["state"].shape)
-
-        input("debug")
         bc_agent: BCAgent = make_bc_agent(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),

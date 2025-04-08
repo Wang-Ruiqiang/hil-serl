@@ -10,7 +10,8 @@ import re
 from collections import deque
 
 class ObsHistoryBuffer:
-    def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
+    # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
+    def __init__(self, obs_horizon=3, image_keys=("front_camera",), proprio_key="state"):
         self.obs_horizon = obs_horizon
         self.image_keys = image_keys
         self.proprio_key = proprio_key
@@ -43,19 +44,19 @@ class ObsHistoryBuffer:
             stacked_obs[key] = np.stack(frames, axis=0)
 
         if self.proprio_key is not None:
-            vecs = [o[self.proprio_key] for o in self.buffer]  # list of (23,)
-            stacked_obs[self.proprio_key] = np.stack(vecs, axis=0)  # (69,)
+            vecs = [o[self.proprio_key] for o in self.buffer]
+            stacked_obs[self.proprio_key] = np.stack(vecs, axis=0)
 
         return stacked_obs
     
 
 def get_frame_data(frame_path, robot_urdf_path):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
-    color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
+    # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
     color_image = cv2.imread(color_image_path) if os.path.exists(color_image_path) else None
-    color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
+    # color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
@@ -81,13 +82,13 @@ def get_frame_data(frame_path, robot_urdf_path):
     ])
 
     resized_image = cv2.resize(color_image, (320,240))
-    resized_image2 = cv2.resize(color_image2, (320,240))
+    # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
-    side_camera_image = resized_image2[..., ::-1]
+    # side_camera_image = resized_image2[..., ::-1]
 
     obs = {
         "front_camera": front_camera_image,
-        "side_camera": side_camera_image,
+        # "side_camera": side_camera_image,
         "state": state_flattened
     }
     # print("state_flattened = ", state_flattened)

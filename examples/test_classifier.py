@@ -17,7 +17,8 @@ flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment correspo
 flags.DEFINE_integer("num_epochs", 150, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
-classifier_keys = ["front_camera", "side_camera"]
+classifier_keys = ["front_camera"]
+# classifier_keys = ["front_camera", "side_camera"]
 robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
 # observation_space = gym.spaces.Dict({
@@ -30,7 +31,7 @@ log_file = "classifier_log.txt"
 
 
 def main(_):
-    data = read_utils.read_data(robot_urdf_path, True)
+    data = read_utils.read_data(robot_urdf_path, False)
     success_count = 0
     record_success_count = 0
     success_as_fail = 0
@@ -53,7 +54,7 @@ def main(_):
         sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
         # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
         # added check for z position to further robustify classifier, but should work without as well
-        return int(sigmoid(classifier(obs)).item() > 0.45)
+        return int(sigmoid(classifier(obs)).item() > 0.85)
     
     
     history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)

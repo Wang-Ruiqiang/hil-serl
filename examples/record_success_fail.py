@@ -52,7 +52,7 @@ def main(_):
     failure_file = os.path.join(file_dir_name, f"failure_images_{uuid}.pkl")
     batch_size = 500
     
-    actions = np.zeros(env.action_space.sample().shape) 
+    actions = np.zeros(env.action_space.sample().shape)
     data_dir = FLAGS.data_dir
 
     for collect_data_dir in sorted(os.listdir(data_dir)):

@@ -23,15 +23,15 @@ class EnvConfig(DefaultEnvConfig):
             "dim": (1280, 720),
             "exposure": 40000,
         },
-        "side_camera": {
-            "serial_number": "127122270350",
-            "dim": (1280, 720),
-            "exposure": 40000,
-        },
+        # "side_camera": {
+        #     "serial_number": "127122270350",
+        #     "dim": (1280, 720),
+        #     "exposure": 40000,
+        # },
     }
     IMAGE_CROP = {
         "front_camera": lambda img: img[150:450, 350:1100],
-        "side_camera": lambda img: img[100:500, 400:900],
+        # "side_camera": lambda img: img[100:500, 400:900],
     }
     TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     GRASP_POSE = np.array([0.5857508505445138,-0.22036261105675414,0.2731021902359492, np.pi, 0, 0])
@@ -88,8 +88,10 @@ class EnvConfig(DefaultEnvConfig):
 
 
 class TrainConfig(DefaultTrainingConfig):
-    image_keys = ["front_camera", "side_camera"]
-    classifier_keys = ["front_camera", "side_camera"]
+    # image_keys = ["front_camera", "side_camera"]
+    image_keys = ["front_camera"]
+    # classifier_keys = ["front_camera", "side_camera"]
+    classifier_keys = ["front_camera"]
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     buffer_period = 1000
