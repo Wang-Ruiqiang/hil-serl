@@ -17,8 +17,8 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/classifier_data", "classifier data dir")
-# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/test_data", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/classifier_data", "classifier data dir")
+# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 is_first_run = True
@@ -75,6 +75,8 @@ def main(_):
         
             print("start_frame = ", start_frame)
             print("end_frame = ", end_frame)
+            history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
+            history_next_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
             for i in list(range(start_frame, end_frame+1)):
             # for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
@@ -84,6 +86,15 @@ def main(_):
 
                 obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
+
+                # if i == start_frame:
+                #     history_obs.reset(obs)
+                #     history_next_obs.reset(next_obs)
+                # else:
+                #     history_obs.append(obs)
+                #     history_next_obs.append(next_obs)
+                # stacked_obs = history_obs.get_success_fail_obs()
+                # stacked_next_obs = history_next_obs.get_success_fail_obs()
 
                 transition = copy.deepcopy(
                     dict(

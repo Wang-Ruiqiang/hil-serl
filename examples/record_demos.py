@@ -24,8 +24,8 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
-flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/demo_data", "demo data dir")
-# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/test_data", "demo data dir")
+flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/demo_data", "demo data dir")
+# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 # camera_keys = ["front_camera", "side_camera"]
@@ -48,7 +48,7 @@ def comupute_reward(obs, classifier):
 
     # 使用索引提取标量值
     classifier_score = classifier_output[0]
-    return int(classifier_score > 0.4)
+    return int(classifier_score > 0.45)
 
 def main(_):
 
@@ -79,6 +79,7 @@ def main(_):
     
     actions = np.zeros(action_space.sample().shape) 
     data_dir = FLAGS.data_dir
+    # print("env.observation_space.sample().shape = ", env.observation_space.sample()["front_camera"].shape)
 
     classifier = load_classifier_func(
         key=jax.random.PRNGKey(0),
@@ -101,6 +102,9 @@ def main(_):
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
 
+        
+        history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
+        history_next_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
         for clip in clip_marks:
             start_frame = int(clip['start'].split('_')[-1])
             end_frame = int(clip['end'].split('_')[-1])
@@ -109,6 +113,7 @@ def main(_):
             # clip_length = end_frame - start_frame + 1 # include frame 0
 
             # for i in range(50):
+            
             for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
@@ -117,16 +122,29 @@ def main(_):
 
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
+
+
+                if i == start_frame:
+                    history_obs.reset(obs)
+                    history_next_obs.reset(next_obs)
+                else:
+                    history_obs.append(obs)
+                    history_next_obs.append(next_obs)
+                stacked_obs = history_obs.get_success_fail_obs()
+                stacked_next_obs = history_next_obs.get_success_fail_obs()
+                # print("stacked_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
+                # print("stacked_next_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 reward = comupute_reward(obs, classifier)
+
                 done = reward or terminate
-                actions[:3] = obs["state"][:3]  # xyz坐标
-                actions[3:7] = obs["state"][3:7]  # 四元数姿态
-                actions[7:] = obs["state"][7:]  # 四元数姿态
+                actions[:3] = next_obs["state"][:3]  # xyz坐标
+                actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
+                actions[7:] = next_obs["state"][7:]  # 四元数姿态
 
                 transition = copy.deepcopy(
                     dict(
-                        observations=obs,
-                        next_observations=next_obs,
+                        observations=stacked_obs,
+                        next_observations=stacked_next_obs,
                         actions=actions,
                         rewards=reward,
                         masks=1.0 - done,

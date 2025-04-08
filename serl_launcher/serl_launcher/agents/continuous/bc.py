@@ -130,9 +130,10 @@ class BCAgent(flax.struct.PyTreeNode):
             actions = dist.mode()
         else:
             actions = dist.sample(seed=seed)
-        # print("actions = ", actions)
         action_mean = jnp.array(self.config["action_mean"])
         action_std = jnp.array(self.config["action_std"])
+        jax.debug.print("action_mean = {}", action_mean)
+        jax.debug.print("action_std = {}", action_std)
         actions = actions.at[..., :3].set(actions[..., :3] * action_std + action_mean)
         return actions
 

@@ -7,6 +7,47 @@ import numpy as np
 import gymnasium as gym
 from examples.utils import kinematics_utils
 import re
+from collections import deque
+
+class ObsHistoryBuffer:
+    def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
+        self.obs_horizon = obs_horizon
+        self.image_keys = image_keys
+        self.proprio_key = proprio_key
+        self.buffer = deque(maxlen=obs_horizon)
+
+    def reset(self, first_obs):
+        self.buffer.clear()
+        for _ in range(self.obs_horizon):
+            self.buffer.append(copy.deepcopy(first_obs))
+
+    def append(self, obs):
+        self.buffer.append(copy.deepcopy(obs))
+
+    def get_stacked_obs(self):
+        stacked_obs = {}
+        for key in self.image_keys:
+            frames = [o[key] for o in self.buffer]  # list of (H, W, 3)
+            stacked_obs[key] = np.concatenate(frames, axis=-1)  # (H, W, 9)
+
+        if self.proprio_key is not None:
+            vecs = [o[self.proprio_key] for o in self.buffer]  # list of (23,)
+            stacked_obs[self.proprio_key] = np.concatenate(vecs, axis=-1)  # (69,)
+
+        return stacked_obs
+    
+    def get_success_fail_obs(self):
+        stacked_obs = {}
+        for key in self.image_keys:
+            frames = [o[key] for o in self.buffer]  # list of (H, W, 3)
+            stacked_obs[key] = np.stack(frames, axis=0)
+
+        if self.proprio_key is not None:
+            vecs = [o[self.proprio_key] for o in self.buffer]  # list of (23,)
+            stacked_obs[self.proprio_key] = np.stack(vecs, axis=0)  # (69,)
+
+        return stacked_obs
+    
 
 def get_frame_data(frame_path, robot_urdf_path):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
@@ -27,8 +68,8 @@ def get_frame_data(frame_path, robot_urdf_path):
         with open(joint_file_path, "r") as f:
             all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
             # Change the order of robot arm joint data
-            wrist_joint_index = [2,0,1,3,4,5]
-            all_joint_values[:6] = all_joint_values[wrist_joint_index]
+            # wrist_joint_index = [2,0,1,3,4,5]
+            # all_joint_values[:6] = all_joint_values[wrist_joint_index]
 
             hand_joint = all_joint_values[6:]
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
@@ -66,9 +107,9 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
     # )
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
-        data_dir = "/home/qiangqiang/workspaces/data/test_data"
+        data_dir = "/home/qiangqiang/workspaces/data/2025-4-3/test_data"
     else:
-        data_dir = "/home/qiangqiang/workspaces/data/demo_data"
+        data_dir = "/home/qiangqiang/workspaces/data/2025-4-3/demo_data"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):

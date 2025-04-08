@@ -180,12 +180,15 @@ def main(_):
                     except EOFError:
                         break  # 读取结束
                 for transition in transitions:
+                    # print("state shape = ", transition["observations"]["state"].shape)
+                    # print("front camera shape = ", transition["observations"]["front_camera"].shape)
+                    # print("side camera shape = ", transition["observations"]["side_camera"].shape)
+                    # print("transition = ", transition)
                     bc_replay_buffer.insert(transition)
                     # print("transition keys = ", transition.keys())
                     # print("transition[observation]state = ", transition["observations"]["state"][:3])
                     # print("transition[actions] = ", transition["actions"][:3])
                     all_actions.append(transition["actions"])
-                    # input("debug")
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
 
 
@@ -206,7 +209,11 @@ def main(_):
         action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
         print("action_mean = ", action_mean)
         print("action_std = ", action_std)
+        print("env.observation_space.sample() side camera shape = ", env.observation_space.sample()["side_camera"].shape)
+        print("env.observation_space.sample() front camera shape = ", env.observation_space.sample()["front_camera"].shape)
+        print("env.observation_space.sample() state shape = ", env.observation_space.sample()["state"].shape)
 
+        input("debug")
         bc_agent: BCAgent = make_bc_agent(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),
