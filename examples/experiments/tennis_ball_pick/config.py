@@ -92,8 +92,8 @@ class TrainConfig(DefaultTrainingConfig):
     image_keys = ["front_camera"]
     # classifier_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera"]
-    proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
-    # proprio_keys = ["tcp_pos", "tcp_ori"]
+    # proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
+    proprio_keys = ["tcp_pos", "tcp_ori"]
     buffer_period = 1000
     checkpoint_period = 1000 
     steps_per_update = 50
@@ -112,7 +112,7 @@ class TrainConfig(DefaultTrainingConfig):
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
-        env = ChunkingWrapper(env, obs_horizon=3, act_exec_horizon=None)
+        env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),

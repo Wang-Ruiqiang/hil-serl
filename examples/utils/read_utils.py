@@ -78,7 +78,7 @@ def get_frame_data(frame_path, robot_urdf_path):
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
         np.array(tcp_ori, dtype=np.float32).flatten(),
-        np.array(hand_joint, dtype=np.float32).flatten()
+        # np.array(hand_joint, dtype=np.float32).flatten()
     ])
 
     resized_image = cv2.resize(color_image, (320,240))
@@ -98,14 +98,16 @@ def get_frame_data(frame_path, robot_urdf_path):
 
 def read_data(robot_urdf_path, is_evaluate_classifier=False):
     data = []
-    action_space = gym.spaces.Box(
-        np.ones((23,), dtype=np.float32) * -1,
-        np.ones((23,), dtype=np.float32),
-    )
+    clip_ranges = []
+    global_idx = 0
     # action_space = gym.spaces.Box(
-    #     np.ones((7,), dtype=np.float32) * -1,
-    #     np.ones((7,), dtype=np.float32),
+    #     np.ones((23,), dtype=np.float32) * -1,
+    #     np.ones((23,), dtype=np.float32),
     # )
+    action_space = gym.spaces.Box(
+        np.ones((7,), dtype=np.float32) * -1,
+        np.ones((7,), dtype=np.float32),
+    )
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
         data_dir = "/home/qiangqiang/workspaces/data/2025-4-3/test_data"
@@ -123,12 +125,13 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
         )
         clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         with open(clip_marks_json, 'r') as f:
-                    clip_marks = json.load(f)
+            clip_marks = json.load(f)
 
 
         for clip in clip_marks:
             start_frame = int(clip['start'].split('_')[-1])
             end_frame = int(clip['end'].split('_')[-1])
+            clip_start_idx = global_idx
             
             for i in list(range(start_frame, end_frame+1)):
             # for i in range(len(frame_dirs) - 1):
@@ -136,6 +139,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
+
 
                 obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
                 next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
@@ -152,5 +156,8 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
                     )
                 )
                 data.append(transition)
+                global_idx += 1
+            clip_end_idx = global_idx - 1  # ✅ 当前 clip 的终点索引
+            clip_ranges.append((clip_start_idx, clip_end_idx))
 
-    return data
+    return data, clip_ranges

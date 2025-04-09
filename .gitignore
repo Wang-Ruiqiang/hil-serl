@@ -1,4 +1,4 @@
-examples/classifier_data/*
+examples/classifier_data*/*
 examples/demo_data/*
 examples/demo_data copy/*
 examples/test_data/*

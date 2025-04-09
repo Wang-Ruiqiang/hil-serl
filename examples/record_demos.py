@@ -62,15 +62,15 @@ def main(_):
     trajectory = []
     returns = 0
 
-    action_space = gym.spaces.Box(
-            np.ones((23,), dtype=np.float32) * -1,
-            np.ones((23,), dtype=np.float32),
-        )
-    
     # action_space = gym.spaces.Box(
-    #         np.ones((7,), dtype=np.float32) * -1,
-    #         np.ones((7,), dtype=np.float32),
+    #         np.ones((23,), dtype=np.float32) * -1,
+    #         np.ones((23,), dtype=np.float32),
     #     )
+    
+    action_space = gym.spaces.Box(
+            np.ones((7,), dtype=np.float32) * -1,
+            np.ones((7,), dtype=np.float32),
+        )
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -138,12 +138,12 @@ def main(_):
                 done = reward or terminate
                 actions[:3] = next_obs["state"][:3]  # xyz坐标
                 actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
-                actions[7:] = next_obs["state"][7:]  # 四元数姿态
+                # actions[7:] = next_obs["state"][7:]  # 四元数姿态
 
                 transition = copy.deepcopy(
                     dict(
-                        observations=stacked_obs,
-                        next_observations=stacked_next_obs,
+                        observations=obs,
+                        next_observations=next_obs,
                         actions=actions,
                         rewards=reward,
                         masks=1.0 - done,

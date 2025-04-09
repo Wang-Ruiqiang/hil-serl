@@ -185,8 +185,8 @@ def main(_):
                     # print("side camera shape = ", transition["observations"]["side_camera"].shape)
                     # print("transition = ", transition)
                     bc_replay_buffer.insert(transition)
-                    # print("transition keys = ", transition.keys())
-                    # print("transition[observation]state = ", transition["observations"]["state"][:3])
+                    # print("transition keys = ", transition["observations"].keys())
+                    # print("transition[observation]state = ", transition["observations"]["state"])
                     # print("transition[actions] = ", transition["actions"][:3])
                     all_actions.append(transition["actions"])
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
@@ -200,15 +200,19 @@ def main(_):
             },
             device=sharding.replicate(), 
         )
-        all_actions = []
-        for _ in range(len(bc_replay_buffer) // config.batch_size):
-            batch = next(bc_replay_iterator)
-            all_actions.append(batch["actions"])  # 应该已经是(batch_size, 7)
-        all_actions = np.concatenate(all_actions, axis=0)
+        # all_actions = []
+        # for _ in range(len(bc_replay_buffer) // config.batch_size):
+        #     batch = next(bc_replay_iterator)
+        #     all_actions.append(batch["actions"])  # 应该已经是(batch_size, 7)
+            
+        all_actions = np.array(all_actions)
         action_mean = np.mean(all_actions[:,:3], axis=0)
         action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
         print("action_mean = ", action_mean)
         print("action_std = ", action_std)
+        print("sample_obs=env.observation_space.sample() = ", env.observation_space.sample()["state"].shape)
+        print("env.action_space.sample(), = ", env.action_space.sample().shape)
+        input("debug")
         bc_agent: BCAgent = make_bc_agent(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),

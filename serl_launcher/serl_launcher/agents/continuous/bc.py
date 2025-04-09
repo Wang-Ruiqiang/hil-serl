@@ -55,43 +55,43 @@ class BCAgent(flax.struct.PyTreeNode):
                 name="actor",
             )
             pi_actions = dist.mode()
-            if self.config["tanh_squash_distribution"]:
-                batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
-            else:
-                normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
-                batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
+            # if self.config["tanh_squash_distribution"]:
+            #     batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
+            # else:
+            normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
+            batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
 
-            pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
-            batch_arm, batch_hand = batch_actions[:, :7], batch_actions[:, 7:]
+            # pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
 
-            arm_std = dist.scale_diag[:, :7]
-            hand_std = dist.scale_diag[:, 7:]
+            # arm_std = dist.scale_diag[:, :7]
+            # hand_std = dist.scale_diag[:, 7:]
 
-            arm_dist = distrax.MultivariateNormalDiag(pi_arm, arm_std)
-            hand_dist = distrax.MultivariateNormalDiag(pi_hand, hand_std)
+            # arm_dist = distrax.MultivariateNormalDiag(pi_arm, arm_std)
+            # hand_dist = distrax.MultivariateNormalDiag(pi_hand, hand_std)
 
-            arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
-            hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
+            # arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
+            # hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
 
-            arm_weight = 1.0
-            hand_weight = 0.5
-            weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
-            actor_loss = -(weighted_log_prob).mean()
-            mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-
-            return actor_loss, {
-                "actor_loss": actor_loss,
-                "mse": mse.mean(),
-            }
-
-            # log_probs = dist.log_prob(batch_actions)
+            # arm_weight = 1.0
+            # hand_weight = 0.5
+            # weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
+            # weighted_log_prob = arm_weight * arm_log_prob
+            # actor_loss = -(weighted_log_prob).mean()
             # mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-            # actor_loss = -(log_probs).mean()
 
             # return actor_loss, {
             #     "actor_loss": actor_loss,
             #     "mse": mse.mean(),
             # }
+
+            log_probs = dist.log_prob(batch_actions)
+            mse = ((pi_actions - batch_actions) ** 2).sum(-1)
+            actor_loss = -(log_probs).mean()
+
+            return actor_loss, {
+                "actor_loss": actor_loss,
+                "mse": mse.mean(),
+            }
 
         # compute gradients and update params
         new_state, info = self.state.apply_loss_fns(
@@ -132,8 +132,8 @@ class BCAgent(flax.struct.PyTreeNode):
             actions = dist.sample(seed=seed)
         action_mean = jnp.array(self.config["action_mean"])
         action_std = jnp.array(self.config["action_std"])
-        jax.debug.print("action_mean = {}", action_mean)
-        jax.debug.print("action_std = {}", action_std)
+        # jax.debug.print("action_mean = {}", action_mean)
+        # jax.debug.print("action_std = {}", action_std)
         actions = actions.at[..., :3].set(actions[..., :3] * action_std + action_mean)
         return actions
 
