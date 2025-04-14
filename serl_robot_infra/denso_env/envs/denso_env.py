@@ -144,8 +144,16 @@ class ROSNodeInterface(Node):
     def publish_arm_action(self, pose):
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = pose[:3]
-        msg.pose.orientation.w, msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z = pose[3:7]
+        x, y, z = map(float, pose[:3])
+        msg.pose.position.x = x
+        msg.pose.position.y = y
+        msg.pose.position.z = z
+        ori_w, ori_x, ori_y, ori_z = map(float, pose[3:7])
+        # msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = pose[:3]
+        msg.pose.orientation.w = ori_w
+        msg.pose.orientation.x = ori_x
+        msg.pose.orientation.y = ori_y
+        msg.pose.orientation.z = ori_z
         print("msg.pose = ", msg.pose)
         self.arm_pub.publish(msg)
 
