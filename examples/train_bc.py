@@ -23,6 +23,9 @@ from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
 from experiments.mappings import NEW_MAPPING
 from experiments.config import DefaultTrainingConfig
+from flax.traverse_util import flatten_dict
+
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
@@ -63,30 +66,50 @@ def eval(
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
-    success_counter = 0
-    time_list = []
-    for episode in range(FLAGS.eval_n_trajs):
-        obs, _ = env.reset()
-        done = False
-        start_time = time.time()
-        while not done:
-            rng, key = jax.random.split(sampling_rng)
+    def print_params_shape(params, prefix=''):
+        for key, val in params.items():
+            if isinstance(val, dict) or isinstance(val, flax.core.FrozenDict):
+                print_params_shape(val, prefix + key + '/')
+            else:
+                print(f"{prefix}{key}: {val.shape}")
 
-            actions = bc_agent.sample_actions(observations=obs, seed=key)
-            actions = np.asarray(jax.device_get(actions))
-            next_obs, reward, done, truncated, info = env.step(actions)
-            obs = next_obs
-            if done:
-                if reward:
-                    dt = time.time() - start_time
-                    time_list.append(dt)
-                    print(dt)
-                success_counter += reward
-                print(reward)
-                print(f"{success_counter}/{episode + 1}")
+    def print_param_keys(params):
+        flat = flatten_dict(params)
+        for k in flat:
+            print("/".join(k), ":", flat[k].shape)
 
-    print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
-    print(f"average time: {np.mean(time_list)}")
+
+    print("==== BC Agent Params ====")
+    print_param_keys(bc_agent.state.params)
+
+    # bc_actor_params = bc_agent.state.params["actor"]
+    # print_params_shape(bc_actor_params)
+    input("debug")
+
+    # success_counter = 0
+    # time_list = []
+    # for episode in range(FLAGS.eval_n_trajs):
+    #     obs, _ = env.reset()
+    #     done = False
+    #     start_time = time.time()
+    #     while not done:
+    #         rng, key = jax.random.split(sampling_rng)
+
+    #         actions = bc_agent.sample_actions(observations=obs, seed=key)
+    #         actions = np.asarray(jax.device_get(actions))
+    #         next_obs, reward, done, truncated, info = env.step(actions)
+    #         obs = next_obs
+    #         if done:
+    #             if reward:
+    #                 dt = time.time() - start_time
+    #                 time_list.append(dt)
+    #                 print(dt)
+    #             success_counter += reward
+    #             print(reward)
+    #             print(f"{success_counter}/{episode + 1}")
+
+    # print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
+    # print(f"average time: {np.mean(time_list)}")
 
 
 ##############################################################################
@@ -191,28 +214,13 @@ def main(_):
                     all_actions.append(transition["actions"])
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
 
-
-
-        bc_replay_iterator = bc_replay_buffer.get_iterator(
-            sample_args={
-                "batch_size": config.batch_size,
-                "pack_obs_and_next_obs": False,
-            },
-            device=sharding.replicate(), 
-        )
-        # all_actions = []
-        # for _ in range(len(bc_replay_buffer) // config.batch_size):
-        #     batch = next(bc_replay_iterator)
-        #     all_actions.append(batch["actions"])  # 应该已经是(batch_size, 7)
-            
         all_actions = np.array(all_actions)
         action_mean = np.mean(all_actions[:,:3], axis=0)
         action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
         print("action_mean = ", action_mean)
         print("action_std = ", action_std)
-        print("sample_obs=env.observation_space.sample() = ", env.observation_space.sample()["state"].shape)
-        print("env.action_space.sample(), = ", env.action_space.sample().shape)
-        input("debug")
+        # print("sample_obs=env.observation_space.sample() = ", env.observation_space.sample()["state"].shape)
+        # print("env.action_space.sample(), = ", env.action_space.sample().shape)
         bc_agent: BCAgent = make_bc_agent(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),

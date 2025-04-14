@@ -23,7 +23,7 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
-flags.DEFINE_integer("batch_size", 128, "Batch size.")
+flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
 
 def main(_):

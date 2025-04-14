@@ -31,7 +31,7 @@ log_file = "classifier_log.txt"
 
 
 def main(_):
-    data = read_utils.read_data(robot_urdf_path, False)
+    data, _ = read_utils.read_data(robot_urdf_path, True)
     success_count = 0
     record_success_count = 0
     success_as_fail = 0
@@ -39,7 +39,7 @@ def main(_):
 
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=False, save_video=False, classifier=True)
+    env = config.get_environment(fake_env=False, save_video=False, classifier=False)
     terminate = False
     
     classifier = load_classifier_func(
@@ -54,7 +54,7 @@ def main(_):
         sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
         # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
         # added check for z position to further robustify classifier, but should work without as well
-        return int(sigmoid(classifier(obs)).item() > 0.85)
+        return int(sigmoid(classifier(obs)).item() > 0.65)
     
     
     history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)

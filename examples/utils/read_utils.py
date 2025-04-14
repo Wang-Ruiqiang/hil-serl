@@ -78,7 +78,7 @@ def get_frame_data(frame_path, robot_urdf_path):
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
         np.array(tcp_ori, dtype=np.float32).flatten(),
-        # np.array(hand_joint, dtype=np.float32).flatten()
+        np.array(hand_joint, dtype=np.float32).flatten()
     ])
 
     resized_image = cv2.resize(color_image, (320,240))
@@ -94,20 +94,20 @@ def get_frame_data(frame_path, robot_urdf_path):
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)
     # input("enter")
-    return obs, is_record_success
+    return obs, int(is_record_success)
 
 def read_data(robot_urdf_path, is_evaluate_classifier=False):
     data = []
     clip_ranges = []
     global_idx = 0
-    # action_space = gym.spaces.Box(
-    #     np.ones((23,), dtype=np.float32) * -1,
-    #     np.ones((23,), dtype=np.float32),
-    # )
     action_space = gym.spaces.Box(
-        np.ones((7,), dtype=np.float32) * -1,
-        np.ones((7,), dtype=np.float32),
+        np.ones((23,), dtype=np.float32) * -1,
+        np.ones((23,), dtype=np.float32),
     )
+    # action_space = gym.spaces.Box(
+    #     np.ones((7,), dtype=np.float32) * -1,
+    #     np.ones((7,), dtype=np.float32),
+    # )
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
         data_dir = "/home/qiangqiang/workspaces/data/2025-4-3/test_data"
@@ -157,7 +157,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
                 )
                 data.append(transition)
                 global_idx += 1
-            clip_end_idx = global_idx - 1  # ✅ 当前 clip 的终点索引
+            clip_end_idx = global_idx - 1 
             clip_ranges.append((clip_start_idx, clip_end_idx))
 
     return data, clip_ranges

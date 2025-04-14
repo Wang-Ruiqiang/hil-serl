@@ -129,15 +129,15 @@ class DensoEnv(gym.Env):
             dtype=np.float64,
         )
         # Action/Observation Space
-        # self.action_space = gym.spaces.Box(
-        #     np.ones((23,), dtype=np.float32) * -1,
-        #     np.ones((23,), dtype=np.float32),
-        # )
-
         self.action_space = gym.spaces.Box(
-            np.ones((7,), dtype=np.float32) * -1,
-            np.ones((7,), dtype=np.float32),
+            np.ones((23,), dtype=np.float32) * -1,
+            np.ones((23,), dtype=np.float32),
         )
+
+        # self.action_space = gym.spaces.Box(
+        #     np.ones((7,), dtype=np.float32) * -1,
+        #     np.ones((7,), dtype=np.float32),
+        # )
         self.observation_space = gym.spaces.Dict(
             {
                 "state": gym.spaces.Dict(
@@ -148,7 +148,7 @@ class DensoEnv(gym.Env):
                         "tcp_ori": gym.spaces.Box(
                             -np.inf, np.inf, shape=(4,)
                         ),
-                        # "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
+                        "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
                     }
                 ),
                 "images": gym.spaces.Dict(
