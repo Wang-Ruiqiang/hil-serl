@@ -17,11 +17,11 @@ palm_lower2denso_end_tf = np.array([
 
 def get_frame_data(frame_path, robot_urdf_path):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
-    color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
+    # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
     color_image = cv2.imread(color_image_path) if os.path.exists(color_image_path) else None
-    color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
+    # color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
@@ -52,13 +52,13 @@ def get_frame_data(frame_path, robot_urdf_path):
     ])
 
     resized_image = cv2.resize(color_image, (320,240))
-    resized_image2 = cv2.resize(color_image2, (320,240))
+    # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
-    side_camera_image = resized_image2[..., ::-1]
+    # side_camera_image = resized_image2[..., ::-1]
 
     obs = {
         "front_camera": front_camera_image,
-        "side_camera": side_camera_image,
+        # "side_camera": side_camera_image,
         "state": state_flattened
     }
     # print("state_flattened = ", state_flattened)
