@@ -510,12 +510,6 @@ class DensoEnv(gym.Env):
         """Internal function to recover the robot from error state."""
         requests.post(self.url + "clearerr")
 
-    def _send_pos_command(self, pos: np.ndarray):
-        """Internal function to send position command to the robot."""
-        self._recover()
-        arr = np.array(pos).astype(np.float32)
-        data = {"arr": arr.tolist()}
-        requests.post(self.url + "pose", json=data)
 
     def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
         """Internal function to send leap hand command to the robot."""
@@ -609,10 +603,6 @@ class DensoEnv(gym.Env):
             cv2.destroyAllWindows()
             self.displayer.join()
 
-
-    # def spin_ros(self):
-    #     rclpy.spin_once(self.node, timeout_sec=0.1)  # 每次只 spin 一次，这样可以在任务中间运行 ROS
-    #     time.sleep(1)
 
     def set_data_count(self, data_count):
         self.data_count = data_count + 1

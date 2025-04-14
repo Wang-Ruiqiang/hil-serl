@@ -92,9 +92,12 @@ def eval(
         rng, key = jax.random.split(sampling_rng)
         actions = bc_agent.sample_actions(observations=obs, seed=key)
         actions = np.asarray(jax.device_get(actions))
+        print("state obs = ", obs["state"])
         
         obs = data[data_count]["observations"]
+        print("obs state = ", obs["state"][:3])
         # print("obs state = ", obs[data_count]["observations"]["state"])
+        input("debug")
         sampling_rng, key = jax.random.split(sampling_rng)
         # actions_read = data[data_count]["actions"]
 
