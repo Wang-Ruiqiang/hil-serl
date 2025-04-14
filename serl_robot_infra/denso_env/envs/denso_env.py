@@ -364,8 +364,8 @@ class DensoEnv(gym.Env):
         # 后16维为灵巧手关节角
         leap_hand_action = action[7:]
         self._send_leap_hand_command(leap_hand_action)
-        leap_hand_action[3] = leap_hand_action[3]-3.14
-        leap_hand_action[7] = leap_hand_action[7]-1.57
+        # leap_hand_action[3] = leap_hand_action[3]-3.14
+        # leap_hand_action[7] = leap_hand_action[7]-1.57
         
         # self._send_leap_hand_command(self.curr_leap_hand_pos + 0.1)
 

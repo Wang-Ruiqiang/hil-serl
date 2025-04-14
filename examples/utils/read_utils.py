@@ -36,8 +36,8 @@ def get_frame_data(frame_path, robot_urdf_path):
             # Change the order of robot arm joint data
 
             # print("all_joint_values ori = ", all_joint_values)
-            wrist_joint_index = [2,0,1,3,4,5]
-            all_joint_values[:6] = all_joint_values[wrist_joint_index]
+            # wrist_joint_index = [2,0,1,3,4,5]
+            # all_joint_values[:6] = all_joint_values[wrist_joint_index]
 
             hand_joint = all_joint_values[6:]
             # print("all_joint_values = ", all_joint_values)
