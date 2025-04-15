@@ -34,7 +34,7 @@ def comupute_forward_kinematics(joint_poistions, robot_urdf_path):
 
     quaternion = oMe.rotation.T  # Rotation matrix
     quaternion = pin.Quaternion(quaternion)
-    return xyz, [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
+    return xyz, [quaternion.w, quaternion.x, quaternion.y, quaternion.z]
 
 
 # for converting plam lower pose to denso end link ( a predefined tf)
