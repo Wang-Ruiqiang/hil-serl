@@ -210,6 +210,7 @@ def main(_):
                     bc_replay_buffer.insert(transition)
                     # print("transition keys = ", transition["observations"].keys())
                     # print("transition[observation]state = ", transition["observations"]["state"])
+                    # input("debug")
                     # print("transition[actions] = ", transition["actions"][:3])
                     all_actions.append(transition["actions"])
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")

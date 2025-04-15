@@ -88,6 +88,7 @@ def main(_):
         checkpoint_path=os.path.abspath("classifier_ckpt/"),
     )
 
+    tcp_ori_list = []
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
@@ -121,6 +122,8 @@ def main(_):
                     continue
 
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+                tcp_ori = obs["state"][3:7]  # 四元数部分
+                tcp_ori_list.append(tcp_ori)
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
 
                 if i == start_frame:
@@ -168,10 +171,18 @@ def main(_):
                         save_batch_to_pickle(transitions, file_name)
                         transitions = []
 
-
     if transitions:
         save_batch_to_pickle(transitions, file_name)
     print("record_finished")
+
+    tcp_ori_array = np.stack(tcp_ori_list, axis=0)
+
+    # 分别提取每一维并打印 min/max
+    component_names = ["w", "x", "y", "z"]
+    for i in range(4):
+        min_val = np.min(tcp_ori_array[:, i])
+        max_val = np.max(tcp_ori_array[:, i])
+        print(f"tcp_ori {component_names[i]}: min = {min_val:.6f}, max = {max_val:.6f}")
 
 if __name__ == "__main__":
     app.run(main)
