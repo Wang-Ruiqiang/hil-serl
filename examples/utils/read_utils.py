@@ -9,6 +9,13 @@ from examples.utils import kinematics_utils
 import re
 from collections import deque
 
+palm_lower2denso_end_tf = np.array([
+    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
+    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
+    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
+    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
+])
+
 class ObsHistoryBuffer:
     # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
     def __init__(self, obs_horizon=3, image_keys=("front_camera",), proprio_key="state"):
@@ -74,6 +81,9 @@ def get_frame_data(frame_path, robot_urdf_path):
 
             hand_joint = all_joint_values[6:]
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
+
+    #convert to end link
+    tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
 
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),

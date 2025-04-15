@@ -1,4 +1,6 @@
 import pinocchio as pin
+from transforms3d.quaternions import mat2quat, quat2mat
+import numpy as np
 
 def comupute_forward_kinematics(joint_poistions, robot_urdf_path):
     robot_model = pin.buildModelFromUrdf(robot_urdf_path)
@@ -32,4 +34,27 @@ def comupute_forward_kinematics(joint_poistions, robot_urdf_path):
 
     quaternion = oMe.rotation.T  # Rotation matrix
     quaternion = pin.Quaternion(quaternion)
-    return xyz, [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
+    return xyz, [quaternion.w, quaternion.x, quaternion.y, quaternion.z]
+
+
+def apply_transformation(position, orientation, transformation_matrix):
+    """Apply a 4x4 transformation matrix to a position and orientation."""
+    # Construct a 4x4 transformation matrix for the input position and orientation
+    rotation_matrix = quat2mat(orientation)  # Convert quaternion to rotation matrix
+    input_transformation_matrix = np.eye(4)
+    input_transformation_matrix[:3, :3] = rotation_matrix
+    input_transformation_matrix[:3, 3] = position
+
+    # Apply the transformation using the @ operator
+    result_transformation_matrix = input_transformation_matrix @ transformation_matrix
+
+    # Extract the transformed position
+    transformed_position = result_transformation_matrix[:3, 3]
+
+    # Extract the transformed rotation matrix and convert back to quaternion
+    transformed_rotation_matrix = result_transformation_matrix[:3, :3]
+    transformed_orientation = mat2quat(transformed_rotation_matrix)
+
+    # print("iput pose: ", position, orientation)
+    # print("output pose: ", transformed_position, transformed_orientation)
+    return transformed_position, transformed_orientation
