@@ -91,14 +91,15 @@ def eval(
     while not done:
         rng, key = jax.random.split(sampling_rng)
 
+        print("obs state = ", obs["state"])
         # obs = data[data_count]["observations"]
         
         actions = bc_agent.sample_actions(observations=obs, seed=key)
         actions = np.asarray(jax.device_get(actions))
         
-        # print("obs state = ", obs[data_count]["observations"]["state"])
+        print("obs_read state = ", data[data_count]["observations"]["state"])
         sampling_rng, key = jax.random.split(sampling_rng)
-        # actions_read = data[data_count]["actions"]
+        actions_read = data[data_count]["actions"]
 
         next_obs, reward, done, truncated, info = env.step(actions)
         obs = next_obs

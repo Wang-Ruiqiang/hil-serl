@@ -135,7 +135,7 @@ class ROSNodeInterface(Node):
         # 从 msg 中提取四元数方向数据（xyzw）
         orientation = msg.pose.orientation
         self.cur_oritation = np.array([
-            orientation.x, orientation.y, orientation.z, orientation.w
+            orientation.w, orientation.x, orientation.y, orientation.z
         ])
 
         # 设置事件为已收到数据
