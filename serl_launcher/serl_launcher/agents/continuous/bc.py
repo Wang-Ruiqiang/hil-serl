@@ -9,6 +9,7 @@ import numpy as np
 import optax
 from flax.core import FrozenDict
 import distrax 
+from jax import debug
 
 from serl_launcher.common.common import JaxRLTrainState, ModuleDict, nonpytree_field
 from serl_launcher.common.encoding import EncodingWrapper
@@ -73,8 +74,8 @@ class BCAgent(flax.struct.PyTreeNode):
             arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
             hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
 
-            arm_weight = 1.0
-            hand_weight = 0.5
+            arm_weight = 0.7
+            hand_weight = 0.3
             weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
             actor_loss = -(weighted_log_prob).mean()
             mse = ((pi_actions - batch_actions) ** 2).sum(-1)
@@ -130,9 +131,9 @@ class BCAgent(flax.struct.PyTreeNode):
             actions = dist.mode()
         else:
             actions = dist.sample(seed=seed)
-        # print("actions = ", actions)
         action_mean = jnp.array(self.config["action_mean"])
         action_std = jnp.array(self.config["action_std"])
+        debug.print("actions (before rescale): {}", actions)
         actions = actions.at[..., :3].set(actions[..., :3] * action_std + action_mean)
         return actions
 

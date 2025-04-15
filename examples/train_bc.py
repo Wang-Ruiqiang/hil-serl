@@ -36,6 +36,7 @@ from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from experiments.mappings import NEW_MAPPING
 from experiments.config import DefaultTrainingConfig
 from examples.utils import read_utils
+from examples.utils import kinematics_utils
 
 
 FLAGS = flags.FLAGS
@@ -59,6 +60,13 @@ flags.DEFINE_boolean(
 devices = jax.local_devices()
 num_devices = len(devices)
 sharding = jax.sharding.PositionalSharding(devices)
+
+palm_lower2denso_end_tf = np.array([
+    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
+    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
+    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
+    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
+])
 
 
 def print_green(x):
@@ -96,6 +104,12 @@ def eval(
         
         actions = bc_agent.sample_actions(observations=obs, seed=key)
         actions = np.asarray(jax.device_get(actions))
+        actions = np.array(actions, copy=True)
+        
+        ori_index = [3, 0, 1, 2]
+        tcp_ori = actions[3:7]
+        actions[3:7] = tcp_ori[ori_index]
+        actions[:3], actions[3:7] = kinematics_utils.apply_transformation(actions[:3], actions[3:7], palm_lower2denso_end_tf)
         
         print("obs_read state = ", data[data_count]["observations"]["state"])
         sampling_rng, key = jax.random.split(sampling_rng)
@@ -176,6 +190,9 @@ def main(_):
         classifier=True,
     )
     env = RecordEpisodeStatistics(env)
+
+    action_mean = [ 0.65431754, -0.19202452, 0.11915473]
+    action_std =  [0.09939767, 0.20337829, 0.08846061 ]
 
     if not eval_mode:
         assert not os.path.isdir(
@@ -270,6 +287,8 @@ def main(_):
             sample_action=env.action_space.sample(),
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
+            action_mean=action_mean,
+            action_std=action_std
         )
 
         # replicate agent across devices
