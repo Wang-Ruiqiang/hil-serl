@@ -6,6 +6,55 @@ import numpy as np
 import gymnasium as gym
 from examples.utils import kinematics_utils
 import re
+from collections import deque
+
+palm_lower2denso_end_tf = np.array([
+    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
+    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
+    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
+    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
+])
+
+class ObsHistoryBuffer:
+    # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
+    def __init__(self, obs_horizon=3, image_keys=("front_camera",), proprio_key="state"):
+        self.obs_horizon = obs_horizon
+        self.image_keys = image_keys
+        self.proprio_key = proprio_key
+        self.buffer = deque(maxlen=obs_horizon)
+
+    def reset(self, first_obs):
+        self.buffer.clear()
+        for _ in range(self.obs_horizon):
+            self.buffer.append(copy.deepcopy(first_obs))
+
+    def append(self, obs):
+        self.buffer.append(copy.deepcopy(obs))
+
+    def get_stacked_obs(self):
+        stacked_obs = {}
+        for key in self.image_keys:
+            frames = [o[key] for o in self.buffer]  # list of (H, W, 3)
+            stacked_obs[key] = np.concatenate(frames, axis=-1)  # (H, W, 9)
+
+        if self.proprio_key is not None:
+            vecs = [o[self.proprio_key] for o in self.buffer]  # list of (23,)
+            stacked_obs[self.proprio_key] = np.concatenate(vecs, axis=-1)  # (69,)
+
+        return stacked_obs
+    
+    def get_success_fail_obs(self):
+        stacked_obs = {}
+        for key in self.image_keys:
+            frames = [o[key] for o in self.buffer]  # list of (H, W, 3)
+            stacked_obs[key] = np.stack(frames, axis=0)
+
+        if self.proprio_key is not None:
+            vecs = [o[self.proprio_key] for o in self.buffer]
+            stacked_obs[self.proprio_key] = np.stack(vecs, axis=0)
+
+        return stacked_obs
+    
 
 
 palm_lower2denso_end_tf = np.array([
@@ -72,10 +121,12 @@ def get_frame_data(frame_path, robot_urdf_path):
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)
     # input("enter")
-    return obs, is_record_success
+    return obs, int(is_record_success)
 
 def read_data(robot_urdf_path, is_evaluate_classifier=False):
     data = []
+    clip_ranges = []
+    global_idx = 0
     action_space = gym.spaces.Box(
         np.ones((23,), dtype=np.float32) * -1,
         np.ones((23,), dtype=np.float32),
@@ -88,7 +139,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
     if is_evaluate_classifier:
         data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"
     else:
-        data_dir = "/home/qiangqiang/workspaces/data/demo_data"
+        data_dir = "/home/qiangqiang/workspaces/data/2025-4-3/demo_data"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
@@ -101,12 +152,13 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
         )
         clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         with open(clip_marks_json, 'r') as f:
-                    clip_marks = json.load(f)
+            clip_marks = json.load(f)
 
 
         for clip in clip_marks:
             start_frame = int(clip['start'].split('_')[-1])
             end_frame = int(clip['end'].split('_')[-1])
+            clip_start_idx = global_idx
             
             for i in list(range(start_frame, end_frame+1)):
             # for i in range(len(frame_dirs) - 1):
@@ -114,6 +166,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
+
 
                 obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
                 next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
@@ -135,5 +188,8 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
                     )
                 )
                 data.append(transition)
+                global_idx += 1
+            clip_end_idx = global_idx - 1 
+            clip_ranges.append((clip_start_idx, clip_end_idx))
 
-    return data
+    return data, clip_ranges

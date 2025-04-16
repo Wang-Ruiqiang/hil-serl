@@ -19,6 +19,7 @@ class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
         "front_camera": {
+<<<<<<< HEAD
             "serial_number": "242422303461",
             "dim": (640, 480),
             "exposure": 40000,
@@ -26,6 +27,15 @@ class EnvConfig(DefaultEnvConfig):
         # "side_camera": {
         #     "serial_number": "234222300515",
         #     "dim": (640, 480),
+=======
+            "serial_number": "127122270146",
+            "dim": (1280, 720),
+            "exposure": 40000,
+        },
+        # "side_camera": {
+        #     "serial_number": "127122270350",
+        #     "dim": (1280, 720),
+>>>>>>> ruiqiang-server
         #     "exposure": 40000,
         # },
     }
@@ -88,10 +98,17 @@ class EnvConfig(DefaultEnvConfig):
 
 
 class TrainConfig(DefaultTrainingConfig):
+<<<<<<< HEAD
     image_keys = ["front_camera"]
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera"]
     # classifier_keys = ["front_camera", "side_camera"]
+=======
+    # image_keys = ["front_camera", "side_camera"]
+    image_keys = ["front_camera"]
+    # classifier_keys = ["front_camera", "side_camera"]
+    classifier_keys = ["front_camera"]
+>>>>>>> ruiqiang-server
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     buffer_period = 1000
@@ -126,7 +143,7 @@ class TrainConfig(DefaultTrainingConfig):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
                 # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.5)
+                return int(sigmoid(classifier(obs)).item() > 0.65)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env

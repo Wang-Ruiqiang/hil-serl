@@ -24,7 +24,7 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
-flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/test_data", "demo data dir")
+flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 # camera_keys = ["front_camera", "side_camera"]

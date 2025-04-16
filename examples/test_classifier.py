@@ -17,28 +17,34 @@ flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment correspo
 flags.DEFINE_integer("num_epochs", 150, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
-classifier_keys = ["front_camera", "side_camera"]
+classifier_keys = ["front_camera"]
+# classifier_keys = ["front_camera", "side_camera"]
 robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
 
-observation_space = gym.spaces.Dict({
-    "front_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
-    "side_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
-    "state": gym.spaces.Box(-np.inf, np.inf, shape=(23,), dtype=np.float32)
-})
+# observation_space = gym.spaces.Dict({
+#     "front_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
+#     "side_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
+#     "state": gym.spaces.Box(-np.inf, np.inf, shape=(23,), dtype=np.float32)
+# })
 
 log_file = "classifier_log.txt"
 
 
 def main(_):
-    data = read_utils.read_data(robot_urdf_path, True)
+    data, _ = read_utils.read_data(robot_urdf_path, True)
     success_count = 0
     record_success_count = 0
     success_as_fail = 0
     fail_as_success = 0
+
+    assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
+    config = NEW_MAPPING[FLAGS.exp_name]()
+    env = config.get_environment(fake_env=False, save_video=False, classifier=False)
+    terminate = False
     
     classifier = load_classifier_func(
         key=jax.random.PRNGKey(0),
-        sample=observation_space.sample(),
+        sample=env.observation_space.sample(),
         image_keys=classifier_keys,
         checkpoint_path=os.path.abspath("classifier_ckpt/"),
     )
@@ -48,8 +54,11 @@ def main(_):
         sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
         # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
         # added check for z position to further robustify classifier, but should work without as well
-        return int(sigmoid(classifier(obs)).item() > 0.4)
+        return int(sigmoid(classifier(obs)).item() > 0.65)
     
+    
+    history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
+    is_first_time = True
     try:
         with open(log_file, "w") as f:
             for data_count in range(len(data)):
@@ -59,6 +68,12 @@ def main(_):
                 # log_msg = f"obs = {obs}\n"
                 # print(log_msg, end="")
                 # f.write(log_msg)
+                # if is_first_time:
+                #     history_obs.reset(obs)
+                #     is_first_time = False
+                # else:
+                #     history_obs.append(obs)
+                # stacked_obs = history_obs.get_stacked_obs()
 
                 reward = reward_func(obs)
                 if is_record_success:

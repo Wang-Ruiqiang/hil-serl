@@ -24,8 +24,8 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
-flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/demo_data", "demo data dir")
-# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/test_data", "demo data dir")
+flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/demo_data", "demo data dir")
+# flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
 
 # camera_keys = ["front_camera", "side_camera"]
@@ -48,7 +48,7 @@ def comupute_reward(obs, classifier):
 
     # 使用索引提取标量值
     classifier_score = classifier_output[0]
-    return int(classifier_score > 0.4)
+    return int(classifier_score > 0.45)
 
 def main(_):
 
@@ -79,6 +79,7 @@ def main(_):
     
     actions = np.zeros(action_space.sample().shape) 
     data_dir = FLAGS.data_dir
+    # print("env.observation_space.sample().shape = ", env.observation_space.sample()["front_camera"].shape)
 
     classifier = load_classifier_func(
         key=jax.random.PRNGKey(0),
@@ -87,6 +88,7 @@ def main(_):
         checkpoint_path=os.path.abspath("classifier_ckpt/"),
     )
 
+    tcp_ori_list = []
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):
@@ -101,6 +103,9 @@ def main(_):
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
 
+        
+        history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
+        history_next_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
         for clip in clip_marks:
             start_frame = int(clip['start'].split('_')[-1])
             end_frame = int(clip['end'].split('_')[-1])
@@ -109,6 +114,7 @@ def main(_):
             # clip_length = end_frame - start_frame + 1 # include frame 0
 
             # for i in range(50):
+            
             for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
@@ -116,8 +122,22 @@ def main(_):
                     continue
 
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+                tcp_ori = obs["state"][3:7]  # 四元数部分
+                tcp_ori_list.append(tcp_ori)
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
+
+                if i == start_frame:
+                    history_obs.reset(obs)
+                    history_next_obs.reset(next_obs)
+                else:
+                    history_obs.append(obs)
+                    history_next_obs.append(next_obs)
+                stacked_obs = history_obs.get_success_fail_obs()
+                stacked_next_obs = history_next_obs.get_success_fail_obs()
+                # print("stacked_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
+                # print("stacked_next_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 reward = comupute_reward(obs, classifier)
+
                 done = reward or terminate
                 actions[:3] = next_obs["state"][:3]  # xyz坐标
                 actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
@@ -151,10 +171,18 @@ def main(_):
                         save_batch_to_pickle(transitions, file_name)
                         transitions = []
 
-
     if transitions:
         save_batch_to_pickle(transitions, file_name)
     print("record_finished")
+
+    tcp_ori_array = np.stack(tcp_ori_list, axis=0)
+
+    # 分别提取每一维并打印 min/max
+    component_names = ["w", "x", "y", "z"]
+    for i in range(4):
+        min_val = np.min(tcp_ori_array[:, i])
+        max_val = np.max(tcp_ori_array[:, i])
+        print(f"tcp_ori {component_names[i]}: min = {min_val:.6f}, max = {max_val:.6f}")
 
 if __name__ == "__main__":
     app.run(main)

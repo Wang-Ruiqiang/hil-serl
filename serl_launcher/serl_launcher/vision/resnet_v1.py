@@ -225,8 +225,8 @@ class ResNetEncoder(nn.Module):
         channels = observations.shape[-1]  # 获得当前通道数，例如9
         assert channels % 3 == 0, "通道数应该为3的整数倍"
         num_frames  = channels // 3
-        # mean = jnp.array([0.485, 0.456, 0.406], repeat)
-        # std = jnp.array([0.229, 0.224, 0.225], repeat)
+        # mean = jnp.array([0.485, 0.456, 0.406])
+        # std = jnp.array([0.229, 0.224, 0.225])
         mean = jnp.tile(jnp.array([0.485, 0.456, 0.406]), num_frames)
         std = jnp.tile(jnp.array([0.229, 0.224, 0.225]), num_frames)
         x = (observations.astype(jnp.float32) / 255.0 - mean) / std

@@ -55,11 +55,8 @@ def main(_):
                         break
             
             for trans in success_data:
-                # if "images" in trans['observations'].keys():
-                #     continue
                 trans["labels"] = 1
-                # trans['actions'] = env.action_space.sample()
-
+                # print("trans keys= ",trans["observations"].keys())
                 pos_buffer.insert(trans)
             
     pos_iterator = pos_buffer.get_iterator(
@@ -86,11 +83,7 @@ def main(_):
                 except EOFError:  # 读取完毕
                     break
             for trans in failure_data:
-                # if "images" in trans['observations'].keys():
-                #     continue
                 trans["labels"] = 0
-                # trans['actions'] = env.action_space.sample()
-
                 neg_buffer.insert(trans)
             
     neg_iterator = neg_buffer.get_iterator(

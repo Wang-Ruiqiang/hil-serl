@@ -56,11 +56,11 @@ class BCAgent(flax.struct.PyTreeNode):
                 name="actor",
             )
             pi_actions = dist.mode()
-            if self.config["tanh_squash_distribution"]:
-                batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
-            else:
-                normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
-                batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
+            # if self.config["tanh_squash_distribution"]:
+            #     batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
+            # else:
+            normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
+            batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
 
             pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
 
@@ -76,6 +76,7 @@ class BCAgent(flax.struct.PyTreeNode):
             arm_weight = 0.7
             hand_weight = 0.3
             weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
+            # weighted_log_prob = arm_weight * arm_log_prob
             actor_loss = -(weighted_log_prob).mean()
             mse = ((pi_actions - batch_actions) ** 2).sum(-1)
 
