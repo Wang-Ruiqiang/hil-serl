@@ -44,11 +44,14 @@ def get_frame_data(frame_path, robot_urdf_path):
             # input("enter")
     # print("all_joint_values = ", all_joint_values)
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
+    # print("tcp_pos = ", tcp_pos)
     # print("tcp_ori = ", tcp_ori)
     # ori_index = [3, 0, 1, 2]
     # tcp_ori = np.array(tcp_ori)[ori_index]
     tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
+    # print("tcp_pos 1= ", tcp_pos)
     # print("tcp_ori 1= ", tcp_ori)
+    # input("debug")
 
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),

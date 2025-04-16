@@ -63,7 +63,6 @@ class BCAgent(flax.struct.PyTreeNode):
                 batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
 
             pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
-            batch_arm, batch_hand = batch_actions[:, :7], batch_actions[:, 7:]
 
             arm_std = dist.scale_diag[:, :7]
             hand_std = dist.scale_diag[:, 7:]
@@ -127,6 +126,8 @@ class BCAgent(flax.struct.PyTreeNode):
             temperature=temperature,
             name="actor",
         )
+
+        debug.print("argmax: {}", argmax)
         if argmax:
             actions = dist.mode()
         else:

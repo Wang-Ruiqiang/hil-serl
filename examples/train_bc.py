@@ -100,7 +100,9 @@ def eval(
         rng, key = jax.random.split(sampling_rng)
 
         print("obs state = ", obs["state"])
-        # obs = data[data_count]["observations"]
+        obs = data[data_count]["observations"]
+
+        print("obs_read state = ", obs["state"])
         
         actions = bc_agent.sample_actions(observations=obs, seed=key)
         actions = np.asarray(jax.device_get(actions))
@@ -111,7 +113,6 @@ def eval(
         # actions[3:7] = tcp_ori[ori_index]
         # actions[:3], actions[3:7] = kinematics_utils.apply_transformation(actions[:3], actions[3:7], palm_lower2denso_end_tf)
         
-        print("obs_read state = ", data[data_count]["observations"]["state"])
         sampling_rng, key = jax.random.split(sampling_rng)
         actions_read = data[data_count]["actions"]
 
@@ -298,8 +299,9 @@ def main(_):
         )
 
         bc_ckpt = checkpoints.restore_checkpoint(
-             os.path.abspath(FLAGS.bc_checkpoint_path),
+            os.path.abspath(FLAGS.bc_checkpoint_path),
             bc_agent.state,
+            step=19000,
         )
         bc_agent = bc_agent.replace(state=bc_ckpt)
 

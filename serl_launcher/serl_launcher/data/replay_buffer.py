@@ -25,8 +25,6 @@ def _insert_recursively(
     dataset_dict: DatasetDict, data_dict: DatasetDict, insert_index: int
 ):
     if isinstance(dataset_dict, np.ndarray):
-        
-        # print("data_dict = ", data_dict)
         dataset_dict[insert_index] = data_dict
     elif isinstance(dataset_dict, dict):
         for k in dataset_dict.keys():
