@@ -35,12 +35,7 @@ from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
 from experiments.mappings import NEW_MAPPING
 from experiments.config import DefaultTrainingConfig
-<<<<<<< HEAD
 from examples.utils import read_utils
-from examples.utils import kinematics_utils
-=======
-from flax.traverse_util import flatten_dict
->>>>>>> ruiqiang-server
 
 
 FLAGS = flags.FLAGS
@@ -72,6 +67,8 @@ palm_lower2denso_end_tf = np.array([
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
 ])
 
+eval_checkpoint_step = 19000
+
 
 def print_green(x):
     return print("\033[92m {}\033[00m".format(x))
@@ -91,21 +88,30 @@ def eval(
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
-<<<<<<< HEAD
     print("evaluating")
+    ckpt = checkpoints.restore_checkpoint(
+        os.path.abspath(FLAGS.bc_checkpoint_path),
+        bc_agent.state,
+        step=eval_checkpoint_step,
+    )
+
+    print_green(f"Loaded previous checkpoint at step {eval_checkpoint_step}.")
+
+    bc_agent = bc_agent.replace(state=ckpt)
+
     success_counter = 0
     time_list = []
-    data = read_utils.read_data(robot_urdf_path, True)
+    # data, _= read_utils.read_data(robot_urdf_path, True)
     data_count = 0
     
     obs, _ = env.reset()
     done = False
     start_time = time.time()
     while not done:
-        rng, key = jax.random.split(sampling_rng)
+        sampling_rng, key = jax.random.split(sampling_rng)
 
         print("obs state = ", obs["state"])
-        obs = data[data_count]["observations"]
+        # obs = data[data_count]["observations"]
 
         print("obs_read state = ", obs["state"])
         
@@ -118,8 +124,7 @@ def eval(
         # actions[3:7] = tcp_ori[ori_index]
         # actions[:3], actions[3:7] = kinematics_utils.apply_transformation(actions[:3], actions[3:7], palm_lower2denso_end_tf)
         
-        sampling_rng, key = jax.random.split(sampling_rng)
-        actions_read = data[data_count]["actions"]
+        # actions_read = data[data_count]["actions"]
 
         next_obs, reward, done, truncated, info = env.step(actions)
         obs = next_obs
@@ -134,52 +139,6 @@ def eval(
         # if data_count >= len(data):
         #     print("eval failed")
         #     break
-=======
-    def print_params_shape(params, prefix=''):
-        for key, val in params.items():
-            if isinstance(val, dict) or isinstance(val, flax.core.FrozenDict):
-                print_params_shape(val, prefix + key + '/')
-            else:
-                print(f"{prefix}{key}: {val.shape}")
-
-    def print_param_keys(params):
-        flat = flatten_dict(params)
-        for k in flat:
-            print("/".join(k), ":", flat[k].shape)
-
-
-    print("==== BC Agent Params ====")
-    print_param_keys(bc_agent.state.params)
-
-    # bc_actor_params = bc_agent.state.params["actor"]
-    # print_params_shape(bc_actor_params)
-    input("debug")
-
-    # success_counter = 0
-    # time_list = []
-    # for episode in range(FLAGS.eval_n_trajs):
-    #     obs, _ = env.reset()
-    #     done = False
-    #     start_time = time.time()
-    #     while not done:
-    #         rng, key = jax.random.split(sampling_rng)
-
-    #         actions = bc_agent.sample_actions(observations=obs, seed=key)
-    #         actions = np.asarray(jax.device_get(actions))
-    #         next_obs, reward, done, truncated, info = env.step(actions)
-    #         obs = next_obs
-    #         if done:
-    #             if reward:
-    #                 dt = time.time() - start_time
-    #                 time_list.append(dt)
-    #                 print(dt)
-    #             success_counter += reward
-    #             print(reward)
-    #             print(f"{success_counter}/{episode + 1}")
-
-    # print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
-    # print(f"average time: {np.mean(time_list)}")
->>>>>>> ruiqiang-server
 
 
 ##############################################################################
@@ -323,7 +282,9 @@ def main(_):
 
     else:
         rng = jax.random.PRNGKey(FLAGS.seed)
-        sampling_rng = jax.device_put(rng, sharding.replicate())
+        rng, sampling_rng = jax.random.split(rng)
+        print("rng = ", rng)
+        print("sampling_rng = ", sampling_rng)
 
         bc_agent: BCAgent = make_bc_agent(
             seed=FLAGS.seed,
@@ -344,10 +305,10 @@ def main(_):
         bc_ckpt = checkpoints.restore_checkpoint(
             os.path.abspath(FLAGS.bc_checkpoint_path),
             bc_agent.state,
-            step=19000,
         )
         bc_agent = bc_agent.replace(state=bc_ckpt)
 
+        sampling_rng = jax.device_put(sampling_rng, sharding.replicate())
         print_green("starting actor loop")
         eval(
             env=env,
