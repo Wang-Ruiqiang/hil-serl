@@ -3,9 +3,5 @@ examples/classifier_data copy/*
 examples/saved_clips*/*
 examples/demo_data/*
 examples/demo_data copy/*
-<<<<<<< HEAD
 examples/test_data/*
-=======
-examples/test_data/*
-examples/experiments/tennis_ball_pick/2025-4-15-0_bc_run
->>>>>>> ruiqiang-server
+examples/experiments/tennis_ball_pick/2025*
