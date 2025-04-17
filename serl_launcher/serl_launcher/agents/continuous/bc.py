@@ -34,6 +34,12 @@ class BCAgent(flax.struct.PyTreeNode):
                 }
             )
         return observations
+    
+
+    def normalize_quaternion(self, q, eps=1e-8):
+        norm = jnp.linalg.norm(q, axis=-1, keepdims=True)
+        return q / (norm + eps)
+    
 
     @partial(jax.jit, static_argnames="pmap_axis")
     def update(self, batch: Batch, pmap_axis: str = None):
@@ -135,8 +141,10 @@ class BCAgent(flax.struct.PyTreeNode):
             actions = dist.sample(seed=seed)
         action_mean = jnp.array(self.config["action_mean"])
         action_std = jnp.array(self.config["action_std"])
-        debug.print("actions (before rescale): {}", actions)
+        jax.debug.print("action = {}", actions)
+        actions = actions.at[..., 3:7].set(self.normalize_quaternion(actions[..., 3:7]))
         actions = actions.at[..., :3].set(actions[..., :3] * action_std + action_mean)
+        jax.debug.print("action after normalize = {}", actions)
         return actions
 
     @jax.jit
