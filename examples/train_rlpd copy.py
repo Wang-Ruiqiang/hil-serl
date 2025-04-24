@@ -243,6 +243,211 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             stats = {"timer": timer.get_average_times()}
             client.request("send-stats", stats)
 
+def actor_test(agent, data_store, intvn_data_store, env, sampling_rng):
+    """
+    This is the actor loop, which runs when "--actor" is set to True.
+    """
+
+    robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+    if FLAGS.eval_checkpoint_step:
+        success_counter = 0
+        time_list = []
+
+        ckpt = checkpoints.restore_checkpoint(
+            os.path.abspath(FLAGS.checkpoint_path),
+            agent.state,
+            step=FLAGS.eval_checkpoint_step,
+        )
+        agent = agent.replace(state=ckpt)
+
+        data = read_utils.read_data(robot_urdf_path, True)
+        data_count = 0 
+
+        obs, _ = env.reset()
+        log_file = "classifier_log_in_training.txt"
+
+        try:
+            with open(log_file, "w") as f:
+                for episode in range(FLAGS.eval_n_trajs):
+                    done = False
+                    start_time = time.time()
+                    # data_count = 0
+
+                    while not done:
+                        env.unwrapped.set_data_count(data_count)
+                        sampling_rng, key = jax.random.split(sampling_rng)
+
+                        # is_record_success = data[data_count]["is_record_success"]
+                        # action_read = data[data_count]["observations"]["state"]
+
+                        actions = agent.sample_actions(
+                            observations=jax.device_put(obs),
+                            argmax=False,
+                            seed=key
+                        )
+
+                        actions = np.asarray(jax.device_get(actions))
+
+                        next_obs, reward, done, truncated, info = env.step(actions)
+                        obs = next_obs
+
+                        if done:
+                            if reward:
+                                dt = time.time() - start_time
+                                time_list.append(dt)
+                                print(dt)
+
+                            success_counter += reward
+                            # print(reward)
+                            # print(f"{success_counter}/{episode + 1}")
+                        data_count += 1
+                    f.flush()
+
+        except KeyboardInterrupt:
+            # 捕获 Ctrl+C 异常
+            print("\nUser interrupted the program. Printing final logs...")
+        
+        finally:
+            # print("success_count:", success_count)
+            # print("data_count:", data_count)
+            # print("fail_as_success:", fail_as_success)
+            # print("success_as_fail:", success_as_fail)
+            # print("record_success_count:", record_success_count)
+            # print("success rate of classifier:", {success_count / record_success_count})
+            # print("success_as_fail rate of classifier:", {success_as_fail / record_success_count})
+            # print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
+            # print(f"average time: {np.mean(time_list)}")
+            return  # after done eval, return and exit
+    
+    start_step = (
+        int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
+        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
+        else 0
+    )
+
+    datastore_dict = {
+        "actor_env": data_store,
+        "actor_env_intvn": intvn_data_store,
+    }
+
+    client = TrainerClient(
+        "actor_env",
+        FLAGS.ip,
+        make_trainer_config(),
+        data_stores=datastore_dict,
+        wait_for_server=True,
+        timeout_ms=3000,
+    )
+
+    # Function to update the agent with new params
+    def update_params(params):
+        nonlocal agent
+        agent = agent.replace(state=agent.state.replace(params=params))
+
+    client.recv_network_callback(update_params)
+
+    transitions = []
+    demo_transitions = []
+
+    # obs, _ = env.reset()
+    done = False
+
+    # training loop
+    timer = Timer()
+    running_return = 0.0
+    already_intervened = False
+    intervention_count = 0
+    intervention_steps = 0
+    data_count = 0
+
+    pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
+    data = read_utils.read_data(robot_urdf_path, True)
+    
+    obs, _ = env.reset()
+
+    for step in pbar:
+        timer.tick("total")
+        # obs, _ = read_utils.get_frame_data(frame_path, robot_urdf_path)
+        env.unwrapped.set_data_count(data_count)
+        # with timer.context("sample_actions"):
+        #     if step < config.random_steps:
+        #         actions = env.action_space.sample()
+        #     else:
+        #         sampling_rng, key = jax.random.split(sampling_rng)
+        #         actions = agent.sample_actions(
+        #             observations=jax.device_put(obs),
+        #             seed=key,
+        #             argmax=False,
+        #         )
+        #         actions = np.asarray(jax.device_get(actions))
+
+        # Step environment
+        with timer.context("step_env"):
+            if data_count < len(data) - 1:
+                action_read = data[data_count]["observations"]["state"]
+                next_obs, reward, done, truncated, info = env.step(action_read)
+
+                running_return += reward
+                transition = dict(
+                    observations=obs,
+                    actions=action_read,
+                    next_observations=next_obs,
+                    rewards=reward,
+                    masks=1.0 - done,
+                    dones=done,
+                )
+                if 'grasp_penalty' in info:
+                    transition['grasp_penalty']= info['grasp_penalty']
+                data_store.insert(transition)
+                transitions.append(copy.deepcopy(transition))
+                if already_intervened:
+                    intvn_data_store.insert(transition)
+                    demo_transitions.append(copy.deepcopy(transition))
+
+                obs = next_obs
+                # if done or truncated:
+                if  data_count == len(data) - 2:
+                    info["episode"]["intervention_count"] = intervention_count
+                    info["episode"]["intervention_steps"] = intervention_steps
+                    stats = {"environment": info}  # send stats to the learner to log
+                    client.request("send-stats", stats)
+                    pbar.set_description(f"last return: {running_return}")
+                    running_return = 0.0
+                    intervention_count = 0
+                    intervention_steps = 0
+                    already_intervened = False
+                    client.update()
+                    # obs, _ = env.reset()
+
+        if (step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0) or data_count >= len(data) - 1:
+            # dump to pickle file
+            buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
+            demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
+            if not os.path.exists(buffer_path):
+                os.makedirs(buffer_path)
+            if not os.path.exists(demo_buffer_path):
+                os.makedirs(demo_buffer_path)
+            with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
+                pkl.dump(transitions, f)
+                transitions = []
+            with open(
+                os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
+            ) as f:
+                pkl.dump(demo_transitions, f)
+                demo_transitions = []
+
+        timer.tock("total")
+
+        if (step % config.log_period == 0) or data_count >= len(data):
+            stats = {"timer": timer.get_average_times()}
+            client.request("send-stats", stats)
+        data_count += 1
+
+        if data_count >= len(data) - 1:
+            # print("data_count max")
+            # is_end = True
+            # break
+            data_count = 0
 
 ##############################################################################
 
@@ -358,7 +563,125 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
                 os.path.abspath(FLAGS.checkpoint_path), agent.state, step=step, keep=100
             )
 
-#############################################################################
+def learner_test(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
+    """
+    The learner loop, which runs when "--learner" is set to True.
+    """
+    start_step = (
+        int(os.path.basename(checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path)))[11:])
+        + 1
+        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
+        else 0
+    )
+    step = start_step
+
+    def stats_callback(type: str, payload: dict) -> dict:
+        """Callback for when server receives stats request."""
+        assert type == "send-stats", f"Invalid request type: {type}"
+        if wandb_logger is not None:
+            wandb_logger.log(payload, step=step)
+        return {}  # not expecting a response
+
+    # Create server
+    server = TrainerServer(make_trainer_config(), request_callback=stats_callback)
+    server.register_data_store("actor_env", replay_buffer)
+    server.register_data_store("actor_env_intvn", demo_buffer)
+    server.start(threaded=True)
+
+    # Loop to wait until replay_buffer is filled
+    pbar = tqdm.tqdm(
+        total=config.training_starts,
+        initial=len(replay_buffer),
+        desc="Filling up replay buffer",
+        position=0,
+        leave=True,
+    )
+    while len(replay_buffer) < 100:
+        pbar.update(len(replay_buffer) - pbar.n)  # Update progress bar
+        # print("replay_buffer len= ", len(replay_buffer))
+        time.sleep(1)
+    
+    # print("replay_buffer len= ", len(replay_buffer))
+    pbar.update(len(replay_buffer) - pbar.n)  # Update progress bar
+    pbar.close()
+
+    # send the initial network to the actor
+    server.publish_network(agent.state.params)
+    print_green("sent initial network to actor")
+
+    # 50/50 sampling from RLPD, half from demo and half from online experience
+    replay_iterator = replay_buffer.get_iterator(
+        sample_args={
+            "batch_size": config.batch_size // 2,
+            "pack_obs_and_next_obs": True,
+        },
+        device=sharding.replicate(),
+    )
+    demo_iterator = demo_buffer.get_iterator(
+        sample_args={
+            "batch_size": config.batch_size // 2,
+            "pack_obs_and_next_obs": True,
+        },
+        device=sharding.replicate(),
+    )
+
+    # wait till the replay buffer is filled with enough data
+    timer = Timer()
+    
+    if isinstance(agent, SACAgent):
+        train_critic_networks_to_update = frozenset({"critic"})
+        train_networks_to_update = frozenset({"critic", "actor", "temperature"})
+    else:
+        train_critic_networks_to_update = frozenset({"critic", "grasp_critic"})
+        train_networks_to_update = frozenset({"critic", "grasp_critic", "actor", "temperature"})
+
+    for step in tqdm.tqdm(
+        range(start_step, config.max_steps), dynamic_ncols=True, desc="learner"
+    ):
+        # run n-1 critic updates and 1 critic + actor update.
+        # This makes training on GPU faster by reducing the large batch transfer time from CPU to GPU
+        for critic_step in range(config.cta_ratio - 1):
+            with timer.context("sample_replay_buffer"):
+                batch = next(replay_iterator)
+                demo_batch = next(demo_iterator)
+                batch = concat_batches(batch, demo_batch, axis=0)
+            with timer.context("train_critics"):
+                agent, critics_info = agent.update(
+                    batch,
+                    networks_to_update=train_critic_networks_to_update,
+                )
+
+        with timer.context("train"):
+            batch = next(replay_iterator)
+            demo_batch = next(demo_iterator)
+            batch = concat_batches(batch, demo_batch, axis=0)
+            agent, update_info = agent.update(
+                batch,
+                networks_to_update=train_networks_to_update,
+            )
+        # publish the updated network
+        if step > 0 and step % (config.steps_per_update) == 0:
+            agent = jax.block_until_ready(agent)
+            server.publish_network(agent.state.params)
+
+        if step % config.log_period == 0 and wandb_logger:
+            wandb_logger.log(update_info, step=step)
+            wandb_logger.log({"timer": timer.get_average_times()}, step=step)
+
+        if (
+            step > 0
+            and config.checkpoint_period
+            and step % config.checkpoint_period == 0
+        ) or is_end:
+            checkpoints.save_checkpoint(
+                os.path.abspath(FLAGS.checkpoint_path), agent.state, step=step, keep=100
+            )
+
+        
+        if is_end:
+            print("learner end")
+            break
+##############################################################################
 
 
 def main(_):
@@ -503,13 +826,22 @@ def main(_):
 
         # learner loop
         print_green("starting learner loop")
-        learner(
-            sampling_rng,
-            agent,
-            replay_buffer,
-            demo_buffer=demo_buffer,
-            wandb_logger=wandb_logger,
-        )
+        if FLAGS.test:
+            learner_test(
+                sampling_rng,
+                agent,
+                replay_buffer,
+                demo_buffer=demo_buffer,
+                wandb_logger=wandb_logger,
+            )
+        else:
+            learner(
+                sampling_rng,
+                agent,
+                replay_buffer,
+                demo_buffer=demo_buffer,
+                wandb_logger=wandb_logger,
+            )
 
     elif FLAGS.actor:
         sampling_rng = jax.device_put(sampling_rng, sharding.replicate())
@@ -518,13 +850,22 @@ def main(_):
 
         # actor loop
         print_green("starting actor loop")
-        actor(
-            agent,
-            data_store,
-            intvn_data_store,
-            env,
-            sampling_rng,
-        )
+        if FLAGS.test:
+            actor_test(
+                agent,
+                data_store,
+                intvn_data_store,
+                env,
+                sampling_rng,
+            )
+        else:
+            actor(
+                agent,
+                data_store,
+                intvn_data_store,
+                env,
+                sampling_rng,
+            )
 
     else:
         raise NotImplementedError("Must be either a learner or an actor")
