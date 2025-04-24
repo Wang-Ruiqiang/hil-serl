@@ -358,12 +358,15 @@ class DensoEnv(gym.Env):
         # 前7维为机械臂位姿
         arm_action = action[:7]
         print("arm_action = ", arm_action)
+
+        # input("debug")
         self.ros_interface.publish_arm_action(arm_action)
-        input("debug")
 
         # 后16维为灵巧手关节角
         leap_hand_action = action[7:]
         self._send_leap_hand_command(leap_hand_action)
+        time.sleep(3)
+        # input("debug")
         # leap_hand_action[3] = leap_hand_action[3]-3.14
         # leap_hand_action[7] = leap_hand_action[7]-1.57
         
@@ -551,7 +554,6 @@ class DensoEnv(gym.Env):
 
     def leap_interpolate_and_publish(self, start_position, end_position, step_time, steps):
         print("leap_interpolate_and_publish")
-        print("end_position = ", end_position)
         for i in range(steps + 1):
             # Interpolate between start and end positions
             interpolated_position = [

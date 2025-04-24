@@ -139,12 +139,8 @@ class BCAgent(flax.struct.PyTreeNode):
             actions = dist.mode()
         else:
             actions = dist.sample(seed=seed)
-        action_mean = jnp.array(self.config["action_mean"])
-        action_std = jnp.array(self.config["action_std"])
-        jax.debug.print("action = {}", actions)
+        # jax.debug.print("action = {}", actions)
         actions = actions.at[..., 3:7].set(self.normalize_quaternion(actions[..., 3:7]))
-        actions = actions.at[..., :3].set(actions[..., :3] * action_std + action_mean)
-        jax.debug.print("action after normalize = {}", actions)
         return actions
 
     @jax.jit
@@ -188,8 +184,6 @@ class BCAgent(flax.struct.PyTreeNode):
         # Optimizer
         learning_rate: float = 3e-4,
         augmentation_function: Optional[callable] = None,
-        action_mean = [ 0.6289433, -0.02980271, 0.2980561 ],
-        action_std = [0.03720388, 0.10612131, 0.07740753]
     ):
         if encoder_type == "resnet":
             from serl_launcher.vision.resnet_v1 import resnetv1_configs
@@ -262,8 +256,6 @@ class BCAgent(flax.struct.PyTreeNode):
             image_keys=image_keys,
             augmentation_function=augmentation_function,
             tanh_squash_distribution=policy_kwargs["tanh_squash_distribution"],
-            action_mean=action_mean,
-            action_std=action_std,
         )
 
         agent = cls(state, config)

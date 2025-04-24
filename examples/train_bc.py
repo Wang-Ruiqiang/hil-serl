@@ -113,7 +113,7 @@ def eval(
         print("obs state = ", obs["state"])
         # obs = data[data_count]["observations"]
 
-        print("obs_read state = ", obs["state"])
+        # print("obs_read state = ", obs["state"])
         
         actions = bc_agent.sample_actions(observations=obs, seed=key)
         actions = np.asarray(jax.device_get(actions))
@@ -249,10 +249,8 @@ def main(_):
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
 
         all_actions = np.array(all_actions)
-        action_mean = np.mean(all_actions[:,:3], axis=0)
-        action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
-        print("action_mean = ", action_mean)
-        print("action_std = ", action_std)
+        # action_mean = np.mean(all_actions[:,:3], axis=0)
+        # action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
         # print("sample_obs=env.observation_space.sample() = ", env.observation_space.sample()["state"].shape)
         # print("env.action_space.sample(), = ", env.action_space.sample().shape)
         bc_agent: BCAgent = make_bc_agent(
@@ -261,8 +259,6 @@ def main(_):
             sample_action=env.action_space.sample(),
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
-            action_mean=action_mean,
-            action_std=action_std
         )
 
         # replicate agent across devices
@@ -283,8 +279,8 @@ def main(_):
     else:
         rng = jax.random.PRNGKey(FLAGS.seed)
         rng, sampling_rng = jax.random.split(rng)
-        print("rng = ", rng)
-        print("sampling_rng = ", sampling_rng)
+        # print("rng = ", rng)
+        # print("sampling_rng = ", sampling_rng)
 
         bc_agent: BCAgent = make_bc_agent(
             seed=FLAGS.seed,
@@ -292,8 +288,6 @@ def main(_):
             sample_action=env.action_space.sample(),
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
-            action_mean=action_mean,
-            action_std=action_std
         )
 
         # replicate agent across devices
