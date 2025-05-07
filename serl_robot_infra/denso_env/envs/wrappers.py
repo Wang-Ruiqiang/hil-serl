@@ -4,7 +4,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Box
 import copy
-# from franka_env.spacemouse.spacemouse_expert import SpaceMouseExpert
+from denso_env.envs.keyboard_expert import KeyboardExpert
 import requests
 from scipy.spatial.transform import Rotation as R
 from denso_env.envs.denso_env import DensoEnv
@@ -183,6 +183,70 @@ class DualQuat2EulerWrapper(gym.ObservationWrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         return self.observation(obs), info
+    
+
+class KeyboardIntervention(gym.ActionWrapper):
+    #TODO: change to suit teleop interventions 
+    def __init__(self, env, action_indices=None):
+        super().__init__(env)
+
+        self.gripper_enabled = True
+        if self.action_space.shape == (6,):
+            self.gripper_enabled = False
+
+        self.expert = KeyboardExpert()
+        self.left, self.right = False, False
+        self.action_indices = action_indices
+
+    def action(self, action: np.ndarray) -> np.ndarray:
+        """
+        Input:
+        - action: policy action
+        Output:
+        - action: spacemouse action if nonezero; else, policy action
+        """
+        expert_a, buttons = self.expert.get_action()
+        self.left, self.right = tuple(buttons)
+        intervened = False
+        
+        # 人为输入动作非0,触发干预
+        if np.linalg.norm(expert_a) > 0.001:
+            intervened = True
+
+        if self.action_indices is not None:
+            filtered_expert_a = np.zeros_like(expert_a)
+            filtered_expert_a[self.action_indices] = expert_a[self.action_indices]
+            expert_a = filtered_expert_a
+
+        if intervened:
+            return expert_a, True
+
+        return action, False
+
+    def step(self, action):
+        new_action, replaced = self.action(action)
+        if replaced:
+            current_obs = self.env._get_obs()  # 获取当前状态（注意根据你的 wrapper 修改）
+            state = current_obs["state"]
+            tcp_pos = state[:3]
+            tcp_ori = state[3:7]
+            hand_joint = state[7:]
+
+            # 对 xyz 增量应用到当前坐标
+            delta_pos = new_action[:3]
+            new_tcp_pos = tcp_pos + delta_pos
+
+            # 对四元数方向的旋转做增量（简化处理，只做平移）
+            # 或者你可以用 scipy.spatial.transform.Rotation 实现四元数旋转叠加
+            new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
+            info["intervene_action"] = new_action
+
+        obs, rew, done, truncated, info = self.env.step(new_action)
+            
+        info["left"] = self.left
+        info["right"] = self.right
+        return obs, rew, done, truncated, info
+    
 
 class GripperCloseEnv(gym.ActionWrapper):
     """

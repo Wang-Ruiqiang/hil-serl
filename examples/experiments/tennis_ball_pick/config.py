@@ -5,8 +5,9 @@ import numpy as np
 
 from serl_robot_infra.denso_env.envs.wrappers import (
     MultiCameraBinaryRewardClassifierWrapper,
-    Quat2EulerWrapper,
+    KeyboardIntervention,
 )
+
 from denso_env.envs.denso_env import DefaultEnvConfig
 from serl_launcher.wrappers.serl_obs_wrappers import SERLObsWrapper
 from serl_launcher.wrappers.chunking import ChunkingWrapper
@@ -107,8 +108,8 @@ class TrainConfig(DefaultTrainingConfig):
             config=EnvConfig(),
         )
         # env = GripperCloseEnv(env)
-        # if not fake_env:
-        #     env = SpacemouseIntervention(env)
+        if not fake_env:
+            env = KeyboardIntervention(env)
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
