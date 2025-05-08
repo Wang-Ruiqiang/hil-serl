@@ -186,7 +186,6 @@ class DualQuat2EulerWrapper(gym.ObservationWrapper):
     
 
 class KeyboardIntervention(gym.ActionWrapper):
-    #TODO: change to suit teleop interventions 
     def __init__(self, env, action_indices=None):
         super().__init__(env)
 
@@ -239,10 +238,15 @@ class KeyboardIntervention(gym.ActionWrapper):
             # 对四元数方向的旋转做增量（简化处理，只做平移）
             # 或者你可以用 scipy.spatial.transform.Rotation 实现四元数旋转叠加
             new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
-            info["intervene_action"] = new_action
+            print("new_tcp_pos = ", new_tcp_pos)
+            # print("tcp_ori = ", tcp_ori)
+            self.print_action = True
+            
 
         obs, rew, done, truncated, info = self.env.step(new_action)
-            
+        if replaced:
+            info["intervene_action"] = new_action
+
         info["left"] = self.left
         info["right"] = self.right
         return obs, rew, done, truncated, info

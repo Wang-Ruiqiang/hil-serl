@@ -65,7 +65,8 @@ def make_sac_pixel_agent(
         use_proprio=True,
         image_keys=image_keys,
         policy_kwargs={
-            "tanh_squash_distribution": True,
+            # "tanh_squash_distribution": True,
+            "tanh_squash_distribution": False,
             "std_parameterization": "exp",
             "std_min": 1e-5,
             "std_max": 5,
@@ -73,12 +74,14 @@ def make_sac_pixel_agent(
         critic_network_kwargs={
             "activations": nn.tanh,
             "use_layer_norm": True,
-            "hidden_dims": [256, 256],
+            # "hidden_dims": [256, 256],
+            "hidden_dims": [512, 512, 512],
         },
         policy_network_kwargs={
             "activations": nn.tanh,
             "use_layer_norm": True,
-            "hidden_dims": [256, 256],
+            # "hidden_dims": [256, 256],
+            "hidden_dims": [512, 512, 512],
         },
         temperature_init=1e-2,
         discount=discount,

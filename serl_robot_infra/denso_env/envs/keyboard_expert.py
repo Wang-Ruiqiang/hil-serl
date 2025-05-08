@@ -76,7 +76,9 @@ class KeyboardExpert:
     def get_action(self) -> tuple[np.ndarray, list]:
         action = self.latest_data["action"]
         buttons = self.latest_data["buttons"]
-        self.latest_data["action"] = [0.0] * 6
+        if np.linalg.norm(action) > 0.001:
+            self.latest_data["action"] = [0.0] * 6  # 只在非零动作时清空
+        # self.latest_data["action"] = [0.0] * 6
         return np.array(action), buttons
 
     def close(self):

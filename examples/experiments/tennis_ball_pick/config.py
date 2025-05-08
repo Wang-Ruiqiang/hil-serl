@@ -108,8 +108,8 @@ class TrainConfig(DefaultTrainingConfig):
             config=EnvConfig(),
         )
         # env = GripperCloseEnv(env)
-        if not fake_env:
-            env = KeyboardIntervention(env)
+        # if not fake_env:
+        #     env = KeyboardIntervention(env)
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)

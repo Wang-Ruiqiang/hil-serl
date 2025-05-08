@@ -322,6 +322,9 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
+        self.print_action = True
+        self._last_step_time = None
+
         print("Initialized Denso")
     
 
@@ -352,20 +355,47 @@ class DensoEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
+
+        # 计算发送频率
+        # current_time = time.time()
+        # if hasattr(self, "_last_step_time") and self._last_step_time is not None:
+        #     dt = current_time - self._last_step_time
+        #     freq = 1.0 / dt if dt > 0 else float('inf')
+        #     print(f"[Step Frequency] Δt = {dt:.4f}s, Frequency = {freq:.2f} Hz")
+        # self._last_step_time = current_time
+
         # action = np.clip(action, self.action_space.low, self.action_space.high)
 
+        # 限制 xyz 的增量在 [-0.2, 0.2] 范围内
+        # print("action = ", action)
+        desired_pos = action[:3]
+        current_pos = self.cur_position  # 当前 TCP 位置
+        delta = desired_pos - current_pos
+
+        # 对 delta 做裁剪，限制最大位移为 0.2
+        clipped_delta = np.clip(delta, -0.2, 0.2)
+        clipped_pos = current_pos + clipped_delta
 
         # 前7维为机械臂位姿
-        arm_action = action[:7]
-        print("arm_action = ", arm_action)
+        arm_action = action[:7].copy()
+        # print("arm_action before= ", arm_action)
+        arm_action[:3] = clipped_pos
 
+        # if self.print_action:
+        # print("arm_action after= ", arm_action)
+            # print("self.cur_ori = ", self.cur_oritation)
+            # self.print_action = False
+
+        # print("self.cur_pos = ", self.cur_position)
+        # print("self.cur_ori = ", self.cur_oritation)
+        # print("self.curr_leap_hand_pos = ", self.curr_leap_hand_pos)
         # input("debug")
         self.ros_interface.publish_arm_action(arm_action)
 
         # 后16维为灵巧手关节角
         leap_hand_action = action[7:]
         self._send_leap_hand_command(leap_hand_action)
-        time.sleep(3)
+        # time.sleep(3)
         # input("debug")
         # leap_hand_action[3] = leap_hand_action[3]-3.14
         # leap_hand_action[7] = leap_hand_action[7]-1.57

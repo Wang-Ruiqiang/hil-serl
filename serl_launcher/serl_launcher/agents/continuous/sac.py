@@ -323,6 +323,12 @@ class SACAgent(flax.struct.PyTreeNode):
                 info[f"{name}_lr"] = opt_state.hyperparams["learning_rate"]
 
         return self.replace(state=new_state), info
+    
+
+    def normalize_quaternion(self, q, eps=1e-8):
+        norm = jnp.linalg.norm(q, axis=-1, keepdims=True)
+        return q / (norm + eps)
+    
 
     @partial(jax.jit, static_argnames=("argmax",))
     def sample_actions(
@@ -340,9 +346,11 @@ class SACAgent(flax.struct.PyTreeNode):
 
         dist = self.forward_policy(observations, rng=seed, train=False)
         if argmax:
-            return dist.mode()
+            actions =  dist.mode()
         else:
-            return dist.sample(seed=seed)
+            actions =  dist.sample(seed=seed)
+        actions = actions.at[..., 3:7].set(self.normalize_quaternion(actions[..., 3:7]))
+        return actions
 
     @classmethod
     def create(

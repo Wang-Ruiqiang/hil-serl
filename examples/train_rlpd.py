@@ -10,6 +10,7 @@ from absl import app, flags
 from flax.training import checkpoints
 import os
 import copy
+import sys
 import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
@@ -31,6 +32,9 @@ from serl_launcher.utils.launcher import (
     make_wandb_logger,
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
 
 from experiments.mappings import NEW_MAPPING
 
@@ -114,11 +118,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         print(f"average time: {np.mean(time_list)}")
         return  # after done eval, return and exit
     
-    start_step = (
-        int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
-        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-        else 0
-    )
+    # start_step = (
+    #     int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
+    #     if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
+    #     else 0
+    # )
+
+    start_step = 0
 
     datastore_dict = {
         "actor_env": data_store,
@@ -159,16 +165,16 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         timer.tick("total")
 
         with timer.context("sample_actions"):
-            if step < config.random_steps:
-                actions = env.action_space.sample()
-            else:
-                sampling_rng, key = jax.random.split(sampling_rng)
-                actions = agent.sample_actions(
-                    observations=jax.device_put(obs),
-                    seed=key,
-                    argmax=False,
-                )
-                actions = np.asarray(jax.device_get(actions))
+            # if step < config.random_steps:
+            #     actions = env.action_space.sample()
+            # else:
+            print("obs state= ", obs["state"])
+            sampling_rng, key = jax.random.split(sampling_rng)
+            actions = agent.sample_actions(
+                observations=obs,
+                seed=key,
+            )
+            actions = np.asarray(jax.device_get(actions))
 
         # Step environment
         with timer.context("step_env"):
@@ -420,7 +426,7 @@ def main(_):
     )
 
     if FLAGS.checkpoint_path is not None and os.path.exists(FLAGS.checkpoint_path):
-        input("Checkpoint path already exists. Press Enter to resume training.")
+        # input("Checkpoint path already exists. Press Enter to resume training.")
         ckpt = checkpoints.restore_checkpoint(
             os.path.abspath(FLAGS.checkpoint_path),
             agent.state,
