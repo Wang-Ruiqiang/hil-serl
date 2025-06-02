@@ -19,7 +19,7 @@ flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
 classifier_keys = ["front_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
-robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
+robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
 
 # observation_space = gym.spaces.Dict({
 #     "front_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),

@@ -15,6 +15,7 @@ from collections import OrderedDict
 from typing import Dict
 
 from franka_env.utils.rotations import euler_2_quat, quat_2_euler
+from scipy.spatial.transform import Rotation as R
 
 import rclpy
 from rclpy.node import Node
@@ -81,7 +82,7 @@ class DefaultEnvConfig:
     }
     DISPLAY_IMAGE: bool = True
     GRIPPER_SLEEP: float = 0.6
-    MAX_EPISODE_LENGTH: int = 100
+    MAX_EPISODE_LENGTH: int = 200
     JOINT_RESET_PERIOD: int = 0
 
 
@@ -105,9 +106,16 @@ class ROSNodeInterface(Node):
         )
 
         # Subscribers（接收）
-        self.joint_sub = self.create_subscription(
+        self.robot_ee_sub = self.create_subscription(
             PoseStamped,
-            '/cartesian_compliance_controller/current_pose',  # 接收机械臂关节角
+            '/cartesian_compliance_controller/current_pose',
+            self.robot_ee_callback,
+            10
+        )
+
+        self.joint_sub = self.create_subscription(
+            JointState,
+            '/joint_states',  # 接收机械臂关节角
             self.joint_callback,
             10
         )
@@ -119,6 +127,7 @@ class ROSNodeInterface(Node):
             self.get_logger().info('Waiting for /leap_position service...')
 
         # 同步事件
+        self.robot_ee_event = threading.Event()
         self.joint_event = threading.Event()
         self.hand_joint_event = threading.Event()
 
@@ -126,7 +135,7 @@ class ROSNodeInterface(Node):
         self.current_joints = None
         self.current_hand_joints = None
 
-    def joint_callback(self, msg):
+    def robot_ee_callback(self, msg):
         #用ros2 INFO打印接收到的数据 
         # self.get_logger().info("ROS回调已接收到机械臂位姿数据")
         position = msg.pose.position
@@ -139,7 +148,25 @@ class ROSNodeInterface(Node):
         ])
 
         # 设置事件为已收到数据
+        self.robot_ee_event.set()
+
+
+    def joint_callback(self, msg):
+        # print("msg = ", msg)
+
+        # 将 joint name 和对应的位置打包为字典
+        joint_dict = {name: pos for name, pos in zip(msg.name, msg.position)}
+
+        # 按照你需要的顺序提取关节角：joint1 ~ joint6
+        ordered_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+        ordered_joint_positions = [joint_dict.get(joint, 0.0) for joint in ordered_joint_names]
+
+        # 保存为 numpy array
+        self.joint_position = np.array(ordered_joint_positions, dtype=np.float32)
+
+        # 设置事件为“数据已接收”
         self.joint_event.set()
+
 
     def publish_arm_action(self, pose):
         msg = PoseStamped()
@@ -154,25 +181,34 @@ class ROSNodeInterface(Node):
         msg.pose.orientation.x = ori_x
         msg.pose.orientation.y = ori_y
         msg.pose.orientation.z = ori_z
-        print("msg.pose = ", msg.pose)
+        # print("msg.pose = ", msg.pose)
         self.arm_pub.publish(msg)
 
 
     def publish_hand_action(self, hand_joints):
-        self.get_logger().info('publish_hand_action')
+        # self.get_logger().info('publish_hand_action')
         stater = JointState()
         stater.name = [f"joint_{i}" for i in range(len(hand_joints))]
         stater.position = hand_joints
         self.publisher_hand.publish(stater)
         
 
-    def get_current_joints(self, timeout=5.0):
+    def get_current_robot_ee(self, timeout=5.0):
+        # success = self.joint_event.wait(timeout=timeout)
+        # if not success:
+        #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
+        self.robot_ee_event.wait()
+        self.robot_ee_event.clear()
+        return self.cur_position, self.cur_oritation
+    
+
+    def get_current_joint(self, timeout=5.0):
         # success = self.joint_event.wait(timeout=timeout)
         # if not success:
         #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
         self.joint_event.wait()
         self.joint_event.clear()
-        return self.cur_position, self.cur_oritation
+        return self.joint_position
 
     def get_current_leap_position(self):
         # Create a request for the LeapPosition service
@@ -205,6 +241,7 @@ class DensoEnv(gym.Env):
         self.max_episode_length = config.MAX_EPISODE_LENGTH
         self.display_image = config.DISPLAY_IMAGE
         self.gripper_sleep = config.GRIPPER_SLEEP
+        self.is_arm_only = config.IS_ARM_ONLY
 
 
 
@@ -237,34 +274,57 @@ class DensoEnv(gym.Env):
             dtype=np.float64,
         )
         # Action/Observation Space
-        self.action_space = gym.spaces.Box(
-            np.ones((23,), dtype=np.float32) * -1,
-            np.ones((23,), dtype=np.float32),
-        )
+        if not self.is_arm_only:
+            print("init is_arm_only1 = ")
+            self.action_space = gym.spaces.Box(
+                np.ones((23,), dtype=np.float32) * -1,
+                np.ones((23,), dtype=np.float32),
+            )
 
-        # self.action_space = gym.spaces.Box(
-        #     np.ones((7,), dtype=np.float32) * -1,
-        #     np.ones((7,), dtype=np.float32),
-        # )
-        self.observation_space = gym.spaces.Dict(
-            {
-                "state": gym.spaces.Dict(
-                    {
-                        "tcp_pos": gym.spaces.Box(
-                            -np.inf, np.inf, shape=(3,)
-                        ),
-                        "tcp_ori": gym.spaces.Box(
-                            -np.inf, np.inf, shape=(4,)
-                        ),
-                        "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
-                    }
-                ),
-                "images": gym.spaces.Dict(
-                    {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
-                                for key in config.REALSENSE_CAMERAS}
-                ),
-            }
-        )
+            self.observation_space = gym.spaces.Dict(
+                {
+                    "state": gym.spaces.Dict(
+                        {
+                            "tcp_pos": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(3,)
+                            ),
+                            "tcp_ori": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(4,)
+                            ),
+                            "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
+                        }
+                    ),
+                    "images": gym.spaces.Dict(
+                        {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
+                                    for key in config.REALSENSE_CAMERAS}
+                    ),
+                }
+            )
+            
+        else :
+            print("init is_arm_only2 = ")
+            self.action_space = gym.spaces.Box(
+                np.ones((7,), dtype=np.float32) * -1,
+                np.ones((7,), dtype=np.float32),
+            )
+            self.observation_space = gym.spaces.Dict(
+                {
+                    "state": gym.spaces.Dict(
+                        {
+                            "tcp_pos": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(3,)
+                            ),
+                            "tcp_ori": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(4,)
+                            )
+                        }
+                    ),
+                    "images": gym.spaces.Dict(
+                        {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
+                                    for key in config.REALSENSE_CAMERAS}
+                    ),
+                }
+            )
         
         self.hand_joint_offset = np.array([3.14, 3.14, 3.14, 3.14,
             3.14, 3.14, 3.14, 3.14,
@@ -325,6 +385,17 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-6-2"  # 可自行修改
+        os.makedirs(self.frame_save_path, exist_ok=True)
+        self.frame_id = 0
+
+        self.changed_hand_joint = [
+            2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+            2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+            3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+        ]
+
         print("Initialized Denso")
     
 
@@ -367,35 +438,44 @@ class DensoEnv(gym.Env):
         # action = np.clip(action, self.action_space.low, self.action_space.high)
 
         # 限制 xyz 的增量在 [-0.2, 0.2] 范围内
-        # print("action = ", action)
+        print("action = ", action)
         desired_pos = action[:3]
         current_pos = self.cur_position  # 当前 TCP 位置
         delta = desired_pos - current_pos
 
         # 对 delta 做裁剪，限制最大位移为 0.2
-        clipped_delta = np.clip(delta, -0.2, 0.2)
+        clipped_delta = np.clip(delta, -0.1, 0.1)
         clipped_pos = current_pos + clipped_delta
+
+        # 限制姿态的增量
+        desired_ori = R.from_quat(action[3:7])          # 目标四元数
+        current_ori = R.from_quat(self.cur_oritation) # 当前四元数
+
+        delta_rot = desired_ori * current_ori.inv()     # 相对旋转
+        angle = delta_rot.magnitude()                   # 旋转角度（弧度）
+
+        max_angle = np.deg2rad(5)  # 最大允许的旋转角度（单位：弧度）
+        if angle > max_angle:
+            scale = max_angle / angle
+            limited_delta_rot = R.from_rotvec(delta_rot.as_rotvec() * scale)
+            limited_desired_ori = limited_delta_rot * current_ori
+        else:
+            limited_desired_ori = desired_ori
+
 
         # 前7维为机械臂位姿
         arm_action = action[:7].copy()
         # print("arm_action before= ", arm_action)
         arm_action[:3] = clipped_pos
+        arm_action[3:7] = limited_desired_ori.as_quat()
 
-        # if self.print_action:
-        # print("arm_action after= ", arm_action)
-            # print("self.cur_ori = ", self.cur_oritation)
-            # self.print_action = False
-
-        # print("self.cur_pos = ", self.cur_position)
-        # print("self.cur_ori = ", self.cur_oritation)
-        # print("self.curr_leap_hand_pos = ", self.curr_leap_hand_pos)
-        # input("debug")
         self.ros_interface.publish_arm_action(arm_action)
 
         # 后16维为灵巧手关节角
-        leap_hand_action = action[7:]
+        # leap_hand_action = action[7:]
+        leap_hand_action = self.changed_hand_joint
         self._send_leap_hand_command(leap_hand_action)
-        # time.sleep(3)
+        time.sleep(2)
         # input("debug")
         # leap_hand_action[3] = leap_hand_action[3]-3.14
         # leap_hand_action[7] = leap_hand_action[7]-1.57
@@ -407,9 +487,12 @@ class DensoEnv(gym.Env):
         time.sleep(max(0, (1.0 / self.hz) - dt))
 
         self._update_cur_position()
+        self.save_training_frame()
+
         ob = self._get_obs()
         reward = self.compute_reward(ob)
-        done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
+        # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
+        done = reward or self.terminate
         return ob, int(reward), done, False, {"succeed": reward}
     
 
@@ -477,6 +560,7 @@ class DensoEnv(gym.Env):
         # self._recover()
         # self.go_to_reset(joint_reset=joint_reset)
         # self._recover()
+
         self.curr_path_length = 0
 
         self._update_cur_position()
@@ -546,26 +630,6 @@ class DensoEnv(gym.Env):
 
     def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
         """Internal function to send leap hand command to the robot."""
-        print("_send_leap_hand_command")
-        # index = leap_hand_action[:4]
-        # index[:2] = index[1::-1]    # Flip the first two elements 
-        # thumb = leap_hand_action[4:8]
-        # middle = leap_hand_action[8:12]
-        # middle[:2] = middle[1::-1]
-        # ring = leap_hand_action[12:]
-        # ring[:2] = ring[1::-1]
-
-        # index = leap_hand_action[:4]
-        # index[:2] = index[1::-1]    # Flip the first two elements 
-        # middle = leap_hand_action[4:8]
-        # middle[:2] = middle[1::-1]
-        # ring = leap_hand_action[8:12]
-        # ring[:2] = ring[1::-1]
-        # thumb = leap_hand_action[12:]
-
-        # leap_hand_j_cmd = np.concatenate((index, middle, ring, thumb))
-        # hand_action = leap_hand_action + self.hand_joint_offset
-        # hand_action = leap_hand_j_cmd
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
         steps = 5       # Example number of steps
@@ -583,7 +647,6 @@ class DensoEnv(gym.Env):
 
 
     def leap_interpolate_and_publish(self, start_position, end_position, step_time, steps):
-        print("leap_interpolate_and_publish")
         for i in range(steps + 1):
             # Interpolate between start and end positions
             interpolated_position = [
@@ -599,26 +662,41 @@ class DensoEnv(gym.Env):
         """
         Internal function to get the latest state of the robot and its gripper.
         """
-        position, orientation = self.ros_interface.get_current_joints()
+        position, orientation = self.ros_interface.get_current_robot_ee()
+        joint_position = self.ros_interface.get_current_joint()
         self.cur_position = position
         self.cur_oritation = orientation
+
+        self.joint_position = joint_position
+
+        # if not self.is_arm_only:
         hand_joint_msg = self.ros_interface.get_current_leap_position()
 
-        if hand_joint_msg is not None:
-            self.curr_leap_hand_pos = np.array(hand_joint_msg)
-        else:
-            print("Warning: Hand joint data unavailable.")
+        # if hand_joint_msg is not None:
+        #     self.curr_leap_hand_pos = np.array(hand_joint_msg)
+        # else:
+        #     print("Warning: Hand joint data unavailable.")
+        self.curr_leap_hand_pos = np.array(hand_joint_msg)
 
 
     def _get_obs(self) -> dict:
         images = self.get_im()
         front_camera_image = images["front_camera"]
         # side_camera_image = images["side_camera"]
-        state_flattened = np.concatenate([
-            np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
-            np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-            np.array(self.curr_leap_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
-        ])
+
+        if not self.is_arm_only:
+            # print("_get_obs is_arm_only1 = ")
+            state_flattened = np.concatenate([
+                np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
+                np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
+                np.array(self.curr_leap_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
+            ])
+        else :
+            # print("_get_obs is_arm_only2 = ")
+            state_flattened = np.concatenate([
+                np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
+                np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
+            ])
 
         return copy.deepcopy({
             "front_camera": front_camera_image,
@@ -643,3 +721,27 @@ class DensoEnv(gym.Env):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
         self.arm_orientation = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
         # self.arm_pose = np.concatenate((position, orientation), axis=0)
+
+
+    def save_training_frame(self):
+        frame_dir = os.path.join(self.frame_save_path, f"frame_{self.frame_id}")
+        os.makedirs(frame_dir, exist_ok=True)
+
+        # 保存图像
+        images = self.get_im()
+        for cam_name, img in images.items():
+            # print("cam_name = ", cam_name)
+            if cam_name == "front_camera":
+                cv2.imwrite(os.path.join(frame_dir, "color_image.jpg"), img[..., ::-1])
+            elif cam_name == "side_camera":
+                cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), img[..., ::-1])
+
+        # 保存 state（TCP + orientation + hand joints）
+        # if not self.is_arm_only:
+        np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), np.concatenate([
+            self.joint_position, self.curr_leap_hand_pos
+        ]))
+        # else:
+        #     np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_position)
+
+        self.frame_id += 1

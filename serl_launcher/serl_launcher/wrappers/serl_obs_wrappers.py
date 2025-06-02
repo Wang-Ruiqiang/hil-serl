@@ -36,6 +36,7 @@ class SERLObsWrapper(gym.ObservationWrapper):
         return obs
 
     def reset(self, **kwargs):
+        print("SERLObsWrapper reset")
         obs, info =  self.env.reset(**kwargs)
         return self.observation(obs), info
 

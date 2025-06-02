@@ -33,6 +33,7 @@ from serl_launcher.utils.launcher import (
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
+# 提前输入export PYTHONPATH=$(pwd)/../serl_robot_infra:$PYTHONPATH
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
 sys.path.insert(0, project_root)
 
@@ -149,7 +150,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
 
     transitions = []
     demo_transitions = []
-
     obs, _ = env.reset()
     done = False
 
@@ -168,7 +168,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             # if step < config.random_steps:
             #     actions = env.action_space.sample()
             # else:
-            print("obs state= ", obs["state"])
             sampling_rng, key = jax.random.split(sampling_rng)
             actions = agent.sample_actions(
                 observations=obs,
@@ -214,6 +213,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
 
             obs = next_obs
             if done or truncated:
+                print_green(f"done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
                 stats = {"environment": info}  # send stats to the learner to log
@@ -224,7 +224,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 intervention_steps = 0
                 already_intervened = False
                 client.update()
+                input("reset env")
                 obs, _ = env.reset()
+                time.sleep(2)
 
         if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
             # dump to pickle file

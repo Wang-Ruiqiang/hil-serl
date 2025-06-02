@@ -272,7 +272,7 @@ class ResNetEncoder(nn.Module):
         )
 
         if num_frames == 1:
-            print("num_frames = 1")
+            # print("num_frames = 1")
             x = conv_init(x)
         else:
             # 每一帧单独卷积

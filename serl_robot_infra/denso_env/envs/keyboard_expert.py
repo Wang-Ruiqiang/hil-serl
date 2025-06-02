@@ -17,7 +17,7 @@ class KeyboardExpert:
         # 创建共享字典用于跨进程通信
         self.manager = multiprocessing.Manager()
         self.latest_data = self.manager.dict()
-        self.latest_data["action"] = [0.0] * 6
+        self.latest_data["action"] = [0.0] * 5
         self.latest_data["buttons"] = [0, 0]  # dummy buttons
 
         self.process = multiprocessing.Process(target=self._read_keyboard)
@@ -45,30 +45,36 @@ class KeyboardExpert:
         listener.start()
 
         while True:
-            action = [0.0] * 6
+            action = [0.0] * 5
 
             # 控制 xyz 方向移动
             if 'w' in current_keys:
-                action[0] += 1.0
-            if 's' in current_keys:
-                action[0] -= 1.0
-            if 'a' in current_keys:
-                action[1] += 1.0
-            if 'd' in current_keys:
-                action[1] -= 1.0
-            if 'q' in current_keys:
+                # print("z + 0.1")
                 action[2] += 1.0
+            if 's' in current_keys:
+                # print("z - 0.1")
+                action[2] -= 0.5
+            if 'a' in current_keys:
+                # print("x - 0.1")
+                action[0] -= 0.5
+            if 'd' in current_keys:
+                # print("x + 0.1")
+                action[0] += 0.5
+            if 'q' in current_keys:
+                # print("y + 0.1")
+                action[1] += 1.0
             if 'e' in current_keys:
-                action[2] -= 1.0
+                # print("y - 0.1")
+                action[1] -= 1.0
 
-            # 可选：gripper 控制（z = close, x = open）
-            if 'z' in current_keys:
-                action[5] = -1.0
-            if 'x' in current_keys:
-                action[5] = 1.0
+            # 可选：gripper 控制（c = close, o = open）
+            if 'c' in current_keys:
+                action[3] = 1.0
+            if 'o' in current_keys:
+                action[4] = 1.0
 
             # 缩放动作大小
-            action = [a * 0.1 for a in action]
+            action = [a * 0.05 for a in action]
 
             # 更新共享状态
             self.latest_data["action"] = action
@@ -77,7 +83,7 @@ class KeyboardExpert:
         action = self.latest_data["action"]
         buttons = self.latest_data["buttons"]
         if np.linalg.norm(action) > 0.001:
-            self.latest_data["action"] = [0.0] * 6  # 只在非零动作时清空
+            self.latest_data["action"] = [0.0] * 5  # 只在非零动作时清空
         # self.latest_data["action"] = [0.0] * 6
         return np.array(action), buttons
 

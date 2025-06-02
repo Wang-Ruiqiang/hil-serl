@@ -7,7 +7,22 @@ import requests
 
 from denso_env.envs.denso_env import DensoEnv
 
-from examples.utils import read_utils
+from examples.utils import kinematics_utils
+
+robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
+palm_lower2denso_end_tf = np.array([
+    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
+    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
+    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
+    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
+])
+
+# T_palm_lower_to_end_link = np.array([
+#     [ 9.99994927e-01, -3.18530179e-03,  5.11967137e-22, -3.40506487e-02],
+#     [-3.18529775e-03, -9.99993659e-01,  1.59265292e-03,  6.04734432e-02],
+#     [-5.07308019e-06, -1.59264484e-03, -9.99998732e-01, -1.69126301e-01],
+#     [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  1.00000000e+00]
+# ])
 
 class RAMEnv(DensoEnv):
     def __init__(self, **kwargs):
@@ -16,18 +31,64 @@ class RAMEnv(DensoEnv):
 
 
     def reset(self, joint_reset=False, **kwargs):
+        print("RAMEnv reset")
         self.last_gripper_act = time.time()
         if self.save_video:
             self.save_video_recording()
 
-        # if True:
-        if self.should_regrasp:
-            self.regrasp()
-            self.should_regrasp = False
+        # # if True:
+        # if self.should_regrasp:
+        #     self.regrasp()
+        #     self.should_regrasp = False
 
         # self._recover()
         # self.go_to_reset(joint_reset=False)
         # self._recover()
+        # obs, info =  self.env.reset(**kwargs)
+
+        # end_joint = np.array([
+        #     1.477218705043910063e-01,
+        #     6.320336404386192042e-01,
+        #     1.542532730778103378e+00,
+        #     6.988420990185105486e-02,
+        #     1.164478712525359061e+00,
+        #     -2.049513381174307702e-01,
+
+        #     2.534136295318603516e+00,
+        #     2.966718912124633789e+00,
+        #     4.986971378326416016e+00,
+        #     2.943709135055541992e+00,
+        #     3.673883914947509766e+00,
+        #     3.367087841033935547e+00,
+        #     3.529689788818359375e+00,
+        #     4.186233520507812500e+00,
+        #     3.176874160766601562e+00,
+        #     3.230563640594482422e+00,
+        #     2.865476131439208984e+00,
+        #     3.322602272033691406e+00,
+        #     4.264466762542724609e+00,
+        #     3.968408346176147461e+00,
+        #     3.364019870758056641e+00,
+        #     3.747514963150024414e+00
+        # ])
+
+        # end_pos, end_ori = kinematics_utils.comupute_forward_kinematics(end_joint, robot_urdf_path)
+        # end_pos, end_ori = kinematics_utils.apply_transformation(end_pos, end_ori, palm_lower2denso_end_tf)
+        # end_arm_action = np.concatenate([end_pos, end_ori])
+        # print("end_pos = ", end_pos)
+        # print("end_ori = ", end_ori)
+        # self.ros_interface.publish_arm_action(end_arm_action)
+
+
+        init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
+        init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
+        init_arm_action = np.concatenate([init_pos, init_ori])
+        self.ros_interface.publish_arm_action(init_arm_action)
+
+
+        # self._send_leap_hand_command(init_hand_joint)
+        time.sleep(3.0)
+
         self.curr_path_length = 0
         self._update_cur_position()
         obs = self._get_obs()

@@ -197,6 +197,25 @@ class KeyboardIntervention(gym.ActionWrapper):
         self.left, self.right = False, False
         self.action_indices = action_indices
 
+        # self.gripper_open_joint = [
+        #     2.989728450775146484, 2.931437253952026367, 4.238389015197753906, 3.963806390762329102,
+        #     3.604854822158813477, 3.202951908111572266, 3.466796636581420898, 4.319689750671386719,
+        #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        #     4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+        # ]
+        self.gripper_open_joint = [
+            2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+            2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+            3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+        ]
+        self.gripper_close_joint = [
+            3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
+            3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
+            3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
+            4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
+        ]   
+
     def action(self, action: np.ndarray) -> np.ndarray:
         """
         Input:
@@ -229,17 +248,29 @@ class KeyboardIntervention(gym.ActionWrapper):
             state = current_obs["state"]
             tcp_pos = state[:3]
             tcp_ori = state[3:7]
-            hand_joint = state[7:]
+            # 如果训练包含hand
+            hand_included = False
+            if hand_included:
+                hand_joint = state[7:]
+
 
             # 对 xyz 增量应用到当前坐标
             delta_pos = new_action[:3]
             new_tcp_pos = tcp_pos + delta_pos
+            if new_action[3] > 0 :
+                hand_joint = self.gripper_close_joint
+                self.env.changed_hand_joint = self.gripper_close_joint
+            if new_action[4] > 0 :
+                hand_joint = self.gripper_open_joint
+                self.env.changed_hand_joint = self.gripper_open_joint
 
             # 对四元数方向的旋转做增量（简化处理，只做平移）
             # 或者你可以用 scipy.spatial.transform.Rotation 实现四元数旋转叠加
-            new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
-            print("new_tcp_pos = ", new_tcp_pos)
-            # print("tcp_ori = ", tcp_ori)
+            if hand_included:
+                new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
+            else:
+                new_action = np.concatenate([new_tcp_pos, tcp_ori])
+
             self.print_action = True
             
 

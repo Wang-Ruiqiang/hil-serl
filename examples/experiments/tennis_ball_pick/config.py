@@ -32,7 +32,7 @@ class EnvConfig(DefaultEnvConfig):
     }
     IMAGE_CROP = {
         "front_camera": lambda img: img[150:450, 350:1100],
-        # "side_camera": lambda img: img[100:500, 400:900],
+        "side_camera": lambda img: img[100:500, 400:900],
     }
     TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     GRASP_POSE = np.array([0.5857508505445138,-0.22036261105675414,0.2731021902359492, np.pi, 0, 0])
@@ -86,6 +86,7 @@ class EnvConfig(DefaultEnvConfig):
         "rotational_clip_neg_z": 0.5,
         "rotational_Ki": 0.0,
     }
+    IS_ARM_ONLY = True
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -93,8 +94,6 @@ class TrainConfig(DefaultTrainingConfig):
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera"]
     # classifier_keys = ["front_camera", "side_camera"]
-    proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
-    # proprio_keys = ["tcp_pos", "tcp_ori"]
     buffer_period = 1000
     checkpoint_period = 1000 
     steps_per_update = 50
@@ -102,32 +101,39 @@ class TrainConfig(DefaultTrainingConfig):
     setup_mode = "single-arm-fixed-gripper"
 
     def get_environment(self, fake_env=False, save_video=False, classifier=False):
+        env_config = EnvConfig()
+        if not env_config.IS_ARM_ONLY:
+            proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
+        else:
+            proprio_keys = ["tcp_pos", "tcp_ori"]
+
         env = RAMEnv(
             fake_env=fake_env,
             save_video=save_video,
-            config=EnvConfig(),
+            config=env_config,
         )
         # env = GripperCloseEnv(env)
-        # if not fake_env:
-        #     env = KeyboardIntervention(env)
+        if not fake_env:
+            env = KeyboardIntervention(env)
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
-        env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
+        env = SERLObsWrapper(env, proprio_keys=proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
+            # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 checkpoint_path=os.path.abspath("../../classifier_ckpt/"),
             )
-
+            # input("debug")
             def reward_func(obs):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
+                print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.65)
+                return int(sigmoid(classifier(obs)).item() > 0.5)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env
