@@ -23,12 +23,21 @@ class EnvConfig(DefaultEnvConfig):
             "serial_number": "242422303461",
             "dim": (640, 480),
             "exposure": 40000,
+            "depth": True,
         },
         # "side_camera": {
         #     "serial_number": "234222300515",
         #     "dim": (640, 480),
         #     "exposure": 40000,
         # },
+    }
+    EXTRA_REALSENSE_CAMERAS = {
+        "side_camera": {
+            "serial_number": "234222300515",
+            "dim": (640, 480),
+            "exposure": 40000,
+            "depth": True,
+        },
     }
     IMAGE_CROP = {
         "front_camera": lambda img: img[150:450, 350:1100],
@@ -133,7 +142,7 @@ class TrainConfig(DefaultTrainingConfig):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.5)
+                return int(sigmoid(classifier(obs)).item() > 0.75)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env

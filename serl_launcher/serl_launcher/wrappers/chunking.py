@@ -73,6 +73,7 @@ class ChunkingWrapper(gym.Wrapper):
     def reset(self, **kwargs):
         print("ChunkingWrapper reset")
         obs, info = self.env.reset(**kwargs)
+        self.current_obs.clear()
         self.current_obs.extend([obs] * self.obs_horizon)
         return stack_obs(self.current_obs), info
 

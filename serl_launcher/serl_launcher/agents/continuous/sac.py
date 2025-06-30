@@ -325,9 +325,61 @@ class SACAgent(flax.struct.PyTreeNode):
         return self.replace(state=new_state), info
     
 
-    def normalize_quaternion(self, q, eps=1e-8):
+    def normalize_quaternion(self, q):
         norm = jnp.linalg.norm(q, axis=-1, keepdims=True)
-        return q / (norm + eps)
+        return q / norm
+
+    def quat_inv(self, q):
+        w, x, y, z = q
+        return jnp.array([w, -x, -y, -z])
+
+    def quat_mult(self, q1, q2):
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+        return jnp.array([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2
+        ])
+
+    def quat_to_rotvec(self, q):
+        q = self.normalize_quaternion(q)
+        w, v = q[0], q[1:]
+        angle = 2 * jnp.arccos(jnp.clip(w, -1.0, 1.0))
+        norm_v = jnp.linalg.norm(v)
+        eps = 1e-8
+        direction = v / (norm_v + eps)
+        return direction * angle
+
+    def rotvec_to_quat(self, r):
+        theta = jnp.linalg.norm(r)
+        half_theta = theta / 2
+        eps = 1e-8
+        w = jnp.cos(half_theta)
+        xyz = jnp.sin(half_theta) * r / (theta + eps)
+        return self.normalize_quaternion(jnp.concatenate([jnp.array([w]), xyz]))
+    
+
+    def limit_quat_delta(self, desired_quat, current_quat, max_angle_rad):
+        desired_quat = self.normalize_quaternion(desired_quat)
+        current_quat = self.normalize_quaternion(current_quat)
+
+        delta_rot = self.quat_mult(desired_quat, self.quat_inv(current_quat))  # desired * inv(current)
+        rotvec = self.quat_to_rotvec(delta_rot)  # 旋转向量
+        angle = jnp.linalg.norm(rotvec)
+
+        # JAX不能用if，改用 lax.cond
+        def clip_fn(_):
+            scale = max_angle_rad / (angle + 1e-8)
+            clipped_rotvec = rotvec * scale
+            limited_delta_rot = self.rotvec_to_quat(clipped_rotvec)
+            return self.quat_mult(limited_delta_rot, current_quat)
+        def not_clip_fn(_):
+            return desired_quat
+
+        limited_desired_quat = jax.lax.cond(angle > max_angle_rad, clip_fn, not_clip_fn, operand=None)
+        return limited_desired_quat
     
 
     @partial(jax.jit, static_argnames=("argmax",))
@@ -343,12 +395,35 @@ class SACAgent(flax.struct.PyTreeNode):
         Sample actions from the policy network, **using an external RNG** (or approximating the argmax by the mode).
         The internal RNG will not be updated.
         """
-
+        # jax.debug.print("obs state = {}", observations["state"])
         dist = self.forward_policy(observations, rng=seed, train=False)
         if argmax:
             actions =  dist.mode()
         else:
             actions =  dist.sample(seed=seed)
+
+        obs_state = jnp.asarray(observations["state"])
+        obs_state = obs_state.reshape(-1)
+        cur_position = obs_state[:3]
+        cur_oritation = obs_state[3:7]
+
+        actions = jnp.reshape(actions, (-1,))
+        # jax.debug.print("action before clip = {}", actions)
+        desired_pos = actions[:3]
+        current_pos = cur_position  # 当前 TCP 位置
+        delta = desired_pos - current_pos
+
+        # 对 delta 做裁剪，限制最大位移为 0.01
+        clipped_delta = jnp.clip(delta, -0.01, 0.01)
+        clipped_pos = current_pos + clipped_delta
+        actions = actions.at[..., :3].set(clipped_pos)
+
+        desired_ori = actions[3:7]
+        current_ori = cur_oritation
+        max_angle = jnp.deg2rad(0.5)
+        limited_desired_ori = self.limit_quat_delta(desired_ori, current_ori, max_angle)
+        actions = actions.at[..., 3:7].set(limited_desired_ori)
+
         actions = actions.at[..., 3:7].set(self.normalize_quaternion(actions[..., 3:7]))
         return actions
 

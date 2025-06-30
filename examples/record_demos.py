@@ -1,4 +1,5 @@
 import os
+import sys
 from tqdm import tqdm
 import numpy as np
 import copy
@@ -14,6 +15,9 @@ import jax
 import jax.numpy as jnp
 import re
 
+# 提前输入export PYTHONPATH=$(pwd)/../serl_robot_infra:$PYTHONPATH
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
 
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
@@ -24,9 +28,10 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 100, "Number of successful demos to collect.")
-flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/demo_data", "demo data dir")
+flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/demo_data", "demo data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
-flags.DEFINE_string("robot_urdf_path", "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf", "robot urdf dir")
+flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
+flags.DEFINE_boolean("is_arm_only", True, "read exist data or not.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -61,16 +66,16 @@ def main(_):
     pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
-
-    action_space = gym.spaces.Box(
-            np.ones((23,), dtype=np.float32) * -1,
-            np.ones((23,), dtype=np.float32),
-        )
-    
-    # action_space = gym.spaces.Box(
-    #         np.ones((7,), dtype=np.float32) * -1,
-    #         np.ones((7,), dtype=np.float32),
-    #     )
+    if not FLAGS.is_arm_only:
+        action_space = gym.spaces.Box(
+                np.ones((23,), dtype=np.float32) * -1,
+                np.ones((23,), dtype=np.float32),
+            )
+    else :
+        action_space = gym.spaces.Box(
+                np.ones((7,), dtype=np.float32) * -1,
+                np.ones((7,), dtype=np.float32),
+            )
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -115,13 +120,15 @@ def main(_):
 
             # for i in range(50):
             
-            for i in list(range(start_frame, end_frame+1)):
+            for i in list(range(start_frame, end_frame)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
 
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+                # print("obs state shape = ", obs["state"].shape)
+                # input("debug")
                 tcp_ori = obs["state"][3:7]  # 四元数部分
                 tcp_ori_list.append(tcp_ori)
                 next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
@@ -141,7 +148,8 @@ def main(_):
                 done = reward or terminate
                 actions[:3] = next_obs["state"][:3]  # xyz坐标
                 actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
-                actions[7:] = next_obs["state"][7:]  # leap_hand
+                if not FLAGS.is_arm_only:
+                    actions[7:] = next_obs["state"][7:]
 
                 transition = copy.deepcopy(
                     dict(

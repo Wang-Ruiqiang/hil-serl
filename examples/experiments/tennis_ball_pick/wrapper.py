@@ -46,40 +46,6 @@ class RAMEnv(DensoEnv):
         # self._recover()
         # obs, info =  self.env.reset(**kwargs)
 
-        # end_joint = np.array([
-        #     1.477218705043910063e-01,
-        #     6.320336404386192042e-01,
-        #     1.542532730778103378e+00,
-        #     6.988420990185105486e-02,
-        #     1.164478712525359061e+00,
-        #     -2.049513381174307702e-01,
-
-        #     2.534136295318603516e+00,
-        #     2.966718912124633789e+00,
-        #     4.986971378326416016e+00,
-        #     2.943709135055541992e+00,
-        #     3.673883914947509766e+00,
-        #     3.367087841033935547e+00,
-        #     3.529689788818359375e+00,
-        #     4.186233520507812500e+00,
-        #     3.176874160766601562e+00,
-        #     3.230563640594482422e+00,
-        #     2.865476131439208984e+00,
-        #     3.322602272033691406e+00,
-        #     4.264466762542724609e+00,
-        #     3.968408346176147461e+00,
-        #     3.364019870758056641e+00,
-        #     3.747514963150024414e+00
-        # ])
-
-        # end_pos, end_ori = kinematics_utils.comupute_forward_kinematics(end_joint, robot_urdf_path)
-        # end_pos, end_ori = kinematics_utils.apply_transformation(end_pos, end_ori, palm_lower2denso_end_tf)
-        # end_arm_action = np.concatenate([end_pos, end_ori])
-        # print("end_pos = ", end_pos)
-        # print("end_ori = ", end_ori)
-        # self.ros_interface.publish_arm_action(end_arm_action)
-
-
         init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
         init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
         init_arm_action = np.concatenate([init_pos, init_ori])
@@ -87,10 +53,12 @@ class RAMEnv(DensoEnv):
 
 
         # self._send_leap_hand_command(init_hand_joint)
-        time.sleep(3.0)
 
         self.curr_path_length = 0
-        self._update_cur_position()
+        # self.ros_interface.reset_cur_pose()
+        self._update_cur_position(init_arm_action)
+        print("self.cur_position = ", self.cur_position)
+        self.save_training_frame()
         obs = self._get_obs()
         # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         self.terminate = False

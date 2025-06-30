@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 10000, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_n_trajs", 1, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 
@@ -77,9 +77,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
     This is the actor loop, which runs when "--actor" is set to True.
     """
     if FLAGS.eval_checkpoint_step:
+        print("in eval mode")
         success_counter = 0
         time_list = []
-
+        print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
         ckpt = checkpoints.restore_checkpoint(
             os.path.abspath(FLAGS.checkpoint_path),
             agent.state,
@@ -95,6 +96,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             while not done:
 
                 sampling_rng, key = jax.random.split(sampling_rng)
+
+                print_green(f"obs[state] =  {obs['state']}")
                 actions = agent.sample_actions(
                     observations=jax.device_put(obs),
                     argmax=False,
@@ -119,13 +122,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         print(f"average time: {np.mean(time_list)}")
         return  # after done eval, return and exit
     
-    # start_step = (
-    #     int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
-    #     if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-    #     else 0
-    # )
+    start_step = (
+        int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
+        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
+        else 0
+    )
 
-    start_step = 0
+    # start_step = 0
 
     datastore_dict = {
         "actor_env": data_store,
@@ -169,6 +172,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             #     actions = env.action_space.sample()
             # else:
             sampling_rng, key = jax.random.split(sampling_rng)
+            print_green(f"obs[state] =  {obs['state']}")
             actions = agent.sample_actions(
                 observations=obs,
                 seed=key,
@@ -179,14 +183,17 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
             next_obs, reward, done, truncated, info = env.step(actions)
-            if "left" in info:
-                info.pop("left")
-            if "right" in info:
-                info.pop("right")
+            print("info = ", info)
+            # if "left" in info:
+            #     info.pop("left")
+            # if "right" in info:
+            #     info.pop("right")
 
             # override the action with the intervention action
+            print("actions before intervene= ", actions)
             if "intervene_action" in info:
                 actions = info.pop("intervene_action")
+                print("intervene_action = ", actions)
                 intervention_steps += 1
                 if not already_intervened:
                     intervention_count += 1
@@ -197,14 +204,14 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             running_return += reward
             transition = dict(
                 observations=obs,
-                actions=actions,
                 next_observations=next_obs,
+                actions=actions,
                 rewards=reward,
                 masks=1.0 - done,
                 dones=done,
             )
-            if 'grasp_penalty' in info:
-                transition['grasp_penalty']= info['grasp_penalty']
+            # if 'grasp_penalty' in info:
+            #     transition['grasp_penalty']= info['grasp_penalty']
             data_store.insert(transition)
             transitions.append(copy.deepcopy(transition))
             if already_intervened:
@@ -226,7 +233,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 client.update()
                 input("reset env")
                 obs, _ = env.reset()
-                time.sleep(2)
 
         if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
             # dump to pickle file
@@ -264,6 +270,8 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
         if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
         else 0
     )
+
+    # start_step = 0
     step = start_step
 
     def stats_callback(type: str, payload: dict) -> dict:
@@ -278,6 +286,7 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     server.register_data_store("actor_env", replay_buffer)
     server.register_data_store("actor_env_intvn", demo_buffer)
     server.start(threaded=True)
+    print_green(f"online buffer size: {len(replay_buffer)}")
 
     # Loop to wait until replay_buffer is filled
     pbar = tqdm.tqdm(
@@ -386,7 +395,7 @@ def main(_):
     )
     env = RecordEpisodeStatistics(env)
 
-    rng, sampling_rng = jax.random.split(rng)
+    # rng, sampling_rng = jax.random.split(rng)
     
     if config.setup_mode == 'single-arm-fixed-gripper' or config.setup_mode == 'dual-arm-fixed-gripper':   
         agent: SACAgent = make_sac_pixel_agent(
@@ -434,6 +443,7 @@ def main(_):
             agent.state,
         )
         agent = agent.replace(state=ckpt)
+        # print_green(f"Loaded previous checkpoint at step {step}.")
         ckpt_number = os.path.basename(
             checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
         )[11:]
@@ -449,7 +459,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl",
+            project="hil-serl-real",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

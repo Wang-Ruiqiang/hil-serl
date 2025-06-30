@@ -244,8 +244,11 @@ class KeyboardIntervention(gym.ActionWrapper):
     def step(self, action):
         new_action, replaced = self.action(action)
         if replaced:
+            print("Keyboard intervention action true")
             current_obs = self.env._get_obs()  # 获取当前状态（注意根据你的 wrapper 修改）
+            
             state = current_obs["state"]
+            # print("state tcp pos in keyboardintervention = ", state[:3])
             tcp_pos = state[:3]
             tcp_ori = state[3:7]
             # 如果训练包含hand

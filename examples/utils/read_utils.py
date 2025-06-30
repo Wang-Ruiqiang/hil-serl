@@ -102,10 +102,15 @@ def get_frame_data(frame_path, robot_urdf_path):
     # print("tcp_ori 1= ", tcp_ori)
     # input("debug")
 
+    # state_flattened = np.concatenate([
+    #     np.array(tcp_pos, dtype=np.float32).flatten(),
+    #     np.array(tcp_ori, dtype=np.float32).flatten(),
+    #     np.array(hand_joint, dtype=np.float32).flatten()
+    # ])
+
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
         np.array(tcp_ori, dtype=np.float32).flatten(),
-        np.array(hand_joint, dtype=np.float32).flatten()
     ])
 
     resized_image = cv2.resize(color_image, (320,240))

@@ -50,7 +50,7 @@ class KeyboardExpert:
             # 控制 xyz 方向移动
             if 'w' in current_keys:
                 # print("z + 0.1")
-                action[2] += 1.0
+                action[2] += 0.5
             if 's' in current_keys:
                 # print("z - 0.1")
                 action[2] -= 0.5
@@ -62,10 +62,10 @@ class KeyboardExpert:
                 action[0] += 0.5
             if 'q' in current_keys:
                 # print("y + 0.1")
-                action[1] += 1.0
+                action[1] += 0.5
             if 'e' in current_keys:
                 # print("y - 0.1")
-                action[1] -= 1.0
+                action[1] -= 0.5
 
             # 可选：gripper 控制（c = close, o = open）
             if 'c' in current_keys:
@@ -74,7 +74,7 @@ class KeyboardExpert:
                 action[4] = 1.0
 
             # 缩放动作大小
-            action = [a * 0.05 for a in action]
+            action = [a * 0.02 for a in action]
 
             # 更新共享状态
             self.latest_data["action"] = action

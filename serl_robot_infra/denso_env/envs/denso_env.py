@@ -61,6 +61,10 @@ class DefaultEnvConfig:
         "front_camera": "242422303461",
         # "side_camera": "234222300515",
     }
+    EXTRA_REALSENSE_CAMERAS: Dict = {
+        # "front_camera": "242422303461",
+        "side_camera": "234222300515",
+    }
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((6,))
     GRASP_POSE: np.ndarray = np.zeros((6,))
@@ -135,10 +139,14 @@ class ROSNodeInterface(Node):
         self.current_joints = None
         self.current_hand_joints = None
 
+        self.cur_position = np.zeros(3, dtype=np.float32)
+        self.cur_oritation = np.zeros(4, dtype=np.float32)
+
+
     def robot_ee_callback(self, msg):
         #用ros2 INFO打印接收到的数据 
-        # self.get_logger().info("ROS回调已接收到机械臂位姿数据")
         position = msg.pose.position
+        # self.get_logger().info(f"robot_ee_received:{position}")
         self.cur_position = np.array([position.x, position.y, position.z])
 
         # 从 msg 中提取四元数方向数据（xyzw）
@@ -146,9 +154,8 @@ class ROSNodeInterface(Node):
         self.cur_oritation = np.array([
             orientation.w, orientation.x, orientation.y, orientation.z
         ])
-
         # 设置事件为已收到数据
-        self.robot_ee_event.set()
+        # self.robot_ee_event.set()
 
 
     def joint_callback(self, msg):
@@ -193,12 +200,24 @@ class ROSNodeInterface(Node):
         self.publisher_hand.publish(stater)
         
 
+    # def get_current_robot_ee(self, timeout=5.0):
+    #     # success = self.joint_event.wait(timeout=timeout)
+    #     # if not success:
+    #     #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
+    #     self.robot_ee_event.wait()
+    #     self.robot_ee_event.clear()
+    #     return self.cur_position, self.cur_oritation
+    
+
     def get_current_robot_ee(self, timeout=5.0):
         # success = self.joint_event.wait(timeout=timeout)
         # if not success:
         #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
-        self.robot_ee_event.wait()
-        self.robot_ee_event.clear()
+        # self.robot_ee_event.wait()
+        # self.robot_ee_event.clear()
+        # self.get_logger().info(f"robot_ee_received:{self.cur_position}")
+        # print("get_current_robot_ee: cur_position = ", self.cur_position)
+        # print("get_current_robot_ee: cur_oritation = ", self.cur_oritation)
         return self.cur_position, self.cur_oritation
     
 
@@ -220,13 +239,18 @@ class ROSNodeInterface(Node):
         else:
             self.get_logger().info("Failed to get current position, using zeros")
             return [0.0] * 16
+        
+
+    def reset_cur_pose(self):
+        self.cur_position = np.array([0.55513753, 0.04267503, 0.18153528])
+        self.cur_oritation = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
 
 ##############################################################################
 
 class DensoEnv(gym.Env):
     def __init__(
         self,
-        hz=10,
+        hz=20,
         fake_env=False,
         save_video=False,
         config: DefaultEnvConfig = None,
@@ -263,16 +287,16 @@ class DensoEnv(gym.Env):
             self.recording_frames = []
 
         # boundary box
-        self.xyz_bounding_box = gym.spaces.Box(
-            config.ABS_POSE_LIMIT_LOW[:3],
-            config.ABS_POSE_LIMIT_HIGH[:3],
-            dtype=np.float64,
-        )
-        self.rpy_bounding_box = gym.spaces.Box(
-            config.ABS_POSE_LIMIT_LOW[3:],
-            config.ABS_POSE_LIMIT_HIGH[3:],
-            dtype=np.float64,
-        )
+        # self.xyz_bounding_box = gym.spaces.Box(
+        #     config.ABS_POSE_LIMIT_LOW[:3],
+        #     config.ABS_POSE_LIMIT_HIGH[:3],
+        #     dtype=np.float64,
+        # )
+        # self.rpy_bounding_box = gym.spaces.Box(
+        #     config.ABS_POSE_LIMIT_LOW[3:],
+        #     config.ABS_POSE_LIMIT_HIGH[3:],
+        #     dtype=np.float64,
+        # )
         # Action/Observation Space
         if not self.is_arm_only:
             print("init is_arm_only1 = ")
@@ -302,7 +326,7 @@ class DensoEnv(gym.Env):
             )
             
         else :
-            print("init is_arm_only2 = ")
+            print("init is_arm_only2")
             self.action_space = gym.spaces.Box(
                 np.ones((7,), dtype=np.float32) * -1,
                 np.ones((7,), dtype=np.float32),
@@ -326,12 +350,6 @@ class DensoEnv(gym.Env):
                 }
             )
         
-        self.hand_joint_offset = np.array([3.14, 3.14, 3.14, 3.14,
-            3.14, 3.14, 3.14, 3.14,
-            3.14, 3.14, 3.14, 3.14,
-            3.14, 3.14, 3.14, 3.14
-        ] )
-        
         self.cycle_count = 0
 
         # robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
@@ -343,19 +361,19 @@ class DensoEnv(gym.Env):
             return
 
         self.cap = None
-        self.init_cameras(config.REALSENSE_CAMERAS)
+        self.init_cameras(config.REALSENSE_CAMERAS, config.EXTRA_REALSENSE_CAMERAS)
         if self.display_image:
             self.img_queue = queue.Queue()
             self.displayer = ImageDisplayer(self.img_queue, self.url)
             self.displayer.start()
 
-        if set_load:
-            input("Put arm into programing mode and press enter.")
-            requests.post(self.url + "set_load", json=self.config.LOAD_PARAM)
-            input("Put arm into execution mode and press enter.")
-            for _ in range(2):
-                self._recover()
-                time.sleep(1)
+        # if set_load:
+        #     input("Put arm into programing mode and press enter.")
+        #     requests.post(self.url + "set_load", json=self.config.LOAD_PARAM)
+        #     input("Put arm into execution mode and press enter.")
+        #     for _ in range(2):
+        #         self._recover()
+        #         time.sleep(1)
 
         # if not fake_env:
         #     from pynput import keyboard
@@ -385,9 +403,19 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-6-2"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-6-26-2"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_id = 0
+
+        self.cur_position = np.zeros(3, dtype=np.float32)
+        self.cur_oritation = np.zeros(4, dtype=np.float32)
+
+        self.last_hand_joint = [
+            3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
+            3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
+            3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
+            4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
+        ]
 
         self.changed_hand_joint = [
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
@@ -399,29 +427,29 @@ class DensoEnv(gym.Env):
         print("Initialized Denso")
     
 
-    def clip_safety_box(self, pose: np.ndarray) -> np.ndarray:
-        """Clip the pose to be within the safety box."""
-        pose[:3] = np.clip(
-            pose[:3], self.xyz_bounding_box.low, self.xyz_bounding_box.high
-        )
-        euler = Rotation.from_quat(pose[3:]).as_euler("xyz")
+    # def clip_safety_box(self, pose: np.ndarray) -> np.ndarray:
+    #     """Clip the pose to be within the safety box."""
+    #     pose[:3] = np.clip(
+    #         pose[:3], self.xyz_bounding_box.low, self.xyz_bounding_box.high
+    #     )
+    #     euler = Rotation.from_quat(pose[3:]).as_euler("xyz")
 
-        # Clip first euler angle separately due to discontinuity from pi to -pi
-        sign = np.sign(euler[0])
-        euler[0] = sign * (
-            np.clip(
-                np.abs(euler[0]),
-                self.rpy_bounding_box.low[0],
-                self.rpy_bounding_box.high[0],
-            )
-        )
+    #     # Clip first euler angle separately due to discontinuity from pi to -pi
+    #     sign = np.sign(euler[0])
+    #     euler[0] = sign * (
+    #         np.clip(
+    #             np.abs(euler[0]),
+    #             self.rpy_bounding_box.low[0],
+    #             self.rpy_bounding_box.high[0],
+    #         )
+    #     )
 
-        euler[1:] = np.clip(
-            euler[1:], self.rpy_bounding_box.low[1:], self.rpy_bounding_box.high[1:]
-        )
-        pose[3:] = Rotation.from_euler("xyz", euler).as_quat()
+    #     euler[1:] = np.clip(
+    #         euler[1:], self.rpy_bounding_box.low[1:], self.rpy_bounding_box.high[1:]
+    #     )
+    #     pose[3:] = Rotation.from_euler("xyz", euler).as_quat()
 
-        return pose
+    #     return pose
 
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
@@ -437,66 +465,70 @@ class DensoEnv(gym.Env):
 
         # action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        # 限制 xyz 的增量在 [-0.2, 0.2] 范围内
+        # 限制 xyz 的增量在 [-0.05, 0.05] 范围内
         print("action = ", action)
-        desired_pos = action[:3]
-        current_pos = self.cur_position  # 当前 TCP 位置
-        delta = desired_pos - current_pos
+        # desired_pos = action[:3]
+        # current_pos = self.cur_position  # 当前 TCP 位置
+        # delta = desired_pos - current_pos
 
-        # 对 delta 做裁剪，限制最大位移为 0.2
-        clipped_delta = np.clip(delta, -0.1, 0.1)
-        clipped_pos = current_pos + clipped_delta
+        # # 对 delta 做裁剪，限制最大位移为 0.05
+        # clipped_delta = np.clip(delta, -0.01, 0.01)
+        # clipped_pos = current_pos + clipped_delta
 
-        # 限制姿态的增量
-        desired_ori = R.from_quat(action[3:7])          # 目标四元数
-        current_ori = R.from_quat(self.cur_oritation) # 当前四元数
+        # # 限制姿态的增量
+        # desired_ori = R.from_quat(action[3:7])          # 目标四元数
+        # current_ori = R.from_quat(self.cur_oritation) # 当前四元数
 
-        delta_rot = desired_ori * current_ori.inv()     # 相对旋转
-        angle = delta_rot.magnitude()                   # 旋转角度（弧度）
+        # delta_rot = desired_ori * current_ori.inv()     # 相对旋转
+        # angle = delta_rot.magnitude()                   # 旋转角度（弧度）
 
-        max_angle = np.deg2rad(5)  # 最大允许的旋转角度（单位：弧度）
-        if angle > max_angle:
-            scale = max_angle / angle
-            limited_delta_rot = R.from_rotvec(delta_rot.as_rotvec() * scale)
-            limited_desired_ori = limited_delta_rot * current_ori
-        else:
-            limited_desired_ori = desired_ori
+        # max_angle = np.deg2rad(0.5)  # 最大允许的旋转角度（单位：弧度）
+        # if angle > max_angle:
+        #     scale = max_angle / angle
+        #     limited_delta_rot = R.from_rotvec(delta_rot.as_rotvec() * scale)
+        #     limited_desired_ori = limited_delta_rot * current_ori
+        # else:
+        #     limited_desired_ori = desired_ori
 
 
         # 前7维为机械臂位姿
         arm_action = action[:7].copy()
-        # print("arm_action before= ", arm_action)
-        arm_action[:3] = clipped_pos
-        arm_action[3:7] = limited_desired_ori.as_quat()
+        # arm_action[:3] = clipped_pos
+        # arm_action[3:7] = limited_desired_ori.as_quat()
 
         self.ros_interface.publish_arm_action(arm_action)
 
         # 后16维为灵巧手关节角
         # leap_hand_action = action[7:]
         leap_hand_action = self.changed_hand_joint
-        self._send_leap_hand_command(leap_hand_action)
-        time.sleep(2)
-        # input("debug")
-        # leap_hand_action[3] = leap_hand_action[3]-3.14
-        # leap_hand_action[7] = leap_hand_action[7]-1.57
-        
-        # self._send_leap_hand_command(self.curr_leap_hand_pos + 0.1)
-
-        self.curr_path_length += 1
+        if self.last_hand_joint != self.changed_hand_joint:
+            self._send_leap_hand_command(leap_hand_action)
+            self.last_hand_joint = self.changed_hand_joint
+        # time.sleep(2.1)
         dt = time.time() - start_time
         time.sleep(max(0, (1.0 / self.hz) - dt))
+        t_end = time.time()
+        print(f"[publish End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
 
-        self._update_cur_position()
+        self.curr_path_length += 1
+        self._update_cur_position(arm_action)
+
+        t_end = time.time()
+        # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
+        # print("after publish arm action cur_position = ", self.cur_position)
         self.save_training_frame()
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
         # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
         done = reward or self.terminate
+        t_end = time.time()
+        # print(f"[Step End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         return ob, int(reward), done, False, {"succeed": reward}
     
 
     def compute_reward(self, obs) -> bool:
+        print(" in compute_reward")
         current_pose = obs["state"]
         # convert from quat to euler first
         current_rot = Rotation.from_quat(current_pose[3:7]).as_matrix()
@@ -517,8 +549,15 @@ class DensoEnv(gym.Env):
         display_images = {}
         full_res_images = {}  # New dictionary to store full resolution cropped images
         for key, cap in self.cap.items():
+            if key == "side_camera":
+                continue
             try:
-                rgb = cap.read()
+                frame = cap.read()
+                if frame.ndim == 3 and frame.shape[2] == 4:
+                    rgb = frame[..., :3]   # BGR 彩色
+                else:
+                    rgb = frame
+                rgb = rgb.astype(np.uint8)
                 # cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
                 cropped_rgb = rgb #当前不需要裁剪
                 resized = cv2.resize(
@@ -533,7 +572,7 @@ class DensoEnv(gym.Env):
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS)
+                self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_im()
 
         # Store full resolution cropped images separately
@@ -543,9 +582,52 @@ class DensoEnv(gym.Env):
         if self.display_image:
             self.img_queue.put(display_images)
         return images
+
+
+    def get_rgb_and_dpth_im(self) -> Dict[str, np.ndarray]:
+        """Get images from the realsense cameras."""
+        images = {}
+        depth_images = {}
+        display_images = {}
+        full_res_images = {}  # New dictionary to store full resolution cropped images
+        for key, cap in self.cap.items():
+            try:
+                frame = cap.read()
+                if frame.ndim == 3 and frame.shape[2] == 4:
+                    rgb = frame[..., :3]   # BGR 彩色
+                    depth = frame[..., 3]    # 深度
+                else:
+                    rgb = frame
+                    depth = None
+                # cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
+                cropped_rgb = rgb #当前不需要裁剪
+                if key in self.observation_space["images"]:
+                    resized = cv2.resize(
+                        cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
+                    )
+                else:
+                    resized = cv2.resize(
+                        cropped_rgb, (640, 480)
+                    )
+                    
+                images[key] = resized[..., ::-1]
+                depth_images[key] = depth
+                display_images[key] = resized
+                display_images[key + "_full"] = cropped_rgb
+                full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
+            except queue.Empty:
+                input(
+                    f"{key} camera frozen. Check connect, then press enter to relaunch..."
+                )
+                cap.close()
+                self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
+                return self.get_im()
+
+        return images, depth_images
     
 
     def reset(self, joint_reset=False, **kwargs):
+        print("densoenv reset")
         self.data_count = 0
         self.last_gripper_act = time.time()
         requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
@@ -603,13 +685,19 @@ class DensoEnv(gym.Env):
         except Exception as e:
             print(f"Failed to save video: {e}")
 
-    def init_cameras(self, name_serial_dict=None):
+    def init_cameras(self, name_serial_dict=None, extra_cameras_dict=None):
         """Init both wrist cameras."""
         if self.cap is not None:  # close cameras if they are already open
             self.close_cameras()
 
         self.cap = OrderedDict()
         for cam_name, kwargs in name_serial_dict.items():
+            cap = VideoCapture(
+                RSCapture(name=cam_name, **kwargs)
+            )
+            self.cap[cam_name] = cap
+
+        for cam_name, kwargs in extra_cameras_dict.items():
             cap = VideoCapture(
                 RSCapture(name=cam_name, **kwargs)
             )
@@ -658,28 +746,39 @@ class DensoEnv(gym.Env):
             time.sleep(step_time)
             
 
-    def _update_cur_position(self):
+    def _update_cur_position(self, arm_action, timeout=10.0):
         """
         Internal function to get the latest state of the robot and its gripper.
         """
-        position, orientation = self.ros_interface.get_current_robot_ee()
-        joint_position = self.ros_interface.get_current_joint()
-        self.cur_position = position
-        self.cur_oritation = orientation
+        start = time.time()
+        threshold = 0.002
+        while np.linalg.norm(arm_action[:3] - self.cur_position) > threshold:
+            position, orientation = self.ros_interface.get_current_robot_ee()
+            joint_position = self.ros_interface.get_current_joint()
+            # print(" before update cur_position = ", self.cur_position)
+            self.cur_position = position
+            self.cur_oritation = orientation
+            # print("cur_position = ", self.cur_position)
 
-        self.joint_position = joint_position
+            self.joint_position = joint_position
 
-        # if not self.is_arm_only:
-        hand_joint_msg = self.ros_interface.get_current_leap_position()
-
-        # if hand_joint_msg is not None:
-        #     self.curr_leap_hand_pos = np.array(hand_joint_msg)
-        # else:
-        #     print("Warning: Hand joint data unavailable.")
-        self.curr_leap_hand_pos = np.array(hand_joint_msg)
+            # if not self.is_arm_only:
+            hand_joint_msg = self.ros_interface.get_current_leap_position()
+            self.curr_leap_hand_pos = np.array(hand_joint_msg)
+            if time.time() - start > timeout:
+                print("[WARN] 等待机械臂到位超时")
+                break
+            time.sleep(0.02)
 
 
     def _get_obs(self) -> dict:
+        # 打印调用栈
+        # import inspect
+        # print(">>> _get_obs called from:")
+        # for frame in inspect.stack()[1:4]:  # 打印最近3层调用栈
+        #     print(f"  ↪ {frame.function}() in {frame.filename}:{frame.lineno}")
+
+
         images = self.get_im()
         front_camera_image = images["front_camera"]
         # side_camera_image = images["side_camera"]
@@ -693,6 +792,8 @@ class DensoEnv(gym.Env):
             ])
         else :
             # print("_get_obs is_arm_only2 = ")
+            # print("self.cur_position = ", self.cur_position)
+            # print("self.cur_oritation = ", self.cur_oritation)
             state_flattened = np.concatenate([
                 np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
                 np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
@@ -728,13 +829,17 @@ class DensoEnv(gym.Env):
         os.makedirs(frame_dir, exist_ok=True)
 
         # 保存图像
-        images = self.get_im()
+        images, depth_img = self.get_rgb_and_dpth_im()
         for cam_name, img in images.items():
             # print("cam_name = ", cam_name)
+
+            depth = depth_img[cam_name]
             if cam_name == "front_camera":
                 cv2.imwrite(os.path.join(frame_dir, "color_image.jpg"), img[..., ::-1])
+                cv2.imwrite(os.path.join(frame_dir, "depth_image.png"), depth)
             elif cam_name == "side_camera":
                 cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), img[..., ::-1])
+                cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), depth)
 
         # 保存 state（TCP + orientation + hand joints）
         # if not self.is_arm_only:
