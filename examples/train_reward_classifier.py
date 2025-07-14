@@ -24,6 +24,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
+flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 
 
 def main(_):
@@ -37,14 +38,19 @@ def main(_):
     # stack_observation_space = space_stack(observation_space, 1)
     
     # Create buffer for positive transitions
+    print("env.observation_space = ", env.observation_space)
     pos_buffer = ReplayBuffer(
         observation_space=env.observation_space,
         action_space=env.action_space,
         capacity=10000,
         include_label=True,
     )
+    
+    if FLAGS.is_pick_task:
+        success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*success*.pkl"))
+    else:
+        success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*success*.pkl"))
 
-    success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
     for path in success_paths:
         success_data = []
         with open(path, "rb") as f:
@@ -73,7 +79,12 @@ def main(_):
         capacity=10000,
         include_label=True,
     )
-    failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
+
+    if FLAGS.is_pick_task:
+        failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*failure*.pkl"))
+    else:
+        failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*failure*.pkl"))
+
     for path in failure_paths:
          failure_data = []
          with open(path, "rb") as f:
@@ -160,12 +171,20 @@ def main(_):
             f"Epoch: {epoch+1}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}"
         )
 
-    checkpoints.save_checkpoint(
-        os.path.join(os.getcwd(), "classifier_ckpt/"),
-        classifier,
-        step=FLAGS.num_epochs,
-        overwrite=True,
-    )
+    if FLAGS.is_pick_task:
+        checkpoints.save_checkpoint(
+            os.path.join(os.getcwd(), "classifier_ckpt_pick/"),
+            classifier,
+            step=FLAGS.num_epochs,
+            overwrite=True,
+        )
+    else:
+        checkpoints.save_checkpoint(
+            os.path.join(os.getcwd(), "classifier_ckpt_pick_place/"),
+            classifier,
+            step=FLAGS.num_epochs,
+            overwrite=True,
+        )
     
 
 if __name__ == "__main__":

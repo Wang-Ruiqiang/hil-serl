@@ -168,26 +168,22 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         timer.tick("total")
 
         with timer.context("sample_actions"):
-            # if step < config.random_steps:
-            #     actions = env.action_space.sample()
-            # else:
-            sampling_rng, key = jax.random.split(sampling_rng)
             print_green(f"obs[state] =  {obs['state']}")
-            actions = agent.sample_actions(
-                observations=obs,
-                seed=key,
-            )
+            if step < config.random_steps:
+                print("random actions")
+                actions = env.action_space.sample()
+            else:
+                sampling_rng, key = jax.random.split(sampling_rng)
+                actions = agent.sample_actions(
+                    observations=obs,
+                    seed=key,
+                )
             actions = np.asarray(jax.device_get(actions))
 
         # Step environment
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
             next_obs, reward, done, truncated, info = env.step(actions)
-            print("info = ", info)
-            # if "left" in info:
-            #     info.pop("left")
-            # if "right" in info:
-            #     info.pop("right")
 
             # override the action with the intervention action
             print("actions before intervene= ", actions)
@@ -200,6 +196,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 already_intervened = True
             else:
                 already_intervened = False
+            
+            if "is_pick" in info:
+                is_pick = info["is_pick"]
+            else:
+                is_pick = True
 
             running_return += reward
             transition = dict(
@@ -219,7 +220,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 demo_transitions.append(copy.deepcopy(transition))
 
             obs = next_obs
-            if done or truncated:
+            if done and is_pick:
+                print_green("pick task done")
+
+            if done and not is_pick:
                 print_green(f"done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps

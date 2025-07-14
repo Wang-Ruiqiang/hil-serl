@@ -66,28 +66,28 @@ class DefaultEnvConfig:
         "side_camera": "234222300515",
     }
     IMAGE_CROP: dict[str, callable] = {}
-    TARGET_POSE: np.ndarray = np.zeros((6,))
-    GRASP_POSE: np.ndarray = np.zeros((6,))
+    TARGET_POSE: np.ndarray = np.zeros((7,))
+    # GRASP_POSE: np.ndarray = np.zeros((6,))
     REWARD_THRESHOLD: np.ndarray = np.zeros((6,))
     ACTION_SCALE = np.zeros((3,))
-    RESET_POSE = np.zeros((6,))
-    RANDOM_RESET = False
-    RANDOM_XY_RANGE = (0.0,)
-    RANDOM_RZ_RANGE = (0.0,)
-    ABS_POSE_LIMIT_HIGH = np.zeros((6,))
-    ABS_POSE_LIMIT_LOW = np.zeros((6,))
-    COMPLIANCE_PARAM: Dict[str, float] = {}
-    RESET_PARAM: Dict[str, float] = {}
-    PRECISION_PARAM: Dict[str, float] = {}
-    LOAD_PARAM: Dict[str, float] = {
-        "mass": 0.0,
-        "F_x_center_load": [0.0, 0.0, 0.0],
-        "load_inertia": [0, 0, 0, 0, 0, 0, 0, 0, 0]
-    }
+    # RESET_POSE = np.zeros((6,))
+    # RANDOM_RESET = False
+    # RANDOM_XY_RANGE = (0.0,)
+    # RANDOM_RZ_RANGE = (0.0,)
+    # ABS_POSE_LIMIT_HIGH = np.zeros((6,))
+    # ABS_POSE_LIMIT_LOW = np.zeros((6,))
+    # COMPLIANCE_PARAM: Dict[str, float] = {}
+    # RESET_PARAM: Dict[str, float] = {}
+    # PRECISION_PARAM: Dict[str, float] = {}
+    # LOAD_PARAM: Dict[str, float] = {
+    #     "mass": 0.0,
+    #     "F_x_center_load": [0.0, 0.0, 0.0],
+    #     "load_inertia": [0, 0, 0, 0, 0, 0, 0, 0, 0]
+    # }
     DISPLAY_IMAGE: bool = True
-    GRIPPER_SLEEP: float = 0.6
+    # GRIPPER_SLEEP: float = 0.6
     MAX_EPISODE_LENGTH: int = 200
-    JOINT_RESET_PERIOD: int = 0
+    # JOINT_RESET_PERIOD: int = 0
 
 
 ##############################################################################
@@ -258,28 +258,28 @@ class DensoEnv(gym.Env):
     ):
         self.action_scale = config.ACTION_SCALE
         self._TARGET_POSE = config.TARGET_POSE
-        self._RESET_POSE = config.RESET_POSE
+        # self._RESET_POSE = config.RESET_POSE
         self._REWARD_THRESHOLD = config.REWARD_THRESHOLD
         self.url = config.SERVER_URL
         self.config = config
         self.max_episode_length = config.MAX_EPISODE_LENGTH
         self.display_image = config.DISPLAY_IMAGE
-        self.gripper_sleep = config.GRIPPER_SLEEP
+        # self.gripper_sleep = config.GRIPPER_SLEEP
         self.is_arm_only = config.IS_ARM_ONLY
 
 
 
         # convert last 3 elements from euler to quat, from size (6,) to (7,)
-        self.resetpos = np.concatenate(
-            [config.RESET_POSE[:3], euler_2_quat(config.RESET_POSE[3:])]
-        )
+        # self.resetpos = np.concatenate(
+        #     [config.RESET_POSE[:3], euler_2_quat(config.RESET_POSE[3:])]
+        # )
         self.last_gripper_act = time.time()
         self.lastsent = time.time()
-        self.randomreset = config.RANDOM_RESET
-        self.random_xy_range = config.RANDOM_XY_RANGE
-        self.random_rz_range = config.RANDOM_RZ_RANGE
+        # self.randomreset = config.RANDOM_RESET
+        # self.random_xy_range = config.RANDOM_XY_RANGE
+        # self.random_rz_range = config.RANDOM_RZ_RANGE
         self.hz = hz
-        self.joint_reset_cycle = config.JOINT_RESET_PERIOD  # reset the robot joint every 200 cycles
+        # self.joint_reset_cycle = config.JOINT_RESET_PERIOD  # reset the robot joint every 200 cycles
 
         self.save_video = save_video
         if self.save_video:
@@ -299,10 +299,10 @@ class DensoEnv(gym.Env):
         # )
         # Action/Observation Space
         if not self.is_arm_only:
-            print("init is_arm_only1 = ")
+            print("init arm with hand")
             self.action_space = gym.spaces.Box(
-                np.ones((23,), dtype=np.float32) * -1,
-                np.ones((23,), dtype=np.float32),
+                np.ones((22,), dtype=np.float32) * -1,
+                np.ones((22,), dtype=np.float32),
             )
 
             self.observation_space = gym.spaces.Dict(
@@ -326,10 +326,10 @@ class DensoEnv(gym.Env):
             )
             
         else :
-            print("init is_arm_only2")
+            print("init arm only")
             self.action_space = gym.spaces.Box(
-                np.ones((7,), dtype=np.float32) * -1,
-                np.ones((7,), dtype=np.float32),
+                np.ones((6,), dtype=np.float32) * -1,
+                np.ones((6,), dtype=np.float32),
             )
             self.observation_space = gym.spaces.Dict(
                 {
@@ -340,6 +340,9 @@ class DensoEnv(gym.Env):
                             ),
                             "tcp_ori": gym.spaces.Box(
                                 -np.inf, np.inf, shape=(4,)
+                            ),
+                            "gripper_pose": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(1,), dtype=np.int32
                             )
                         }
                     ),
@@ -403,7 +406,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-6-26-2"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-7-11-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_id = 0
 
@@ -417,12 +420,13 @@ class DensoEnv(gym.Env):
             4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
         ]
 
-        self.changed_hand_joint = [
+        self.gripper_close_joint = [
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
             2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
             3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
             4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
         ]
+        self.hand_state = 0 #hand opened lable
 
         print("Initialized Denso")
     
@@ -454,64 +458,44 @@ class DensoEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
+        action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        # 计算发送频率
-        # current_time = time.time()
-        # if hasattr(self, "_last_step_time") and self._last_step_time is not None:
-        #     dt = current_time - self._last_step_time
-        #     freq = 1.0 / dt if dt > 0 else float('inf')
-        #     print(f"[Step Frequency] Δt = {dt:.4f}s, Frequency = {freq:.2f} Hz")
-        # self._last_step_time = current_time
-
-        # action = np.clip(action, self.action_space.low, self.action_space.high)
-
-        # 限制 xyz 的增量在 [-0.05, 0.05] 范围内
         print("action = ", action)
-        # desired_pos = action[:3]
-        # current_pos = self.cur_position  # 当前 TCP 位置
-        # delta = desired_pos - current_pos
 
-        # # 对 delta 做裁剪，限制最大位移为 0.05
-        # clipped_delta = np.clip(delta, -0.01, 0.01)
-        # clipped_pos = current_pos + clipped_delta
+        xyz_delta = action[:3]
 
-        # # 限制姿态的增量
-        # desired_ori = R.from_quat(action[3:7])          # 目标四元数
-        # current_ori = R.from_quat(self.cur_oritation) # 当前四元数
-
-        # delta_rot = desired_ori * current_ori.inv()     # 相对旋转
-        # angle = delta_rot.magnitude()                   # 旋转角度（弧度）
-
-        # max_angle = np.deg2rad(0.5)  # 最大允许的旋转角度（单位：弧度）
-        # if angle > max_angle:
-        #     scale = max_angle / angle
-        #     limited_delta_rot = R.from_rotvec(delta_rot.as_rotvec() * scale)
-        #     limited_desired_ori = limited_delta_rot * current_ori
-        # else:
-        #     limited_desired_ori = desired_ori
+        self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
+        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
 
-        # 前7维为机械臂位姿
-        arm_action = action[:7].copy()
-        # arm_action[:3] = clipped_pos
-        # arm_action[3:7] = limited_desired_ori.as_quat()
+        # GET ORIENTATION FROM ACTION
+        rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        # self.nextpos[3:] = (
+        #     Rotation.from_euler("xyz", action[3:6] * self.action_scale[1])
+        #     * Rotation.from_quat(self.cur_oritation)
+        # ).as_quat()
+        self.nextpos[3:] = (
+            Rotation.from_euler("xyz", rpy_delta * self.action_scale[1])
+            * Rotation.from_quat(self.cur_oritation)
+        ).as_quat()
+        
+        print("nextpos = ", self.nextpos)
+        self.ros_interface.publish_arm_action(self.nextpos)
 
-        self.ros_interface.publish_arm_action(arm_action)
 
-        # 后16维为灵巧手关节角
-        # leap_hand_action = action[7:]
-        leap_hand_action = self.changed_hand_joint
-        if self.last_hand_joint != self.changed_hand_joint:
+        leap_hand_action = self.gripper_close_joint
+        if self.last_hand_joint != self.gripper_close_joint:
             self._send_leap_hand_command(leap_hand_action)
-            self.last_hand_joint = self.changed_hand_joint
+            self.last_hand_joint = self.gripper_close_joint
+
         # time.sleep(2.1)
         dt = time.time() - start_time
         time.sleep(max(0, (1.0 / self.hz) - dt))
         t_end = time.time()
-        print(f"[publish End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
+        print(f"[publish End] {t_end:.6f}, Step总耗时(含sleep): {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
 
         self.curr_path_length += 1
-        self._update_cur_position(arm_action)
+        self._update_cur_position(self.nextpos)
 
         t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
@@ -520,6 +504,7 @@ class DensoEnv(gym.Env):
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
+        print(f"reward in denso_env = {reward}")
         # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
         done = reward or self.terminate
         t_end = time.time()
@@ -528,15 +513,14 @@ class DensoEnv(gym.Env):
     
 
     def compute_reward(self, obs) -> bool:
-        print(" in compute_reward")
         current_pose = obs["state"]
         # convert from quat to euler first
         current_rot = Rotation.from_quat(current_pose[3:7]).as_matrix()
-        target_rot = Rotation.from_euler("xyz", self._TARGET_POSE[3:]).as_matrix()
+        target_rot = Rotation.from_quat(self._TARGET_POSE[3:7]).as_matrix()
+        # target_rot = Rotation.from_euler("xyz", self._TARGET_POSE[3:]).as_matrix()
         diff_rot = current_rot.T  @ target_rot
         diff_euler = Rotation.from_matrix(diff_rot).as_euler("xyz")
-        delta = np.abs(np.hstack([current_pose[:3] - self._TARGET_POSE[:3], diff_euler]))
-        # print(f"Delta: {delta}")
+        delta = np.abs(np.hstack([current_pose[:3] - self._TARGET_POSE[:3], [0, 0, 0]]))
         if np.all(delta < self._REWARD_THRESHOLD):
             return True
         else:
@@ -630,7 +614,7 @@ class DensoEnv(gym.Env):
         print("densoenv reset")
         self.data_count = 0
         self.last_gripper_act = time.time()
-        requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
+        # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         if self.save_video:
             self.save_video_recording()
 
@@ -765,6 +749,14 @@ class DensoEnv(gym.Env):
             # if not self.is_arm_only:
             hand_joint_msg = self.ros_interface.get_current_leap_position()
             self.curr_leap_hand_pos = np.array(hand_joint_msg)
+
+            dist_close = np.linalg.norm(self.curr_leap_hand_pos - self.gripper_close_joint)
+
+            if dist_close < 0.05:
+                self.hand_state = 1
+            else:
+                self.hand_state = 0
+
             if time.time() - start > timeout:
                 print("[WARN] 等待机械臂到位超时")
                 break
@@ -772,31 +764,21 @@ class DensoEnv(gym.Env):
 
 
     def _get_obs(self) -> dict:
-        # 打印调用栈
-        # import inspect
-        # print(">>> _get_obs called from:")
-        # for frame in inspect.stack()[1:4]:  # 打印最近3层调用栈
-        #     print(f"  ↪ {frame.function}() in {frame.filename}:{frame.lineno}")
-
-
         images = self.get_im()
         front_camera_image = images["front_camera"]
         # side_camera_image = images["side_camera"]
 
         if not self.is_arm_only:
-            # print("_get_obs is_arm_only1 = ")
             state_flattened = np.concatenate([
                 np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
                 np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
                 np.array(self.curr_leap_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
             ])
         else :
-            # print("_get_obs is_arm_only2 = ")
-            # print("self.cur_position = ", self.cur_position)
-            # print("self.cur_oritation = ", self.cur_oritation)
             state_flattened = np.concatenate([
                 np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
                 np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
+                np.array(self.hand_state, dtype=np.int32).flatten(),  # TCP 旋转 (4,)
             ])
 
         return copy.deepcopy({

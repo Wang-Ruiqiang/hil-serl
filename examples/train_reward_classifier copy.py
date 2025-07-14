@@ -15,7 +15,7 @@ from serl_launcher.utils.train_utils import concat_batches
 from serl_launcher.vision.data_augmentations import batched_random_crop
 from serl_launcher.networks.reward_classifier import create_classifier
 
-from experiments.mappings import CONFIG_MAPPING
+from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
@@ -25,8 +25,8 @@ flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
 
 def main(_):
-    assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
-    config = CONFIG_MAPPING[FLAGS.exp_name]()
+    assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
+    config = NEW_MAPPING[FLAGS.exp_name]()
     env = config.get_environment(fake_env=True, save_video=False, classifier=False)
 
     devices = jax.local_devices()

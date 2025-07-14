@@ -44,6 +44,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
         self.log_file_path = "classifier_test.txt"
+        self.is_pick = True  # whether the task is pick or place, used for classifier
 
     def compute_reward(self, obs):
         if self.reward_classifier_func is not None:
@@ -51,7 +52,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
                 log_msg = f"obs = {obs}\n"
                 f.write(log_msg)
                 f.flush()
-            return self.reward_classifier_func(obs)
+            return self.reward_classifier_func(obs, self.is_pick)
         return 0
 
     def step(self, action):
@@ -59,11 +60,14 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         obs, rew, done, truncated, info = self.env.step(action)
         rew = self.compute_reward(obs)
         done = done or rew
+
         info['succeed'] = bool(rew)
+        info['is_pick'] = self.is_pick
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        
+        if done and self.is_pick:
+            self.is_pick = False  # switch to place task after pick is done
         # print("reward = ", rew)
         return obs, rew, done, truncated, info
 
@@ -189,20 +193,13 @@ class KeyboardIntervention(gym.ActionWrapper):
     def __init__(self, env, action_indices=None):
         super().__init__(env)
 
-        self.gripper_enabled = True
-        if self.action_space.shape == (6,):
-            self.gripper_enabled = False
+        # self.gripper_enabled = True
+        # if self.action_space.shape == (6,):
+        #     self.gripper_enabled = False
 
         self.expert = KeyboardExpert()
-        self.left, self.right = False, False
         self.action_indices = action_indices
 
-        # self.gripper_open_joint = [
-        #     2.989728450775146484, 2.931437253952026367, 4.238389015197753906, 3.963806390762329102,
-        #     3.604854822158813477, 3.202951908111572266, 3.466796636581420898, 4.319689750671386719,
-        #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        #     4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
-        # ]
         self.gripper_open_joint = [
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
             2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
@@ -223,8 +220,7 @@ class KeyboardIntervention(gym.ActionWrapper):
         Output:
         - action: spacemouse action if nonezero; else, policy action
         """
-        expert_a, buttons = self.expert.get_action()
-        self.left, self.right = tuple(buttons)
+        expert_a = self.expert.get_action()
         intervened = False
         
         # 人为输入动作非0,触发干预
@@ -237,52 +233,59 @@ class KeyboardIntervention(gym.ActionWrapper):
             expert_a = filtered_expert_a
 
         if intervened:
-            return expert_a, True
+            new_action = np.zeros(6, dtype=np.float32)
+            new_action[:3] = expert_a[:3]
+            if expert_a[3] > 0.8 :
+                # hand_joint = self.gripper_close_joint
+                self.env.changed_hand_joint = self.gripper_close_joint
+            if expert_a[4] > 0.8 :
+                # hand_joint = self.gripper_open_joint
+                self.env.changed_hand_joint = self.gripper_open_joint
+
+            return new_action, True
 
         return action, False
 
     def step(self, action):
         new_action, replaced = self.action(action)
-        if replaced:
-            print("Keyboard intervention action true")
-            current_obs = self.env._get_obs()  # 获取当前状态（注意根据你的 wrapper 修改）
+        # if replaced:
+        #     print("Keyboard intervention action true")
+        #     current_obs = self.env._get_obs()  # 获取当前状态（注意根据你的 wrapper 修改）
             
-            state = current_obs["state"]
-            # print("state tcp pos in keyboardintervention = ", state[:3])
-            tcp_pos = state[:3]
-            tcp_ori = state[3:7]
-            # 如果训练包含hand
-            hand_included = False
-            if hand_included:
-                hand_joint = state[7:]
+        #     state = current_obs["state"]
+        #     # print("state tcp pos in keyboardintervention = ", state[:3])
+        #     tcp_pos = state[:3]
+        #     tcp_ori = state[3:7]
+        #     # 如果训练包含hand
+        #     hand_included = False
+        #     if hand_included:
+        #         hand_joint = state[7:]
 
 
-            # 对 xyz 增量应用到当前坐标
-            delta_pos = new_action[:3]
-            new_tcp_pos = tcp_pos + delta_pos
-            if new_action[3] > 0 :
-                hand_joint = self.gripper_close_joint
-                self.env.changed_hand_joint = self.gripper_close_joint
-            if new_action[4] > 0 :
-                hand_joint = self.gripper_open_joint
-                self.env.changed_hand_joint = self.gripper_open_joint
+        #     # 对 xyz 增量应用到当前坐标
+        #     delta_pos = new_action[:3]
+        #     new_tcp_pos = tcp_pos + delta_pos
+        #     if new_action[3] > 0 :
+        #         hand_joint = self.gripper_close_joint
+        #         self.env.changed_hand_joint = self.gripper_close_joint
+        #     if new_action[4] > 0 :
+        #         hand_joint = self.gripper_open_joint
+        #         self.env.changed_hand_joint = self.gripper_open_joint
 
-            # 对四元数方向的旋转做增量（简化处理，只做平移）
-            # 或者你可以用 scipy.spatial.transform.Rotation 实现四元数旋转叠加
-            if hand_included:
-                new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
-            else:
-                new_action = np.concatenate([new_tcp_pos, tcp_ori])
+        #     # 对四元数方向的旋转做增量（简化处理，只做平移）
+        #     # 或者你可以用 scipy.spatial.transform.Rotation 实现四元数旋转叠加
+        #     if hand_included:
+        #         new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
+        #     else:
+        #         new_action = np.concatenate([new_tcp_pos, tcp_ori])
 
-            self.print_action = True
-            
-
+        #     self.print_action = True
+        
         obs, rew, done, truncated, info = self.env.step(new_action)
+
         if replaced:
             info["intervene_action"] = new_action
 
-        info["left"] = self.left
-        info["right"] = self.right
         return obs, rew, done, truncated, info
     
 

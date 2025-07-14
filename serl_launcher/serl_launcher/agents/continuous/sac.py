@@ -398,34 +398,9 @@ class SACAgent(flax.struct.PyTreeNode):
         # jax.debug.print("obs state = {}", observations["state"])
         dist = self.forward_policy(observations, rng=seed, train=False)
         if argmax:
-            actions =  dist.mode()
+            return dist.mode()
         else:
-            actions =  dist.sample(seed=seed)
-
-        obs_state = jnp.asarray(observations["state"])
-        obs_state = obs_state.reshape(-1)
-        cur_position = obs_state[:3]
-        cur_oritation = obs_state[3:7]
-
-        actions = jnp.reshape(actions, (-1,))
-        # jax.debug.print("action before clip = {}", actions)
-        desired_pos = actions[:3]
-        current_pos = cur_position  # 当前 TCP 位置
-        delta = desired_pos - current_pos
-
-        # 对 delta 做裁剪，限制最大位移为 0.01
-        clipped_delta = jnp.clip(delta, -0.01, 0.01)
-        clipped_pos = current_pos + clipped_delta
-        actions = actions.at[..., :3].set(clipped_pos)
-
-        desired_ori = actions[3:7]
-        current_ori = cur_oritation
-        max_angle = jnp.deg2rad(0.5)
-        limited_desired_ori = self.limit_quat_delta(desired_ori, current_ori, max_angle)
-        actions = actions.at[..., 3:7].set(limited_desired_ori)
-
-        actions = actions.at[..., 3:7].set(self.normalize_quaternion(actions[..., 3:7]))
-        return actions
+            return dist.sample(seed=seed)
 
     @classmethod
     def create(

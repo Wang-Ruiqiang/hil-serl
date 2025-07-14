@@ -15,6 +15,20 @@ palm_lower2denso_end_tf = np.array([
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
 ])
 
+gripper_open_joint = [
+    2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+    2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+    3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+]
+
+gripper_close_joint = [
+    3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
+    3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
+    3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
+    4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
+]  
+
 class ObsHistoryBuffer:
     # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
     def __init__(self, obs_horizon=3, image_keys=("front_camera",), proprio_key="state"):
@@ -56,14 +70,6 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-
-palm_lower2denso_end_tf = np.array([
-    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
-    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
-    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
-    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
-])
-
 def get_frame_data(frame_path, robot_urdf_path):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
@@ -92,6 +98,11 @@ def get_frame_data(frame_path, robot_urdf_path):
             # print("all_joint_values = ", all_joint_values)
             # input("enter")
     # print("all_joint_values = ", all_joint_values)
+    dist_open = np.linalg.norm(hand_joint - gripper_open_joint)
+    if dist_open < 0.2:
+        hand_state = 0
+    else:
+        hand_state = 1
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
     # print("tcp_pos = ", tcp_pos)
     # print("tcp_ori = ", tcp_ori)
@@ -111,6 +122,7 @@ def get_frame_data(frame_path, robot_urdf_path):
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
         np.array(tcp_ori, dtype=np.float32).flatten(),
+        np.array(hand_state, dtype=np.int32).flatten(),
     ])
 
     resized_image = cv2.resize(color_image, (320,240))
@@ -132,14 +144,14 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
     data = []
     clip_ranges = []
     global_idx = 0
-    action_space = gym.spaces.Box(
-        np.ones((23,), dtype=np.float32) * -1,
-        np.ones((23,), dtype=np.float32),
-    )
     # action_space = gym.spaces.Box(
-    #     np.ones((7,), dtype=np.float32) * -1,
-    #     np.ones((7,), dtype=np.float32),
+    #     np.ones((23,), dtype=np.float32) * -1,
+    #     np.ones((23,), dtype=np.float32),
     # )
+    action_space = gym.spaces.Box(
+        np.ones((6,), dtype=np.float32) * -1,
+        np.ones((6,), dtype=np.float32),
+    )
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
         data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"

@@ -18,7 +18,6 @@ class KeyboardExpert:
         self.manager = multiprocessing.Manager()
         self.latest_data = self.manager.dict()
         self.latest_data["action"] = [0.0] * 5
-        self.latest_data["buttons"] = [0, 0]  # dummy buttons
 
         self.process = multiprocessing.Process(target=self._read_keyboard)
         self.process.daemon = True
@@ -49,23 +48,23 @@ class KeyboardExpert:
 
             # 控制 xyz 方向移动
             if 'w' in current_keys:
-                # print("z + 0.1")
-                action[2] += 0.5
+                # print("z+")
+                action[2] += 1
             if 's' in current_keys:
-                # print("z - 0.1")
-                action[2] -= 0.5
+                # print("z-")
+                action[2] -= 1
             if 'a' in current_keys:
-                # print("x - 0.1")
-                action[0] -= 0.5
+                # print("x-")
+                action[0] -= 1
             if 'd' in current_keys:
-                # print("x + 0.1")
-                action[0] += 0.5
+                # print("x+")
+                action[0] += 1
             if 'q' in current_keys:
-                # print("y + 0.1")
-                action[1] += 0.5
+                # print("y+")
+                action[1] += 1
             if 'e' in current_keys:
-                # print("y - 0.1")
-                action[1] -= 0.5
+                # print("y-")
+                action[1] -= 1
 
             # 可选：gripper 控制（c = close, o = open）
             if 'c' in current_keys:
@@ -74,18 +73,17 @@ class KeyboardExpert:
                 action[4] = 1.0
 
             # 缩放动作大小
-            action = [a * 0.02 for a in action]
+            action = [a * 1 for a in action]
 
             # 更新共享状态
             self.latest_data["action"] = action
 
     def get_action(self) -> tuple[np.ndarray, list]:
         action = self.latest_data["action"]
-        buttons = self.latest_data["buttons"]
         if np.linalg.norm(action) > 0.001:
             self.latest_data["action"] = [0.0] * 5  # 只在非零动作时清空
         # self.latest_data["action"] = [0.0] * 6
-        return np.array(action), buttons
+        return np.array(action)
 
     def close(self):
         self.process.terminate()

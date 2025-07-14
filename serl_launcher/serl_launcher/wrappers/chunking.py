@@ -50,6 +50,7 @@ class ChunkingWrapper(gym.Wrapper):
         self.observation_space = space_stack(
             self.env.observation_space, self.obs_horizon
         )
+        
         if self.act_exec_horizon is None:
             self.action_space = self.env.action_space
         else:

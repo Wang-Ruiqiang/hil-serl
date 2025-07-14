@@ -57,7 +57,7 @@ class RAMEnv(DensoEnv):
         self.curr_path_length = 0
         # self.ros_interface.reset_cur_pose()
         self._update_cur_position(init_arm_action)
-        print("self.cur_position = ", self.cur_position)
+        # print("self.cur_position = ", self.cur_position)
         self.save_training_frame()
         obs = self._get_obs()
         # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
