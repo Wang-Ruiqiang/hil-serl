@@ -10,6 +10,8 @@ import time
 import requests
 import queue
 import threading
+import yaml
+
 from datetime import datetime
 from collections import OrderedDict
 from typing import Dict
@@ -26,6 +28,7 @@ import threading
 from denso_env.camera.video_capture import VideoCapture
 from denso_env.camera.rs_capture import RSCapture
 from leap_hand.srv import LeapPosition, LeapPosVelEff
+from shape_reconstruction import Sensor
 
 from examples.utils import read_utils
 
@@ -46,7 +49,6 @@ class ImageDisplayer(threading.Thread):
             frame = np.concatenate(
                 [cv2.resize(v, (128, 128)) for k, v in img_array.items() if "full" not in k], axis=1
             )
-
             cv2.imshow(self.name, frame)
             cv2.waitKey(1)
 
@@ -266,6 +268,8 @@ class DensoEnv(gym.Env):
         self.display_image = config.DISPLAY_IMAGE
         # self.gripper_sleep = config.GRIPPER_SLEEP
         self.is_arm_only = config.IS_ARM_ONLY
+        self.tact_base_path = config.TACT_BASE_PATH
+        self.enable_tactile = config.ENABLE_TACTILE
 
 
 
@@ -324,9 +328,7 @@ class DensoEnv(gym.Env):
                     ),
                 }
             )
-            
-        else :
-            print("init arm only")
+        elif self.enable_tactile:
             self.action_space = gym.spaces.Box(
                 np.ones((6,), dtype=np.float32) * -1,
                 np.ones((6,), dtype=np.float32),
@@ -347,11 +349,89 @@ class DensoEnv(gym.Env):
                         }
                     ),
                     "images": gym.spaces.Dict(
+                        {
+                            **{key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
+                                    for key in config.REALSENSE_CAMERAS},
+                            "tactile_data": gym.spaces.Box(0, 255, shape=(480, 1920, 3), dtype=np.uint8),
+                        }
+                    ),
+                }
+            )
+        else:
+            print("init arm only")
+            self.action_space = gym.spaces.Box(
+                np.ones((6,), dtype=np.float32) * -1,
+                np.ones((6,), dtype=np.float32),
+            )
+            self.observation_space = gym.spaces.Dict(
+                {
+                    "state": gym.spaces.Dict(
+                        {
+                            "tcp_pos": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(3,)
+                            ),
+                            "tcp_ori": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(4,)
+                            ),
+                            # "gripper_pose": gym.spaces.Box(
+                            #     -np.inf, np.inf, shape=(1,), dtype=np.int32
+                            # )
+                        }
+                    ),
+                    "images": gym.spaces.Dict(
                         {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS}
                     ),
                 }
             )
+
+
+        if self.enable_tactile:
+            # tactile configuration loading and init
+            thumb_cfg_path = os.path.join(self.tact_base_path, "shape_config_thumb.yaml")
+            # assert the path exists
+            if not os.path.exists(thumb_cfg_path):
+                raise FileNotFoundError(f"Configuration file not found: {thumb_cfg_path}")
+            thumb_f = open(thumb_cfg_path, 'r+', encoding='utf-8')
+            thumb_cfg = yaml.load(thumb_f, Loader=yaml.FullLoader)
+            self.thumb_tactile_sensor = Sensor(thumb_cfg)
+            # self.thumb_tactile_vis  = Visualizer(self.thumb_tactile_sensor.points)
+
+            index_cfg_path = os.path.join(self.tact_base_path, "shape_config_index.yaml")
+            index_f = open(index_cfg_path, 'r+', encoding='utf-8')
+            index_cfg = yaml.load(index_f, Loader=yaml.FullLoader)
+            self.index_tactile_sensor = Sensor(index_cfg)
+            # self.index_tactile_vis  = Visualizer(self.index_tactile_sensor.points)
+
+            middle_cfg_path = os.path.join(self.tact_base_path, "shape_config_middle.yaml")
+            middle_f = open(middle_cfg_path, 'r+', encoding='utf-8')
+            middle_cfg = yaml.load(middle_f, Loader=yaml.FullLoader)
+            self.middle_tactile_sensor = Sensor(middle_cfg)
+            # self.middle_tactile_vis  = Visualizer(self.middle_tactile_sensor.points)
+
+            self.thumb_raw_img = []
+            self.index_raw_img = []
+            self.middle_raw_img = []
+
+            self.thumb_points = []
+            self.index_points = []
+            self.middle_points = []
+
+            self.thumb_height_map = []
+            self.index_height_map = []
+            self.middle_height_map = []
+
+            self.thumb_heat_map = []
+            self.index_heat_map = []
+            self.middle_heat_map = []
+
+            self.tac_thumb_lock = threading.Lock()
+            self.tac_index_lock = threading.Lock()
+            self.tac_middle_lock = threading.Lock()
+            self.tac_main_lock = threading.Lock()
+
+            # Start threads for each tactile sensor
+            self.start_tac_processing()
         
         self.cycle_count = 0
 
@@ -370,22 +450,6 @@ class DensoEnv(gym.Env):
             self.displayer = ImageDisplayer(self.img_queue, self.url)
             self.displayer.start()
 
-        # if set_load:
-        #     input("Put arm into programing mode and press enter.")
-        #     requests.post(self.url + "set_load", json=self.config.LOAD_PARAM)
-        #     input("Put arm into execution mode and press enter.")
-        #     for _ in range(2):
-        #         self._recover()
-        #         time.sleep(1)
-
-        # if not fake_env:
-        #     from pynput import keyboard
-        #     self.terminate = False
-        #     def on_press(key):
-        #         if key == keyboard.Key.esc:
-        #             self.terminate = True
-        #     self.listener = keyboard.Listener(on_press=on_press)
-        #     self.listener.start()
 
         self.position_data = []
         self.oritation_data = []
@@ -406,54 +470,70 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-7-11-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-7-24-3"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_id = 0
 
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_oritation = np.zeros(4, dtype=np.float32)
 
-        self.last_hand_joint = [
+        # initial close pose
+        # self.gripper_close_joint = [
+        #     3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
+        #     3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
+        #     3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
+        #     4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
+        # ]
+
+        self.gripper_close_joint = [
+            3.546563625335693359, 4.127942085266113281, 3.213689804077148438, 3.641670465469360352,
+            3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+            3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
+            4.661767482757568359, 3.416175127029418945, 3.060291767120361328, 3.466796636581420898
+        ]
+
+        # self.gripper_open_joint = [
+        #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+        #     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+        #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        #     4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211  #thumb
+        # ]
+
+        self.last_hand_pos = [
             3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
             3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
             3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
             4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
         ]
 
-        self.gripper_close_joint = [
+        self.changed_hand_pos = [
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
             2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
             3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
             4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
         ]
+
         self.hand_state = 0 #hand opened lable
 
         print("Initialized Denso")
-    
 
-    # def clip_safety_box(self, pose: np.ndarray) -> np.ndarray:
-    #     """Clip the pose to be within the safety box."""
-    #     pose[:3] = np.clip(
-    #         pose[:3], self.xyz_bounding_box.low, self.xyz_bounding_box.high
-    #     )
-    #     euler = Rotation.from_quat(pose[3:]).as_euler("xyz")
 
-    #     # Clip first euler angle separately due to discontinuity from pi to -pi
-    #     sign = np.sign(euler[0])
-    #     euler[0] = sign * (
-    #         np.clip(
-    #             np.abs(euler[0]),
-    #             self.rpy_bounding_box.low[0],
-    #             self.rpy_bounding_box.high[0],
-    #         )
-    #     )
+    def start_tac_processing(self):
+        # Start threads for each tactile sensor
+        self.thumb_thread = threading.Thread(target=self.process_thumb_tactile)
+        self.thumb_thread.start()
+        self.index_thread = threading.Thread(target=self.process_index_tactile)
+        self.index_thread.start()
+        self.middle_thread = threading.Thread(target=self.process_middle_tactile)
+        self.middle_thread.start()
 
-    #     euler[1:] = np.clip(
-    #         euler[1:], self.rpy_bounding_box.low[1:], self.rpy_bounding_box.high[1:]
-    #     )
-    #     pose[3:] = Rotation.from_euler("xyz", euler).as_quat()
 
-    #     return pose
+    def close_tac_processing(self):
+        # Close threads for each tactile sensor
+        self.thumb_thread.join()
+        self.index_thread.join()
+        self.middle_thread.join()
+
 
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
@@ -483,10 +563,9 @@ class DensoEnv(gym.Env):
         self.ros_interface.publish_arm_action(self.nextpos)
 
 
-        leap_hand_action = self.gripper_close_joint
-        if self.last_hand_joint != self.gripper_close_joint:
-            self._send_leap_hand_command(leap_hand_action)
-            self.last_hand_joint = self.gripper_close_joint
+        if self.last_hand_pos != self.changed_hand_pos:
+            self._send_leap_hand_command(self.changed_hand_pos)
+            self.last_hand_pos = self.changed_hand_pos
 
         # time.sleep(2.1)
         dt = time.time() - start_time
@@ -500,7 +579,7 @@ class DensoEnv(gym.Env):
         t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
-        self.save_training_frame()
+        # self.save_training_frame()
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
@@ -526,6 +605,7 @@ class DensoEnv(gym.Env):
         else:
             # print(f'Goal not reached, the difference is {delta}, the desired threshold is {self._REWARD_THRESHOLD}')
             return False
+    
 
     def get_im(self) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
@@ -605,9 +685,63 @@ class DensoEnv(gym.Env):
                 )
                 cap.close()
                 self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
-                return self.get_im()
+                return self.get_rgb_and_dpth_im()
 
         return images, depth_images
+
+
+    def process_tactile_data(self, sensor, img_size):
+        heat_map = []
+        raw_img = []
+        points = []
+       
+        raw_img = sensor.get_rectify_crop_image()
+        img_GRAY = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
+        height_map = sensor.raw_image_2_height_map(img_GRAY)
+        height_map = sensor.expand_image(height_map)
+        heat_map_input = cv2.normalize(height_map, None, 0, 255, cv2.NORM_MINMAX)
+        heat_map_input = np.uint8(heat_map_input)
+        heat_map = cv2.applyColorMap(heat_map_input, cv2.COLORMAP_JET)
+        # Add subtitles to each image
+        # cv2.putText(heat_map, "Thumb", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        # Resize images for display
+        target_size = img_size
+        heat_map = cv2.resize(heat_map, target_size, interpolation=cv2.INTER_LINEAR)
+        points, gradients = sensor.height_map_2_point_cloud_gradients(height_map)
+
+        return raw_img, points, heat_map
+    
+
+    def process_thumb_tactile(self):
+        while True:
+            thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (640, 480))
+
+            with self.tac_thumb_lock:
+                self.thumb_raw_img = thumb_raw_img
+                self.thumb_points = thumb_points
+                self.thumb_heat_map = thumb_heat_map
+
+
+    def process_index_tactile(self):
+        # Process index tactile data
+        while True:
+            index_raw_img, index_points, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, (640, 480))
+
+            with self.tac_index_lock:
+                self.index_raw_img = index_raw_img
+                self.index_points = index_points
+                self.index_heat_map = index_heat_map
+    
+
+    def process_middle_tactile(self):
+        # Process middle tactile data
+        while True:
+            middle_raw_img, middle_points, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, (640, 480))
+
+            with self.tac_middle_lock:
+                self.middle_raw_img = middle_raw_img
+                self.middle_points = middle_points
+                self.middle_heat_map = middle_heat_map
     
 
     def reset(self, joint_reset=False, **kwargs):
@@ -730,7 +864,7 @@ class DensoEnv(gym.Env):
             time.sleep(step_time)
             
 
-    def _update_cur_position(self, arm_action, timeout=10.0):
+    def _update_cur_position(self, arm_action, timeout=3.0):
         """
         Internal function to get the latest state of the robot and its gripper.
         """
@@ -780,12 +914,23 @@ class DensoEnv(gym.Env):
                 np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
                 np.array(self.hand_state, dtype=np.int32).flatten(),  # TCP 旋转 (4,)
             ])
-
-        return copy.deepcopy({
+        if self.enable_tactile:
+            heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map, self.middle_heat_map])
+            obs = copy.deepcopy({
+            "front_camera": front_camera_image,
+            # "side_camera": side_camera_image,
+            "tactle_data":heatmap_canvas,
+            "state": state_flattened
+        })
+        else:
+            obs = copy.deepcopy({
             "front_camera": front_camera_image,
             # "side_camera": side_camera_image,
             "state": state_flattened
         })
+            
+        return obs
+
 
     def close(self):
         if hasattr(self, 'listener'):
@@ -807,6 +952,7 @@ class DensoEnv(gym.Env):
 
 
     def save_training_frame(self):
+        print("save_training_frame")
         frame_dir = os.path.join(self.frame_save_path, f"frame_{self.frame_id}")
         os.makedirs(frame_dir, exist_ok=True)
 
@@ -823,6 +969,16 @@ class DensoEnv(gym.Env):
                 cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), img[..., ::-1])
                 cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), depth)
 
+        if self.enable_tactile:
+            with self.tac_thumb_lock:
+                cv2.imwrite(os.path.join(frame_dir, "thumb_raw_image.jpg"), self.thumb_raw_img)
+                cv2.imwrite(os.path.join(frame_dir, "thumb_heat_map.jpg"), self.thumb_heat_map)
+            with self.tac_index_lock:
+                cv2.imwrite(os.path.join(frame_dir, "index_raw_image.jpg"), self.index_raw_img)
+                cv2.imwrite(os.path.join(frame_dir, "index_heat_map.jpg"), self.index_heat_map)
+            with self.tac_middle_lock:
+                cv2.imwrite(os.path.join(frame_dir, "middle_raw_image.jpg"), self.middle_raw_img)
+                cv2.imwrite(os.path.join(frame_dir, "middle_heat_map.jpg"), self.middle_heat_map)
         # 保存 state（TCP + orientation + hand joints）
         # if not self.is_arm_only:
         np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), np.concatenate([

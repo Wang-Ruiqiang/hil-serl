@@ -11,12 +11,12 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("successes_needed", 30, "Number of successful demos to collect.")
+flags.DEFINE_integer("successes_needed", 25, "Number of successful demos to collect.")
 
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=False, save_video=False, classifier=False)
+    env = config.get_environment(fake_env=False, save_video=False, classifier=True)
     
     obs, info = env.reset()
     transitions = []
@@ -46,6 +46,10 @@ def main(_):
                 )
             )
             trajectory.append(transition)
+            # if "is_pick" in info:
+            #     is_pick = info["is_pick"]
+            # else:
+            #     is_pick = True
             
             pbar.set_description(f"Return: {returns}")
 

@@ -8,6 +8,7 @@ from serl_launcher.networks.reward_classifier import load_classifier_func
 from examples.utils import read_utils
 
 
+
 from experiments.mappings import NEW_MAPPING
 
 
@@ -46,7 +47,7 @@ def main(_):
         key=jax.random.PRNGKey(0),
         sample=env.observation_space.sample(),
         image_keys=classifier_keys,
-        checkpoint_path=os.path.abspath("classifier_ckpt/"),
+        checkpoint_path=os.path.abspath("classifier_ckpt_place/"),
     )
 
     def reward_func(obs):
@@ -54,7 +55,7 @@ def main(_):
         sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
         # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
         # added check for z position to further robustify classifier, but should work without as well
-        return int(sigmoid(classifier(obs)).item() > 0.65)
+        return int(sigmoid(classifier(obs)).item() > 0.75)
     
     
     history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)

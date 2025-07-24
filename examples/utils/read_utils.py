@@ -7,6 +7,7 @@ import gymnasium as gym
 from examples.utils import kinematics_utils
 import re
 from collections import deque
+from scipy.spatial.transform import Rotation as R
 
 palm_lower2denso_end_tf = np.array([
     [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
@@ -180,18 +181,33 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
             for i in list(range(start_frame, end_frame+1)):
             # for i in range(len(frame_dirs) - 1):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
-                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
+                if i == end_frame:
+                    next_frame_path = current_frame_path
+                else:
+                    next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
+
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
 
 
                 obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
-                next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
+                if i == end_frame:
+                    next_obs = obs
+                else:
+                    next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
                 # print("next_obs['state'][3:7] = ", next_obs["state"][3:7])
-                
-                actions[:3] = next_obs["state"][:3]  # xyz坐标
-                actions[3:7] = next_obs["state"][3:7]  # 四元数姿态
-                actions[7:] = next_obs["state"][7:]  # leap_hand
+
+                delta_pos = next_obs["state"][:3] - obs["state"][:3]
+                actions[:3] = delta_pos
+
+                current_quat = obs["state"][3:7]  # wxyz
+                next_quat = next_obs["state"][3:7]
+
+                current_euler = R.from_quat([current_quat[1], current_quat[2], current_quat[3], current_quat[0]]).as_euler("xyz")
+                next_euler = R.from_quat([next_quat[1], next_quat[2], next_quat[3], next_quat[0]]).as_euler("xyz")
+
+                delta_euler = next_euler - current_euler
+                actions[3:6] = delta_euler
 
                 transition = copy.deepcopy(
                     dict(

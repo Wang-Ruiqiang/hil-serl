@@ -62,12 +62,14 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         done = done or rew
 
         info['succeed'] = bool(rew)
-        info['is_pick'] = self.is_pick
+        # info['is_pick'] = self.is_pick
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        if done and self.is_pick:
-            self.is_pick = False  # switch to place task after pick is done
+        # if done and self.is_pick:
+        #     self.is_pick = False  # switch to place task after pick is done
+        # elif done and not self.is_pick:
+        #     self.is_pick = True
         # print("reward = ", rew)
         return obs, rew, done, truncated, info
 
@@ -204,14 +206,21 @@ class KeyboardIntervention(gym.ActionWrapper):
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
             2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
             3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
         ]
+        # self.gripper_close_joint = [
+        #     3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
+        #     3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
+        #     3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
+        #     4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
+        # ]   
         self.gripper_close_joint = [
-            3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
-            3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
-            3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
-            4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
-        ]   
+            3.546563625335693359, 4.127942085266113281, 3.513689804077148438, 3.441670465469360352,
+            # 3.546563625335693359, 4.127942085266113281, 3.213689804077148438, 3.641670465469360352,
+            3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+            3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
+            4.661767482757568359, 3.416175127029418945, 3.260291767120361328, 3.566796636581420898
+        ]
 
     def action(self, action: np.ndarray) -> np.ndarray:
         """
@@ -237,10 +246,10 @@ class KeyboardIntervention(gym.ActionWrapper):
             new_action[:3] = expert_a[:3]
             if expert_a[3] > 0.8 :
                 # hand_joint = self.gripper_close_joint
-                self.env.changed_hand_joint = self.gripper_close_joint
+                self.env.changed_hand_pos = self.gripper_close_joint
             if expert_a[4] > 0.8 :
                 # hand_joint = self.gripper_open_joint
-                self.env.changed_hand_joint = self.gripper_open_joint
+                self.env.changed_hand_pos = self.gripper_open_joint
 
             return new_action, True
 

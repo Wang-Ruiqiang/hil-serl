@@ -174,6 +174,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 actions = env.action_space.sample()
             else:
                 sampling_rng, key = jax.random.split(sampling_rng)
+                print("obs shape = ", obs["state"].shape)
                 actions = agent.sample_actions(
                     observations=obs,
                     seed=key,
@@ -201,7 +202,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 is_pick = info["is_pick"]
             else:
                 is_pick = True
-
+            
             running_return += reward
             transition = dict(
                 observations=obs,
@@ -220,11 +221,12 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 demo_transitions.append(copy.deepcopy(transition))
 
             obs = next_obs
-            if done and is_pick:
-                print_green("pick task done")
+            # if done and is_pick:
+            #     print_green("pick task done")
 
+            # if done and not is_pick:
             if done and not is_pick:
-                print_green(f"done = {done}")
+                print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
                 stats = {"environment": info}  # send stats to the learner to log
@@ -401,7 +403,7 @@ def main(_):
 
     # rng, sampling_rng = jax.random.split(rng)
     
-    if config.setup_mode == 'single-arm-fixed-gripper' or config.setup_mode == 'dual-arm-fixed-gripper':   
+    if config.setup_mode == 'single-arm-fixed-gripper' or config.setup_mode == 'dual-arm-fixed-gripper':
         agent: SACAgent = make_sac_pixel_agent(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),

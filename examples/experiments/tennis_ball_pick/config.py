@@ -98,12 +98,16 @@ class EnvConfig(DefaultEnvConfig):
     #     "rotational_Ki": 0.0,
     # }
     IS_ARM_ONLY = True
+    ENABLE_TACTILE = True
+    TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
 
 
 class TrainConfig(DefaultTrainingConfig):
     image_keys = ["front_camera"]
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera"]
+    # proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
+    proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
     buffer_period = 1000
     checkpoint_period = 1000 
@@ -113,10 +117,6 @@ class TrainConfig(DefaultTrainingConfig):
 
     def get_environment(self, fake_env=False, save_video=False, classifier=False):
         env_config = EnvConfig()
-        if not env_config.IS_ARM_ONLY:
-            proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
-        else:
-            proprio_keys = ["tcp_pos", "tcp_ori"]
 
         env = RAMEnv(
             fake_env=fake_env,
@@ -128,36 +128,43 @@ class TrainConfig(DefaultTrainingConfig):
             env = KeyboardIntervention(env)
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
-        env = SERLObsWrapper(env, proprio_keys=proprio_keys)
+        env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
-            )
+            # classifier_pick = load_classifier_func(
+            #     key=jax.random.PRNGKey(0),
+            #     sample=env.observation_space.sample(),
+            #     image_keys=self.classifier_keys,
+            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
+            # )
 
-            classifier_place = load_classifier_func(
+            # classifier_place = load_classifier_func(
+            #     key=jax.random.PRNGKey(0),
+            #     sample=env.observation_space.sample(),
+            #     image_keys=self.classifier_keys,
+            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_place/"),
+            # )
+            classifier_normal = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("../../classifier_ckpt_pick_place/"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
             )
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                if is_pick:
-                    print("classifier = classifier_pick")
-                    classifier = classifier_pick
-                else:
-                    print("classifier = classifier_place")
-                    classifier = classifier_place
+                # if is_pick:
+                #     print("classifier = classifier_pick")
+                #     classifier = classifier_pick
+                # else:
+                #     print("classifier = classifier_place")
+                #     classifier = classifier_place
+                classifier = classifier_normal
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.75)
+                return int(sigmoid(classifier(obs)).item() > 0.85)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env
