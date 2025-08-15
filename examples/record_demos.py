@@ -1,4 +1,5 @@
 import os
+import sys
 from tqdm import tqdm
 import numpy as np
 import copy
@@ -11,7 +12,8 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("successes_needed", 25, "Number of successful demos to collect.")
+flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
+
 
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
@@ -65,6 +67,7 @@ def main(_):
                 input("reset env")
                 obs, info = env.reset()
     finally:
+        env.save_all_data_on_exit()
         if hasattr(env, "keyboard_process") and env.keyboard_process.is_alive():
             print("Shutting down keyboard process...")
             env.keyboard_process.terminate()

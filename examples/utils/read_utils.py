@@ -71,8 +71,10 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-def get_frame_data(frame_path, robot_urdf_path):
+def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
+    index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
+    thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
@@ -80,6 +82,10 @@ def get_frame_data(frame_path, robot_urdf_path):
     # color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
+    index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
+    thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
+    heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
+
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
@@ -130,12 +136,18 @@ def get_frame_data(frame_path, robot_urdf_path):
     # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
     # side_camera_image = resized_image2[..., ::-1]
-
-    obs = {
-        "front_camera": front_camera_image,
-        # "side_camera": side_camera_image,
-        "state": state_flattened
-    }
+    if enable_tactaile:
+        obs = {
+            "front_camera": front_camera_image,
+            # "side_camera": side_camera_image,
+            "tactle_data": heatmap_canvas,
+            "state": state_flattened
+        }
+    else:
+        obs = {
+            "front_camera": front_camera_image,
+            "state": state_flattened
+        }
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)
     # input("enter")

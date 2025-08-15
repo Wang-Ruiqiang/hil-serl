@@ -23,6 +23,7 @@ flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/record
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactaile", 1, "evaluate pick or place task.")
 
 
 
@@ -106,11 +107,12 @@ def main(_):
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
                 
-                obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+                obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path,
+                                                                  FLAGS.enable_tactaile)
                 if i == end_frame:
                     next_obs = obs
                 else:
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
+                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactaile)
 
                 # if i == start_frame:
                 #     history_obs.reset(obs)
