@@ -1,5 +1,5 @@
 import glob
-import os
+import os, sys
 import pickle as pkl
 import jax
 from jax import numpy as jnp
@@ -17,14 +17,17 @@ from serl_launcher.utils.train_utils import concat_batches
 from serl_launcher.vision.data_augmentations import batched_random_crop
 from serl_launcher.networks.reward_classifier import create_classifier
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
+
 from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("num_epochs", 30, "Number of training epochs.")
+flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
-flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 
 
 def main(_):
@@ -38,6 +41,8 @@ def main(_):
     # stack_observation_space = space_stack(observation_space, 1)
     
     # Create buffer for positive transitions
+    # print("env.action_space shape= ", env.action_space.shape)
+    # print("env.observation_space shape= ", env.observation_space["state"].shape)
     pos_buffer = ReplayBuffer(
         observation_space=env.observation_space,
         action_space=env.action_space,
@@ -62,6 +67,7 @@ def main(_):
             for trans in success_data:
                 trans["labels"] = 1
                 # print("trans keys= ",trans["observations"].keys())
+                # print("trans tactile_data shape=", trans["observations"]["tactile_data"].shape)
                 pos_buffer.insert(trans)
             
     pos_iterator = pos_buffer.get_iterator(

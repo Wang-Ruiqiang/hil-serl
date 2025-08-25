@@ -20,14 +20,14 @@ gripper_open_joint = [
     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-    4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+    4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
 ]
 
 gripper_close_joint = [
-    3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
-    3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
-    3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
-    4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
+    3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
+    3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+    3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
+    4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
 ]  
 
 class ObsHistoryBuffer:
@@ -75,6 +75,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
+    middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
@@ -84,7 +85,12 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
     thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
-    heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
+    middle_heat_map_image = cv2.imread(middle_heat_map_path) if os.path.exists(middle_heat_map_path) else None
+
+    index_heat_map_image = cv2.resize(index_heat_map_image, (320, 240), interpolation=cv2.INTER_LINEAR)
+    thumb_heat_map_image = cv2.resize(thumb_heat_map_image, (320, 240), interpolation=cv2.INTER_LINEAR)
+    middle_heat_map_image = cv2.resize(middle_heat_map_image, (320, 240), interpolation=cv2.INTER_LINEAR)
+    heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image, middle_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
@@ -105,11 +111,11 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
             # print("all_joint_values = ", all_joint_values)
             # input("enter")
     # print("all_joint_values = ", all_joint_values)
-    dist_open = np.linalg.norm(hand_joint - gripper_open_joint)
-    if dist_open < 0.2:
-        hand_state = 0
-    else:
+    is_close = np.allclose(hand_joint, gripper_close_joint, atol=0.3)
+    if is_close:
         hand_state = 1
+    else:
+        hand_state = 0
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
     # print("tcp_pos = ", tcp_pos)
     # print("tcp_ori = ", tcp_ori)
@@ -140,7 +146,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
         obs = {
             "front_camera": front_camera_image,
             # "side_camera": side_camera_image,
-            "tactle_data": heatmap_canvas,
+            "tactile_data": heatmap_canvas,
             "state": state_flattened
         }
     else:
@@ -180,7 +186,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
             [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
-        clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
+        clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
 

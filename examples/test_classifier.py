@@ -1,5 +1,6 @@
 from absl import app, flags
 import os
+import sys
 import jax
 import numpy as np
 from jax import numpy as jnp
@@ -7,7 +8,8 @@ import gymnasium as gym
 from serl_launcher.networks.reward_classifier import load_classifier_func
 from examples.utils import read_utils
 
-
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
 
 from experiments.mappings import NEW_MAPPING
 
@@ -47,7 +49,7 @@ def main(_):
         key=jax.random.PRNGKey(0),
         sample=env.observation_space.sample(),
         image_keys=classifier_keys,
-        checkpoint_path=os.path.abspath("classifier_ckpt_place/"),
+        checkpoint_path=os.path.abspath("classifier_ckpt_pick/"),
     )
 
     def reward_func(obs):

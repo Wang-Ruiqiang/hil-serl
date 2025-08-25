@@ -106,8 +106,8 @@ class TrainConfig(DefaultTrainingConfig):
     image_keys = ["front_camera"]
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera"]
-    # proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
-    proprio_keys = ["tcp_pos", "tcp_ori"]
+    proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
+    # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
     buffer_period = 1000
     checkpoint_period = 1000 
@@ -149,7 +149,7 @@ class TrainConfig(DefaultTrainingConfig):
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_pick"),
             )
             # input("debug")
             def reward_func(obs, is_pick=True):

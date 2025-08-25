@@ -74,8 +74,8 @@ def main(_):
             )
     else :
         action_space = gym.spaces.Box(
-                np.ones((6,), dtype=np.float32) * -1,
-                np.ones((6,), dtype=np.float32),
+                np.ones((7,), dtype=np.float32) * -1,
+                np.ones((7,), dtype=np.float32),
             )
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
@@ -141,11 +141,11 @@ def main(_):
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
 
-                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, True)
                 if i == end_frame:
                     next_obs = obs
                 else:
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
+                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, True)
                 # print("obs state shape = ", obs["state"].shape)
                 # input("debug")
                 tcp_ori = obs["state"][3:7]  # 四元数部分
@@ -161,6 +161,7 @@ def main(_):
                 stacked_next_obs = history_next_obs.get_success_fail_obs()
                 # print("stacked_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 # print("stacked_next_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
+                # print("obs keys:", obs.keys())
                 if is_pick:
                     reward = comupute_reward(obs, classifier_pick)
                 else:
@@ -180,6 +181,7 @@ def main(_):
 
                 delta_euler = next_euler - current_euler
                 actions[3:6] = delta_euler
+                actions[6] = next_obs["state"][7]
 
                 transition = copy.deepcopy(
                     dict(
@@ -205,13 +207,20 @@ def main(_):
                     trajectory = []
                     returns = 0
                     terminate = False
-                    if len(transitions) >= batch_size:
-                        save_batch_to_pickle(transitions, file_name)
-                        transitions = []
+                    # if len(transitions) >= batch_size:
+                    #     save_batch_to_pickle(transitions, file_name)
+                    #     transitions = []
 
-    if transitions:
-        save_batch_to_pickle(transitions, file_name)
+    # if transitions:
+    #     save_batch_to_pickle(transitions, file_name)
     print("record_finished")
+    if not os.path.exists("./demo_data"):
+        os.makedirs("./demo_data")
+    uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+    with open(file_name, "wb") as f:
+        pkl.dump(transitions, f)
+        print(f"saved {success_needed} demos to {file_name}")
 
     tcp_ori_array = np.stack(tcp_ori_list, axis=0)
 

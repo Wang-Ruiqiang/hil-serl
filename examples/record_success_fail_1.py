@@ -1,4 +1,5 @@
 import copy
+import sys
 import os
 from tqdm import tqdm
 import numpy as np
@@ -13,16 +14,19 @@ import json
 from examples.utils import read_utils
 from scipy.spatial.transform import Rotation as R
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
+
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_data_place", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_pick", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
-flags.DEFINE_integer("is_pick_and_place_task", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("enable_tactaile", 1, "evaluate pick or place task.")
 
 
@@ -55,7 +59,7 @@ def main(_):
         file_dir_name = "./classifier_data"
 
     elif FLAGS.is_pick_task:
-        if not os.path.exists("./classifier_data_pcik"):
+        if not os.path.exists("./classifier_data_pick"):
             os.makedirs("./classifier_data_pick")
         file_dir_name = "./classifier_data_pick"
     else:
@@ -134,6 +138,7 @@ def main(_):
 
                 delta_euler = next_euler - current_euler
                 actions[3:6] = delta_euler
+                actions[6] = next_obs["state"][7]
 
                 transition = copy.deepcopy(
                     dict(

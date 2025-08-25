@@ -184,10 +184,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         # Step environment
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
+            print("actions before intervene= ", actions)
             next_obs, reward, done, truncated, info = env.step(actions)
 
             # override the action with the intervention action
-            print("actions before intervene= ", actions)
             if "intervene_action" in info:
                 actions = info.pop("intervene_action")
                 print("intervene_action = ", actions)
@@ -225,7 +225,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             #     print_green("pick task done")
 
             # if done and not is_pick:
-            if done and not is_pick:
+            if done:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps

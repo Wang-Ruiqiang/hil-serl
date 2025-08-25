@@ -249,14 +249,16 @@ class KeyboardIntervention(gym.ActionWrapper):
             expert_a = filtered_expert_a
 
         if intervened:
-            new_action = np.zeros(6, dtype=np.float32)
+            new_action = np.zeros(7, dtype=np.float32)
             new_action[:3] = expert_a[:3]
             if expert_a[3] > 0.8 :
                 # hand_joint = self.gripper_close_joint
                 self.env.changed_hand_pos = self.gripper_close_joint
+                new_action[6] = 1.0  # gripper close action
             if expert_a[4] > 0.8 :
                 # hand_joint = self.gripper_open_joint
                 self.env.changed_hand_pos = self.gripper_open_joint
+                new_action[6] = 0 # gripper close action
 
             return new_action, True
 
