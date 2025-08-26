@@ -103,9 +103,10 @@ class EnvConfig(DefaultEnvConfig):
 
 
 class TrainConfig(DefaultTrainingConfig):
-    image_keys = ["front_camera"]
+    image_keys = ["front_camera", "tactile_data"]
     # image_keys = ["front_camera", "side_camera"]
-    classifier_keys = ["front_camera"]
+    classifier_keys = ["front_camera", "tactile_data"]
+    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 2.0}
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
@@ -149,6 +150,7 @@ class TrainConfig(DefaultTrainingConfig):
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
+                image_key_weights=self.classifier_key_weights,
                 checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_pick"),
             )
             # input("debug")
@@ -164,7 +166,7 @@ class TrainConfig(DefaultTrainingConfig):
                 classifier = classifier_normal
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.85)
+                return int(sigmoid(classifier(obs)).item() > 0.95)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env

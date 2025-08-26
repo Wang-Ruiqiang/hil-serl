@@ -22,6 +22,7 @@ class EncodingWrapper(nn.Module):
     proprio_latent_dim: int = 64
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
+    image_weights: Optional[Dict[str, float]] = None
 
     @nn.compact
     def __call__(
@@ -46,6 +47,9 @@ class EncodingWrapper(nn.Module):
 
             if stop_gradient:
                 image = jax.lax.stop_gradient(image)
+
+            if self.image_weights is not None:
+                image = image * self.image_weights.get(image_key, 1.0)
 
             encoded.append(image)
 

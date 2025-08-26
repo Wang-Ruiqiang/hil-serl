@@ -349,11 +349,18 @@ class DensoEnv(gym.Env):
                             )
                         }
                     ),
+                    # "images": gym.spaces.Dict(
+                    #     {
+                    #         **{key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
+                    #                 for key in config.REALSENSE_CAMERAS},
+                    #         "tactile_data": gym.spaces.Box(0, 255, shape=(240, 960, 3), dtype=np.uint8),
+                    #     }
+                    # ),
                     "images": gym.spaces.Dict(
                         {
-                            **{key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
+                            **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS},
-                            "tactile_data": gym.spaces.Box(0, 255, shape=(240, 960, 3), dtype=np.uint8),
+                            "tactile_data": gym.spaces.Box(0, 255, shape=(128, 384, 3), dtype=np.uint8),
                         }
                     ),
                 }
@@ -470,10 +477,19 @@ class DensoEnv(gym.Env):
 
         self.ros_interface = ROSNodeInterface()
 
-        executor = rclpy.executors.MultiThreadedExecutor()
-        executor.add_node(self.ros_interface)
-        executor_thread = threading.Thread(target=executor.spin, daemon=True)
-        executor_thread.start()
+        # executor = rclpy.executors.MultiThreadedExecutor()
+        # executor.add_node(self.ros_interface)
+        # executor_thread = threading.Thread(target=executor.spin, daemon=True)
+        # executor_thread.start()
+
+        # Spin ROS callbacks in a background thread and keep references so we can
+        # shut everything down cleanly when the environment closes.
+        self.executor = rclpy.executors.MultiThreadedExecutor()
+        self.executor.add_node(self.ros_interface)
+        self.executor_thread = threading.Thread(
+            target=self.executor.spin, daemon=True
+        )
+        self.executor_thread.start()
 
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
@@ -587,9 +603,9 @@ class DensoEnv(gym.Env):
             * Rotation.from_quat(self.cur_oritation)
         ).as_quat()
 
-        if action[6] > 0.8:
+        if action[6] > 0.95:
             self.changed_hand_pos = self.gripper_close_joint
-        elif 0 <= action[6] <= 0.8:
+        elif 0 <= action[6] <= 0.95:
             self.changed_hand_pos = self.gripper_open_joint
 
         # print("nextpos = ", self.nextpos)
@@ -600,7 +616,7 @@ class DensoEnv(gym.Env):
             self._send_leap_hand_command(self.changed_hand_pos)
             self.last_hand_pos = self.changed_hand_pos
 
-        # time.sleep(2.1)
+        time.sleep(1.5)
         dt = time.time() - start_time
         time.sleep(max(0, (1.0 / self.hz) - dt))
         t_end = time.time()
@@ -752,7 +768,8 @@ class DensoEnv(gym.Env):
 
     def process_thumb_tactile(self):
         while True:
-            thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (320, 240))
+            # thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (320, 240))
+            thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (128, 128))
 
             with self.tac_thumb_lock:
                 self.thumb_raw_img = thumb_raw_img
@@ -764,7 +781,7 @@ class DensoEnv(gym.Env):
     def process_index_tactile(self):
         # Process index tactile data
         while True:
-            index_raw_img, index_points, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, (320, 240))
+            index_raw_img, index_points, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, (128, 128))
 
             with self.tac_index_lock:
                 self.index_raw_img = index_raw_img
@@ -776,7 +793,7 @@ class DensoEnv(gym.Env):
     def process_middle_tactile(self):
         # Process middle tactile data
         while True:
-            middle_raw_img, middle_points, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, (320, 240))
+            middle_raw_img, middle_points, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, (128, 128))
 
             with self.tac_middle_lock:
                 self.middle_raw_img = middle_raw_img
@@ -875,11 +892,15 @@ class DensoEnv(gym.Env):
         requests.post(self.url + "clearerr")
 
 
-    def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
+    def _send_leap_hand_command(self, leap_hand_action: np.ndarray, current_leap_hand_pos=None):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
-        steps = 5       # Example number of steps
+        steps = 30      # Example number of steps
+        if current_leap_hand_pos is None:
+            curr_leap_hand_pos = self.curr_leap_hand_pos
+        else:
+            curr_leap_hand_pos = current_leap_hand_pos
 
         if self.interpolation_thread and self.interpolation_thread.is_alive():
             return
@@ -887,7 +908,7 @@ class DensoEnv(gym.Env):
         with self.thread_lock:
             self.interpolation_thread = threading.Thread(
                 target=self.leap_interpolate_and_publish,
-                args=(self.curr_leap_hand_pos, hand_action, step_time, steps),
+                args=(curr_leap_hand_pos, hand_action, step_time, steps),
                 daemon=True
             )
             self.interpolation_thread.start()
@@ -983,6 +1004,23 @@ class DensoEnv(gym.Env):
             self.img_queue.put(None)
             cv2.destroyAllWindows()
             self.displayer.join()
+
+        # Ensure ROS executor and node are cleaned up to avoid threading errors
+        if hasattr(self, "executor"):
+            if hasattr(self, "ros_interface"):
+                # Remove the node from the executor and destroy it before shutting down ROS
+                self.executor.remove_node(self.ros_interface)
+                self.ros_interface.destroy_node()
+            try:
+                if getattr(rclpy, "is_initialized", lambda: True)():
+                    # Signal the spinning thread to exit
+                    rclpy.shutdown()
+            except Exception:
+                pass
+            if hasattr(self, "executor_thread"):
+                # Wait for the executor thread to finish before closing it
+                self.executor_thread.join()
+            self.executor.shutdown()
 
 
     def set_data_count(self, data_count):

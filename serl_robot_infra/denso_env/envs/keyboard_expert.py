@@ -19,11 +19,15 @@ class KeyboardExpert:
         self.latest_data = self.manager.dict()
         self.latest_data["action"] = [0.0] * 5
 
-        self.process = multiprocessing.Process(target=self._read_keyboard)
+        # self.process = multiprocessing.Process(target=self._read_keyboard)
+        self._stop_event = multiprocessing.Event()
+        self.process = multiprocessing.Process(
+            target=self._read_keyboard, args=(self._stop_event,)
+        )
         self.process.daemon = True
         self.process.start()
 
-    def _read_keyboard(self):
+    def _read_keyboard(self, stop_event: multiprocessing.Event):
         # 记录按键状态
         current_keys = set()
 
@@ -43,7 +47,7 @@ class KeyboardExpert:
         listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         listener.start()
 
-        while True:
+        while not stop_event.is_set():
             action = [0.0] * 5
 
             # 控制 xyz 方向移动
@@ -76,7 +80,12 @@ class KeyboardExpert:
             action = [a * 1 for a in action]
 
             # 更新共享状态
-            self.latest_data["action"] = action
+            try:
+                self.latest_data["action"] = action
+            except (BrokenPipeError, EOFError, ConnectionResetError):
+                break
+
+        listener.stop()
 
     def get_action(self) -> tuple[np.ndarray, list]:
         action = self.latest_data["action"]
@@ -86,6 +95,11 @@ class KeyboardExpert:
         return np.array(action)
 
     def close(self):
-        self.process.terminate()
+        self._stop_event.set()
+        self.process.join(timeout=1)
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join()
+        self.manager.shutdown()
 
 

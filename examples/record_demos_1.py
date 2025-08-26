@@ -91,6 +91,7 @@ def main(_):
         key=jax.random.PRNGKey(0),
         sample=env.observation_space.sample(),
         image_keys=config.classifier_keys,
+        image_key_weights = config.classifier_key_weights,
         checkpoint_path=os.path.abspath("classifier_ckpt_pick/"),
     )
 
@@ -98,6 +99,7 @@ def main(_):
         key=jax.random.PRNGKey(0),
         sample=env.observation_space.sample(),
         image_keys=config.classifier_keys,
+        image_key_weights = config.classifier_key_weights,
         checkpoint_path=os.path.abspath("classifier_ckpt_place/"),
     )
 
@@ -214,6 +216,7 @@ def main(_):
     # if transitions:
     #     save_batch_to_pickle(transitions, file_name)
     print("record_finished")
+    env.close()
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

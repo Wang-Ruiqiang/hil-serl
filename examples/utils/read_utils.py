@@ -71,7 +71,7 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
+def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
@@ -87,9 +87,9 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
     thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
     middle_heat_map_image = cv2.imread(middle_heat_map_path) if os.path.exists(middle_heat_map_path) else None
 
-    index_heat_map_image = cv2.resize(index_heat_map_image, (320, 240), interpolation=cv2.INTER_LINEAR)
-    thumb_heat_map_image = cv2.resize(thumb_heat_map_image, (320, 240), interpolation=cv2.INTER_LINEAR)
-    middle_heat_map_image = cv2.resize(middle_heat_map_image, (320, 240), interpolation=cv2.INTER_LINEAR)
+    index_heat_map_image = cv2.resize(index_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
+    thumb_heat_map_image = cv2.resize(thumb_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
+    middle_heat_map_image = cv2.resize(middle_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
     heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image, middle_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
@@ -138,11 +138,11 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
         np.array(hand_state, dtype=np.int32).flatten(),
     ])
 
-    resized_image = cv2.resize(color_image, (320,240))
+    resized_image = cv2.resize(color_image, (128,128))
     # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
     # side_camera_image = resized_image2[..., ::-1]
-    if enable_tactaile:
+    if enable_tactile:
         obs = {
             "front_camera": front_camera_image,
             # "side_camera": side_camera_image,
@@ -159,7 +159,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactaile=False):
     # input("enter")
     return obs, int(is_record_success)
 
-def read_data(robot_urdf_path, is_evaluate_classifier=False):
+def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=False):
     data = []
     clip_ranges = []
     global_idx = 0
@@ -208,11 +208,11 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False):
                     continue
 
 
-                obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path)
+                obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path, enable_tactile)
                 if i == end_frame:
                     next_obs = obs
                 else:
-                    next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path)
+                    next_obs, _ = get_frame_data(next_frame_path, robot_urdf_path, enable_tactile)
                 # print("next_obs['state'][3:7] = ", next_obs["state"][3:7])
 
                 delta_pos = next_obs["state"][:3] - obs["state"][:3]

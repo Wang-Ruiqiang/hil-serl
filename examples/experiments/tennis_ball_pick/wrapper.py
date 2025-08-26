@@ -17,6 +17,13 @@ palm_lower2denso_end_tf = np.array([
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
 ])
 
+gripper_open_joint = [
+    2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+    2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+    3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
+]
+
 # T_palm_lower_to_end_link = np.array([
 #     [ 9.99994927e-01, -3.18530179e-03,  5.11967137e-22, -3.40506487e-02],
 #     [-3.18529775e-03, -9.99993659e-01,  1.59265292e-03,  6.04734432e-02],
@@ -45,6 +52,10 @@ class RAMEnv(DensoEnv):
         # self.go_to_reset(joint_reset=False)
         # self._recover()
         # obs, info =  self.env.reset(**kwargs)
+        hand_joint_msg = self.ros_interface.get_current_leap_position()
+        curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
+        self._send_leap_hand_command(gripper_open_joint, curr_leap_hand_pos)
+        time.sleep(1)
 
         init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
         init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
@@ -52,7 +63,6 @@ class RAMEnv(DensoEnv):
         self.ros_interface.publish_arm_action(init_arm_action)
 
 
-        # self._send_leap_hand_command(init_hand_joint)
 
         self.curr_path_length = 0
         # self.ros_interface.reset_cur_pose()

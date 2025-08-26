@@ -122,6 +122,7 @@ def main(_):
     classifier = create_classifier(key, 
                                    sample["observations"], 
                                    config.classifier_keys,
+                                   image_key_weights=config.classifier_key_weights,
                                    )
 
     def data_augmentation_fn(rng, observations):
@@ -148,7 +149,7 @@ def main(_):
         logits = state.apply_fn(
             {"params": state.params}, batch["observations"], train=False, rngs={"dropout": key}
         )
-        train_accuracy = jnp.mean((nn.sigmoid(logits) >= 0.85) == batch["labels"])
+        train_accuracy = jnp.mean((nn.sigmoid(logits) >= 0.95) == batch["labels"])
 
         return state.apply_gradients(grads=grads), loss, train_accuracy
 
@@ -190,6 +191,7 @@ def main(_):
             step=FLAGS.num_epochs,
             overwrite=True,
         )
+    # env.close()
     
 
 if __name__ == "__main__":
