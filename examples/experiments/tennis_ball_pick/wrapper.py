@@ -62,8 +62,6 @@ class RAMEnv(DensoEnv):
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.publish_arm_action(init_arm_action)
 
-
-
         self.curr_path_length = 0
         # self.ros_interface.reset_cur_pose()
         self._update_cur_position(init_arm_action)

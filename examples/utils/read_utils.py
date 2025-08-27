@@ -28,7 +28,7 @@ gripper_close_joint = [
     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
     3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
     4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
-]  
+]
 
 class ObsHistoryBuffer:
     # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
@@ -110,12 +110,14 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
             hand_joint = all_joint_values[6:]
             # print("all_joint_values = ", all_joint_values)
             # input("enter")
-    # print("all_joint_values = ", all_joint_values)
-    is_close = np.allclose(hand_joint, gripper_close_joint, atol=0.3)
-    if is_close:
-        hand_state = 1
-    else:
-        hand_state = 0
+
+    open_j  = np.array(gripper_open_joint,  dtype=np.float32)
+    close_j = np.array(gripper_close_joint, dtype=np.float32)
+    curr    = np.array(hand_joint,          dtype=np.float32)
+
+    delta = close_j - open_j
+    denominator = np.dot(delta, delta) + 1e-8
+    hand_state = float(np.clip(np.dot(curr - open_j, delta) / denominator, 0.0, 1.0))
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
     # print("tcp_pos = ", tcp_pos)
     # print("tcp_ori = ", tcp_ori)
@@ -135,7 +137,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
         np.array(tcp_ori, dtype=np.float32).flatten(),
-        np.array(hand_state, dtype=np.int32).flatten(),
+        np.array(hand_state, dtype=np.float32).flatten(),
     ])
 
     resized_image = cv2.resize(color_image, (128,128))
@@ -167,10 +169,10 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=Fals
     #     np.ones((23,), dtype=np.float32) * -1,
     #     np.ones((23,), dtype=np.float32),
     # )
-    action_space = gym.spaces.Box(
-        np.ones((6,), dtype=np.float32) * -1,
-        np.ones((6,), dtype=np.float32),
-    )
+    low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
+    high = np.ones(7, dtype=np.float32)
+    action_space = gym.spaces.Box(low, high, dtype=np.float32)
+    
     actions = np.zeros(action_space.sample().shape)
     if is_evaluate_classifier:
         data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"

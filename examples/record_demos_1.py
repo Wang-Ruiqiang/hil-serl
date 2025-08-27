@@ -73,10 +73,10 @@ def main(_):
                 np.ones((22,), dtype=np.float32),
             )
     else :
-        action_space = gym.spaces.Box(
-                np.ones((7,), dtype=np.float32) * -1,
-                np.ones((7,), dtype=np.float32),
-            )
+        low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
+        high = np.ones(7, dtype=np.float32)
+        action_space = gym.spaces.Box(low, high, dtype=np.float32)
+        
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

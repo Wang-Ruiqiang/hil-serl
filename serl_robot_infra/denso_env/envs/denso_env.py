@@ -160,7 +160,6 @@ class ROSNodeInterface(Node):
 
 
     def joint_callback(self, msg):
-        # print("msg = ", msg)
 
         # 将 joint name 和对应的位置打包为字典
         joint_dict = {name: pos for name, pos in zip(msg.name, msg.position)}
@@ -173,7 +172,7 @@ class ROSNodeInterface(Node):
         self.joint_position = np.array(ordered_joint_positions, dtype=np.float32)
 
         # 设置事件为“数据已接收”
-        self.joint_event.set()
+        # self.joint_event.set()
 
 
     def publish_arm_action(self, pose):
@@ -211,9 +210,9 @@ class ROSNodeInterface(Node):
     
 
     def get_current_robot_ee(self, timeout=5.0):
-        # success = self.joint_event.wait(timeout=timeout)
+        # success = self.robot_ee_event.wait(timeout=timeout)
         # if not success:
-        #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
+        #     raise TimeoutError("等待get_current_robot_ee超时，请检查ROS话题是否正常发布。")
         # self.robot_ee_event.wait()
         # self.robot_ee_event.clear()
         # self.get_logger().info(f"robot_ee_received:{self.cur_position}")
@@ -225,9 +224,9 @@ class ROSNodeInterface(Node):
     def get_current_joint(self, timeout=5.0):
         # success = self.joint_event.wait(timeout=timeout)
         # if not success:
-        #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
-        self.joint_event.wait()
-        self.joint_event.clear()
+        #     raise TimeoutError("等待get_current_joint超时，请检查ROS话题是否正常发布。")
+        # self.joint_event.wait()
+        # self.joint_event.clear()
         return self.joint_position
 
     def get_current_leap_position(self):
@@ -330,10 +329,10 @@ class DensoEnv(gym.Env):
             )
         elif self.enable_tactile:
             print("init arm with tactile")
-            self.action_space = gym.spaces.Box(
-                np.ones((7,), dtype=np.float32) * -1,
-                np.ones((7,), dtype=np.float32),
-            )
+            low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
+            high = np.ones(7, dtype=np.float32)
+            self.action_space = gym.spaces.Box(low, high, dtype=np.float32)
+
             self.observation_space = gym.spaces.Dict(
                 {
                     "state": gym.spaces.Dict(
@@ -345,7 +344,7 @@ class DensoEnv(gym.Env):
                                 -np.inf, np.inf, shape=(4,)
                             ),
                             "gripper_pose": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(1,), dtype=np.int32
+                                -np.inf, np.inf, shape=(1,), dtype=np.float32
                             )
                         }
                     ),
@@ -556,7 +555,7 @@ class DensoEnv(gym.Env):
             4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
         ]
 
-        self.hand_state = 0 #hand opened lable
+        self.hand_state = 0.0 #hand opened lable
 
         print("Initialized Denso")
 
@@ -602,10 +601,11 @@ class DensoEnv(gym.Env):
             * Rotation.from_quat(self.cur_oritation)
         ).as_quat()
 
-        if action[6] > 0.95:
-            self.changed_hand_pos = self.gripper_close_joint
-        elif 0 <= action[6] <= 0.95:
-            self.changed_hand_pos = self.gripper_open_joint
+        grip_ratio = np.clip(action[6], 0.0, 1.0)
+        self.changed_hand_pos = (
+            (1 - grip_ratio) * np.array(self.gripper_open_joint) +
+            grip_ratio * np.array(self.gripper_close_joint)
+        )
 
         # print("nextpos = ", self.nextpos)
         self.ros_interface.publish_arm_action(self.nextpos)
@@ -623,6 +623,7 @@ class DensoEnv(gym.Env):
 
         self.curr_path_length += 1
         self._update_cur_position(self.nextpos)
+        self.hand_state = grip_ratio
 
         t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
@@ -897,7 +898,7 @@ class DensoEnv(gym.Env):
         step_time = 0.05  # Example step time
         steps = 20     # Example number of steps
         if current_leap_hand_pos is None:
-            curr_leap_hand_pos = self.changed_hand_pos
+            curr_leap_hand_pos = self.curr_leap_hand_pos
         else:
             curr_leap_hand_pos = current_leap_hand_pos
 
@@ -938,28 +939,19 @@ class DensoEnv(gym.Env):
             self.cur_position = position
             self.cur_oritation = orientation
             # print("cur_position = ", self.cur_position)
-
             self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
 
+            hand_joint_msg = self.ros_interface.get_current_leap_position()
+            self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
             if time.time() - start > timeout:
                 print("[WARN] 等待机械臂到位超时")
                 break
             time.sleep(0.02)
 
-        print("quit while loop")
-        if self.changed_hand_pos == self.gripper_close_joint:
-            self.hand_state = 1
-        else:
-            self.hand_state = 0
-
-        print("finish hand_state judge")
-            # while not np.allclose(self.curr_leap_hand_pos, self.gripper_close_joint, atol=0.3):
-            #     hand_joint_msg = self.ros_interface.get_current_leap_position()
-            #     self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-
-        
-        # max_err = np.max(np.abs(self.curr_leap_hand_pos - self.gripper_close_joint))
-        # print(f"max_err = {max_err}")
+        # if self.changed_hand_pos == self.gripper_close_joint:
+        #     self.hand_state = 1
+        # else:
+        #     self.hand_state = 0
 
 
     def _get_obs(self) -> dict:
@@ -977,7 +969,7 @@ class DensoEnv(gym.Env):
             state_flattened = np.concatenate([
                 np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
                 np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-                np.array(self.hand_state, dtype=np.int32).flatten(),  # TCP 旋转 (4,)
+                np.array(self.hand_state, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
             ])
         if self.enable_tactile:
             heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map, self.middle_heat_map])
