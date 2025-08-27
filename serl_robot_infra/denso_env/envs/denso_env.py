@@ -550,11 +550,10 @@ class DensoEnv(gym.Env):
         ]
 
         self.changed_hand_pos = [
-            # 3.140058755874633789, 3.187612056732177734, 3.155398368835449219, 3.150796651840209961,
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
             2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
             3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211
+            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
         ]
 
         self.hand_state = 0 #hand opened lable
@@ -896,9 +895,9 @@ class DensoEnv(gym.Env):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
-        steps = 30      # Example number of steps
+        steps = 20     # Example number of steps
         if current_leap_hand_pos is None:
-            curr_leap_hand_pos = self.curr_leap_hand_pos
+            curr_leap_hand_pos = self.changed_hand_pos
         else:
             curr_leap_hand_pos = current_leap_hand_pos
 
@@ -942,23 +941,25 @@ class DensoEnv(gym.Env):
 
             self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
 
-            # if not self.is_arm_only:
-            hand_joint_msg = self.ros_interface.get_current_leap_position()
-            self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-
             if time.time() - start > timeout:
                 print("[WARN] 等待机械臂到位超时")
                 break
             time.sleep(0.02)
-        
-        # dist_close = np.linalg.norm(self.curr_leap_hand_pos - self.gripper_close_joint)
-        is_close = np.allclose(self.curr_leap_hand_pos, self.gripper_close_joint, atol=0.3)
-        # max_err = np.max(np.abs(self.curr_leap_hand_pos - self.gripper_close_joint))
-        # print(f"max_err = {max_err}")
-        if is_close:
+
+        print("quit while loop")
+        if self.changed_hand_pos == self.gripper_close_joint:
             self.hand_state = 1
         else:
             self.hand_state = 0
+
+        print("finish hand_state judge")
+            # while not np.allclose(self.curr_leap_hand_pos, self.gripper_close_joint, atol=0.3):
+            #     hand_joint_msg = self.ros_interface.get_current_leap_position()
+            #     self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
+
+        
+        # max_err = np.max(np.abs(self.curr_leap_hand_pos - self.gripper_close_joint))
+        # print(f"max_err = {max_err}")
 
 
     def _get_obs(self) -> dict:

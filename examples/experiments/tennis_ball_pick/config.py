@@ -166,7 +166,16 @@ class TrainConfig(DefaultTrainingConfig):
                 classifier = classifier_normal
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
-                return int(sigmoid(classifier(obs)).item() > 0.95)
+                # return int(sigmoid(classifier(obs)).item() > 0.95)
+            
+                prob = sigmoid(classifier(obs)).item()
+                success = prob > 0.95
+                reward = 1 if success else 0
+                state = obs["state"]
+                ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
+                if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
+                    reward -= 1
+                return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         return env

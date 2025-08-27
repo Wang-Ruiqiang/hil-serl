@@ -68,6 +68,9 @@ is_end = False
 def print_green(x):
     return print("\033[92m {}\033[00m".format(x))
 
+def print_red(x):
+    return print("\033[91m {}\033[00m".format(x))
+
 
 ##############################################################################
 
@@ -174,7 +177,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 actions = env.action_space.sample()
             else:
                 sampling_rng, key = jax.random.split(sampling_rng)
-                print("obs shape = ", obs["state"].shape)
+                # print("obs shape = ", obs["state"].shape)
                 actions = agent.sample_actions(
                     observations=obs,
                     seed=key,
@@ -186,6 +189,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             # TODO: judge if the network need to be intervened
             print("actions before intervene= ", actions)
             next_obs, reward, done, truncated, info = env.step(actions)
+            print("reward = ", reward)
+
+            print_red(f"next_obs[state] =  {next_obs['state']}")
 
             # override the action with the intervention action
             if "intervene_action" in info:
@@ -225,7 +231,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             #     print_green("pick task done")
 
             # if done and not is_pick:
-            if done:
+            if done == 1:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
