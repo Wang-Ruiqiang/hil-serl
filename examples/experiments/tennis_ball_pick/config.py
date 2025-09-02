@@ -106,7 +106,7 @@ class TrainConfig(DefaultTrainingConfig):
     image_keys = ["front_camera", "tactile_data"]
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera", "tactile_data"]
-    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 2.0}
+    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
@@ -174,7 +174,7 @@ class TrainConfig(DefaultTrainingConfig):
                 state = obs["state"]
                 ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
                 if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-                    reward -= 1
+                    reward -= 0.05
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)

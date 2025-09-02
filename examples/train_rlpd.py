@@ -172,17 +172,19 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
 
         with timer.context("sample_actions"):
             print_green(f"obs[state] =  {obs['state']}")
-            if step < config.random_steps:
-                print("random actions")
-                actions = env.action_space.sample()
-            else:
-                sampling_rng, key = jax.random.split(sampling_rng)
-                # print("obs shape = ", obs["state"].shape)
-                actions = agent.sample_actions(
-                    observations=obs,
-                    seed=key,
-                )
-            actions = np.asarray(jax.device_get(actions))
+            # if step < config.random_steps:
+            #     print("random actions")
+            #     actions = env.action_space.sample()
+            # else:
+            sampling_rng, key = jax.random.split(sampling_rng)
+            # print("obs shape = ", obs["state"].shape)
+            actions_sample = agent.sample_actions(
+                observations=obs,
+                seed=key,
+            )
+            actions = np.asarray(jax.device_get(actions_sample)).copy()
+            actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
+            actions[..., 6] = np.clip(actions[..., 6], 0.0, 1.0)
 
         # Step environment
         with timer.context("step_env"):

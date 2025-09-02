@@ -54,7 +54,14 @@ def comupute_reward(obs, classifier):
 
     # 使用索引提取标量值
     classifier_score = classifier_output[0]
-    return int(classifier_score > 0.45)
+    prob = sigmoid(classifier(obs)).item()
+    success = prob > 0.95
+    reward = 1 if success else 0
+    state = obs["state"]
+    ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
+    if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
+        reward -= 0.05
+    return reward
 
 def main(_):
 
