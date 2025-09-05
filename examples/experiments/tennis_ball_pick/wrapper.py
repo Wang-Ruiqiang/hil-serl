@@ -53,9 +53,10 @@ class RAMEnv(DensoEnv):
         # self._recover()
         # obs, info =  self.env.reset(**kwargs)
         hand_joint_msg = self.ros_interface.get_current_leap_position()
-        curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-        self._send_leap_hand_command(gripper_open_joint, curr_leap_hand_pos)
+        self.last_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
+        self._send_leap_hand_command(gripper_open_joint)
         time.sleep(1)
+        self.last_hand_pos = gripper_open_joint
 
         init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
         init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])

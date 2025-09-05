@@ -892,15 +892,11 @@ class DensoEnv(gym.Env):
         requests.post(self.url + "clearerr")
 
 
-    def _send_leap_hand_command(self, leap_hand_action: np.ndarray, current_leap_hand_pos=None):
+    def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
         steps = 20     # Example number of steps
-        if current_leap_hand_pos is None:
-            curr_leap_hand_pos = self.curr_leap_hand_pos
-        else:
-            curr_leap_hand_pos = current_leap_hand_pos
 
         if self.interpolation_thread and self.interpolation_thread.is_alive():
             return
@@ -908,7 +904,7 @@ class DensoEnv(gym.Env):
         with self.thread_lock:
             self.interpolation_thread = threading.Thread(
                 target=self.leap_interpolate_and_publish,
-                args=(curr_leap_hand_pos, hand_action, step_time, steps),
+                args=(self.last_hand_pos, hand_action, step_time, steps),
                 daemon=True
             )
             self.interpolation_thread.start()
@@ -942,7 +938,7 @@ class DensoEnv(gym.Env):
             self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
 
             hand_joint_msg = self.ros_interface.get_current_leap_position()
-            self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
+            # self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
             if time.time() - start > timeout:
                 print("[WARN] 等待机械臂到位超时")
                 break
@@ -963,7 +959,7 @@ class DensoEnv(gym.Env):
             state_flattened = np.concatenate([
                 np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
                 np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-                np.array(self.curr_leap_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
+                np.array(self.last_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
             ])
         else :
             state_flattened = np.concatenate([
@@ -1029,7 +1025,7 @@ class DensoEnv(gym.Env):
         # print("save_training_frame")
         try:
             joint_pose = np.concatenate([
-                    self.joint_position, self.curr_leap_hand_pos], dtype=np.float32)
+                    self.joint_position, self.last_hand_pos], dtype=np.float32)
             
             self.joint_buffer.append(
                             copy.deepcopy(joint_pose))
