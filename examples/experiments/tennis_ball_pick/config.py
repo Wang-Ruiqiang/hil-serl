@@ -53,7 +53,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.01, 0.01, 0.01)
+    ACTION_SCALE = (0.02, 0.02, 0.02)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
@@ -151,7 +151,7 @@ class TrainConfig(DefaultTrainingConfig):
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_pick"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
             )
             # input("debug")
             def reward_func(obs, is_pick=True):
