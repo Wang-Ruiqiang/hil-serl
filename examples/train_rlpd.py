@@ -185,7 +185,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             actions = np.asarray(jax.device_get(actions_sample)).copy()
             actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
             actions[..., 6] = np.clip(actions[..., 6], 0.0, 1.0)
-
         # Step environment
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
@@ -210,6 +209,12 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 is_pick = info["is_pick"]
             else:
                 is_pick = True
+
+            if done == 1:
+                time.sleep(0.5)
+                actions = np.zeros(env.action_space.sample().shape)
+                actions[..., 6] = 1.0
+                next_obs, _, _, _, _ = env.step(actions)
             
             running_return += reward
             transition = dict(
@@ -473,7 +478,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-real",
+            project="hil-serl-keyboard-20",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

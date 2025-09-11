@@ -34,7 +34,7 @@ def main(_):
     try:
         while success_count < success_needed:
             actions = np.zeros(env.action_space.sample().shape)
-            actions[1] = -1
+            actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
             print("reward = ", rew)
             returns += rew
@@ -62,6 +62,11 @@ def main(_):
             obs = next_obs
             if done:
                 if info["succeed"]:
+                    # time.sleep(0.5)
+                    # actions = np.zeros(env.action_space.sample().shape)
+                    # actions[6] = 1.0
+                    # stable_obs, _, _, _, _ = env.step(np.zeros_like(actions))
+                    # trajectory[-1]["next_observations"] = stable_obs
                     for transition in trajectory:
                         transitions.append(copy.deepcopy(transition))
                     success_count += 1

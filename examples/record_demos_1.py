@@ -67,7 +67,7 @@ def main(_):
 
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=False, save_video=False, classifier=True)
+    env = config.get_environment(fake_env=True, save_video=False, classifier=True)
     terminate = False
     transitions = []
     success_needed = FLAGS.successes_needed
@@ -223,7 +223,7 @@ def main(_):
     # if transitions:
     #     save_batch_to_pickle(transitions, file_name)
     print("record_finished")
-    env.close()
+    # env.close()
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

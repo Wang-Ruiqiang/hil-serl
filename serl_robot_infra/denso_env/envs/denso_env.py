@@ -496,7 +496,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-9-6-2"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-9-11-1"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -899,7 +899,7 @@ class DensoEnv(gym.Env):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
-        steps = 20     # Example number of steps
+        steps = 10     # Example number of steps
 
         if self.interpolation_thread and self.interpolation_thread.is_alive():
             return

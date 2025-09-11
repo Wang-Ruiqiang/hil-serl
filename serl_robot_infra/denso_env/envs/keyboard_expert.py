@@ -53,25 +53,44 @@ class KeyboardExpert:
             # 控制 xyz 方向移动
             if 'w' in current_keys:
                 # print("z+")
-                action[2] += 1
+                action[2] += 0.8
             if 's' in current_keys:
                 # print("z-")
-                action[2] -= 1
+                action[2] -= 0.8
             if 'a' in current_keys:
                 # print("x-")
-                action[0] -= 1
+                action[0] -= 0.8
             if 'd' in current_keys:
                 # print("x+")
-                action[0] += 1
+                action[0] += 0.8
             if 'q' in current_keys:
                 # print("y+")
-                action[1] += 1
+                action[1] += 0.8
             if 'e' in current_keys:
                 # print("y-")
-                action[1] -= 1
+                action[1] -= 0.8
+
+            if 't' in current_keys:
+                # print("z+")
+                action[2] += 0.1
+            if 'g' in current_keys:
+                # print("z-")
+                action[2] -= 0.1
+            if 'f' in current_keys:
+                # print("x-")
+                action[0] -= 0.1
+            if 'h' in current_keys:
+                # print("x+")
+                action[0] += 0.1
+            if 'r' in current_keys:
+                # print("y+")
+                action[1] += 0.1
+            if 'y' in current_keys:
+                # print("y-")
+                action[1] -= 0.1
 
             # 可选：gripper 控制（c = close, o = open）
-            if 'c' in current_keys:
+            if 'i' in current_keys:
                 action[3] = 1.0
             if 'o' in current_keys:
                 action[4] = 1.0

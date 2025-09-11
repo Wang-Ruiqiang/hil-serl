@@ -44,7 +44,7 @@ def main(_):
 
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=False, save_video=False, classifier=False)
+    env = config.get_environment(fake_env=True, save_video=False, classifier=False)
     terminate = False
     
     classifier = load_classifier_func(
@@ -65,7 +65,7 @@ def main(_):
     
     history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
     is_first_time = True
-    save_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success_sample_1"
+    save_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success"
     try:
         with open(log_file, "w") as f:
             for data_count in range(len(data)):
@@ -133,7 +133,7 @@ def main(_):
         print("日志文件路径:", os.path.abspath("classifier_log.txt"))
         # print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
         # print(f"average time: {np.mean(time_list)}")
-        env.close()
+        # env.close()
         return  # after done eval, return and exit
 
 

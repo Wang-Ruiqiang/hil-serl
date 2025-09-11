@@ -11,7 +11,7 @@ class DefaultTrainingConfig:
     discount: float = 0.97
 
     max_steps: int = 100000
-    replay_buffer_capacity: int = 20000
+    replay_buffer_capacity: int = 100000
 
     random_steps: int = 100
     training_starts: int = 100
