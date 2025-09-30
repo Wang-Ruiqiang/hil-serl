@@ -52,7 +52,7 @@ def main(_):
         sample=env.observation_space.sample(),
         image_keys=classifier_keys,
         image_key_weights=classifier_key_weights,
-        checkpoint_path=os.path.abspath("classifier_ckpt_pick/"),
+        checkpoint_path=os.path.abspath("classifier_ckpt/"),
     )
 
     def reward_func(obs):
@@ -65,7 +65,8 @@ def main(_):
     
     history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
     is_first_time = True
-    save_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success"
+    failure_as_success_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success"
+    success_as_failure_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/success_as_failure"
     try:
         with open(log_file, "w") as f:
             for data_count in range(len(data)):
@@ -100,14 +101,14 @@ def main(_):
                     # 保存 front_camera 图像
                     if "front_camera" in obs:
                         img = obs["front_camera"]
-                        save_path = os.path.join(save_dir, f"front_camera_{data_count}.jpg")
+                        save_path = os.path.join(failure_as_success_dir, f"front_camera_{data_count}.jpg")
                         cv2.imwrite(save_path, img)
                         print(f"Saved front_camera image to {save_path}")
 
                     # 如果你还想保存 tactile_data
                     if "tactile_data" in obs:
                         tactile_img = obs["tactile_data"]
-                        save_path = os.path.join(save_dir, f"tactile_data_{data_count}.jpg")
+                        save_path = os.path.join(failure_as_success_dir, f"tactile_data_{data_count}.jpg")
                         cv2.imwrite(save_path, tactile_img)
                         print(f"Saved tactile_data image to {save_path}")
 
@@ -115,6 +116,18 @@ def main(_):
                 if is_record_success and reward == 0:
                     success_as_fail+=1
                     print("seem success sample as failure-------------------------------------------")
+                    if "front_camera" in obs:
+                        img = obs["front_camera"]
+                        save_path = os.path.join(success_as_failure_dir, f"front_camera_{data_count}.jpg")
+                        cv2.imwrite(save_path, img)
+                        print(f"Saved front_camera image to {save_path}")
+
+                    # 如果你还想保存 tactile_data
+                    if "tactile_data" in obs:
+                        tactile_img = obs["tactile_data"]
+                        save_path = os.path.join(success_as_failure_dir, f"tactile_data_{data_count}.jpg")
+                        cv2.imwrite(save_path, tactile_img)
+                        print(f"Saved tactile_data image to {save_path}")
                 # f.flush()  
 
     except KeyboardInterrupt:

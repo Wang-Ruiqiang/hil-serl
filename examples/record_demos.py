@@ -62,11 +62,11 @@ def main(_):
             obs = next_obs
             if done:
                 if info["succeed"]:
-                    # time.sleep(0.5)
-                    # actions = np.zeros(env.action_space.sample().shape)
-                    # actions[6] = 1.0
-                    # stable_obs, _, _, _, _ = env.step(np.zeros_like(actions))
-                    # trajectory[-1]["next_observations"] = stable_obs
+                    time.sleep(0.5)
+                    actions = np.zeros(env.action_space.sample().shape)
+                    # actions[6] = 1.0W
+                    stable_obs, _, _, _, _ = env.step(actions)
+                    trajectory[-1]["next_observations"] = stable_obs
                     for transition in trajectory:
                         transitions.append(copy.deepcopy(transition))
                     success_count += 1

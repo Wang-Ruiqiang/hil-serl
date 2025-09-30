@@ -65,14 +65,14 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
             done  = rew
 
         info['succeed'] = bool(rew)
-        # info['is_pick'] = self.is_pick
+        info['is_pick'] = self.is_pick
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        # if done and self.is_pick:
-        #     self.is_pick = False  # switch to place task after pick is done
-        # elif done and not self.is_pick:
-        #     self.is_pick = True
+        if done and self.is_pick:
+            self.is_pick = False  # switch to place task after pick is done
+        elif done and not self.is_pick:
+            self.is_pick = True
         # print("reward = ", rew)
         return obs, rew, done, truncated, info
 

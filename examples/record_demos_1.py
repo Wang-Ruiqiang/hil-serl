@@ -33,6 +33,8 @@ flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/record
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_boolean("is_arm_only", True, "read exist data or not.")
+flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
+flags.DEFINE_boolean("is_pick_and_place", True, "read exist data or not.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -87,7 +89,8 @@ def main(_):
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+    
+    # file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
     batch_size = 500
     
     actions = np.zeros(action_space.sample().shape) 
@@ -107,7 +110,7 @@ def main(_):
         sample=env.observation_space.sample(),
         image_keys=config.classifier_keys,
         image_key_weights = config.classifier_key_weights,
-        checkpoint_path=os.path.abspath("classifier_ckpt_place/"),
+        checkpoint_path=os.path.abspath("classifier_ckpt/"),
     )
 
     tcp_ori_list = []
@@ -123,12 +126,20 @@ def main(_):
         )
 
         # clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
-
-        clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
-        if not os.path.exists(clip_marks_json):
+        if FLAGS.is_pick_task:
+            print("clip_marks_pick")
+            is_pick = True
+            clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
+        else:
             print("clip_marks_place")
             is_pick = False
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
+        
+        if FLAGS.is_pick_and_place:
+            print("clip_marks")
+            is_pick = False
+            clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
+            
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
 
@@ -146,14 +157,12 @@ def main(_):
             
             for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
-                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-                if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
-                    continue
 
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, True)
                 if i == end_frame:
                     next_obs = obs
                 else:
+                    next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                     next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, True)
                 # print("obs state shape = ", obs["state"].shape)
                 # input("debug")
@@ -227,7 +236,14 @@ def main(_):
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+    if FLAGS.is_pick_task:
+        file_name = f"./demo_data/{FLAGS.exp_name}_pick_{success_needed}_demos_{uuid}.pkl"
+    else:
+        file_name = f"./demo_data/{FLAGS.exp_name}_place_{success_needed}_demos_{uuid}.pkl"
+        
+    if FLAGS.is_pick_and_place:
+        
+        file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
     with open(file_name, "wb") as f:
         pkl.dump(transitions, f)
         print(f"saved {success_needed} demos to {file_name}")

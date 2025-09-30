@@ -250,7 +250,7 @@ class ROSNodeInterface(Node):
 class DensoEnv(gym.Env):
     def __init__(
         self,
-        hz=20,
+        hz=2,
         fake_env=False,
         save_video=False,
         config: DefaultEnvConfig = None,
@@ -496,7 +496,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-9-11-1"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-9-27-2"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -590,7 +590,8 @@ class DensoEnv(gym.Env):
 
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
-
+        if self.nextpos[2] < 0.03:
+            self.nextpos[2] = 0.03
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -632,7 +633,7 @@ class DensoEnv(gym.Env):
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
         self.frame_count += 1
-        self.save_training_frame()
+        # self.save_training_frame()
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
@@ -899,7 +900,7 @@ class DensoEnv(gym.Env):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
-        steps = 10     # Example number of steps
+        steps = 20     # Example number of steps
 
         if self.interpolation_thread and self.interpolation_thread.is_alive():
             return
@@ -1032,7 +1033,6 @@ class DensoEnv(gym.Env):
 
 
     def save_training_frame(self):
-        # print("save_training_frame")
         try:
             joint_pose = np.concatenate([
                     self.joint_position, self.curr_leap_hand_pos], dtype=np.float32)

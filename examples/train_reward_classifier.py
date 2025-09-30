@@ -27,8 +27,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
-flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
-flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("is_pick_and_place_task", 1, "evaluate pick or place task.")
 
 
 def main(_):

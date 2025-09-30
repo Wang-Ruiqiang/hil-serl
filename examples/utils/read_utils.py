@@ -188,7 +188,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=Fals
             [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
-        clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
+        clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
 

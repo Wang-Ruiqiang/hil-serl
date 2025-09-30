@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 1, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 
@@ -120,6 +120,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                     success_counter += reward
                     print(reward)
                     print(f"{success_counter}/{episode + 1}")
+                    input("reset env")
+                    obs, _ = env.reset()
 
         print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
         print(f"average time: {np.mean(time_list)}")
@@ -210,11 +212,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             else:
                 is_pick = True
 
-            if done == 1:
-                time.sleep(0.5)
-                actions = np.zeros(env.action_space.sample().shape)
-                actions[..., 6] = 1.0
-                next_obs, _, _, _, _ = env.step(actions)
+            # if done == 1:
+            #     time.sleep(0.5)
+            #     actions = np.zeros(env.action_space.sample().shape)
+            #     actions[..., 6] = 1.0
+            #     next_obs, _, _, _, _ = env.step(actions)
             
             running_return += reward
             transition = dict(
@@ -234,11 +236,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 demo_transitions.append(copy.deepcopy(transition))
 
             obs = next_obs
-            # if done and is_pick:
-            #     print_green("pick task done")
+            if done and is_pick:
+                print_green("pick task done")
 
-            # if done and not is_pick:
-            if done == 1:
+            if done and not is_pick:
+            # if done == 1:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
@@ -478,7 +480,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-keyboard-20",
+            project="hil-serl-pick_place-keyboard-9-29",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
