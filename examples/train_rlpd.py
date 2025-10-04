@@ -50,6 +50,7 @@ flags.DEFINE_boolean("actor", False, "Whether this is an actor.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
+flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
 flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
@@ -75,7 +76,7 @@ def print_red(x):
 ##############################################################################
 
 
-def actor(agent, data_store, intvn_data_store, env, sampling_rng):
+def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
@@ -175,11 +176,58 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
     already_intervened = False
     intervention_count = 0
     intervention_steps = 0
+    mode = "S1_INFER"
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
     for step in pbar:
-        timer.tick("total")
+        
+        if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
+            # dump to pickle file
+            buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
+            demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
+            if not os.path.exists(buffer_path):
+                os.makedirs(buffer_path)
+            if not os.path.exists(demo_buffer_path):
+                os.makedirs(demo_buffer_path)
+            with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
+                pkl.dump(transitions, f)
+                transitions = []
+            with open(
+                os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
+            ) as f:
+                pkl.dump(demo_transitions, f)
+                demo_transitions = []
+        
+        sampling_rng, key = jax.random.split(sampling_rng)
+        if mode == "S1_INFER":
+            # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
+            actions = agent_pick.sample_actions(
+                observations=jax.device_put(obs),
+                argmax=True,    
+                seed=key
+            )
+            actions = np.asarray(jax.device_get(actions)).copy()
+            if actions.shape[-1] >= 7:
+                actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
+                actions[..., 6] = np.clip(actions[..., 6], 0.0, 1.0)
 
+            next_obs, reward, done, truncated, info = env.step(actions)
+            obs = next_obs
+
+            # ==== 判定任务1完成（你可替换为自己的条件）====
+            if done:
+                print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                mode = "S2_TRAIN"
+                # 可在此清零统计（可选）
+                intervention_count = 0
+                intervention_steps = 0
+                already_intervened = False
+            else:
+                # 任务1未完成就继续 S1 推理
+                continue
+
+        
+        timer.tick("total")
         with timer.context("sample_actions"):
             print_green(f"obs[state] =  {obs['state']}")
             # if step < config.random_steps:
@@ -219,12 +267,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             #     is_pick = info["is_pick"]
             # else:
             #     is_pick = True
-
-            # if done == 1:
-            #     time.sleep(0.5)
-            #     actions = np.zeros(env.action_space.sample().shape)
-            #     actions[..., 6] = 1.0
-            #     next_obs, _, _, _, _ = env.step(actions)
             
             running_return += reward
             transition = dict(
@@ -260,25 +302,26 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 intervention_steps = 0
                 already_intervened = False
                 client.update()
+                mode = "S1_INFER"
                 input("reset env")
                 obs, _ = env.reset()
 
-        if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
-            # dump to pickle file
-            buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
-            demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
-            if not os.path.exists(buffer_path):
-                os.makedirs(buffer_path)
-            if not os.path.exists(demo_buffer_path):
-                os.makedirs(demo_buffer_path)
-            with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
-                pkl.dump(transitions, f)
-                transitions = []
-            with open(
-                os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
-            ) as f:
-                pkl.dump(demo_transitions, f)
-                demo_transitions = []
+        # if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
+        #     # dump to pickle file
+        #     buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
+        #     demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
+        #     if not os.path.exists(buffer_path):
+        #         os.makedirs(buffer_path)
+        #     if not os.path.exists(demo_buffer_path):
+        #         os.makedirs(demo_buffer_path)
+        #     with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
+        #         pkl.dump(transitions, f)
+        #         transitions = []
+        #     with open(
+        #         os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
+        #     ) as f:
+        #         pkl.dump(demo_transitions, f)
+        #         demo_transitions = []
 
         timer.tock("total")
 
@@ -436,8 +479,8 @@ def main(_):
             discount=config.discount,
         )
         include_grasp_penalty = False
-    elif config.setup_mode == 'single-arm-learned-gripper':
-        agent: SACAgentHybridSingleArm = make_sac_pixel_agent_hybrid_single_arm(
+        
+        agent_pick: SACAgent = make_sac_pixel_agent(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),
             sample_action=env.action_space.sample(),
@@ -445,17 +488,7 @@ def main(_):
             encoder_type=config.encoder_type,
             discount=config.discount,
         )
-        include_grasp_penalty = True
-    elif config.setup_mode == 'dual-arm-learned-gripper':
-        agent: SACAgentHybridDualArm = make_sac_pixel_agent_hybrid_dual_arm(
-            seed=FLAGS.seed,
-            sample_obs=env.observation_space.sample(),
-            sample_action=env.action_space.sample(),
-            image_keys=config.image_keys,
-            encoder_type=config.encoder_type,
-            discount=config.discount,
-        )
-        include_grasp_penalty = True
+        include_grasp_penalty = False
     else:
         raise NotImplementedError(f"Unknown setup mode: {config.setup_mode}")
 
@@ -463,6 +496,9 @@ def main(_):
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     agent = jax.device_put(
         jax.tree_map(jnp.array, agent), sharding.replicate()
+    )
+    agent_pick = jax.device_put(
+        jax.tree_map(jnp.array, agent_pick), sharding.replicate()
     )
     # if FLAGS.checkpoint_path is not None and os.path.exists(os.path.join(FLAGS.checkpoint_path, "checkpoint*")):
     if FLAGS.checkpoint_path is not None and os.path.exists(FLAGS.checkpoint_path):
@@ -478,6 +514,20 @@ def main(_):
         )[11:]
         print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
 
+    if FLAGS.checkpoint_path_pick is not None and os.path.exists(FLAGS.checkpoint_path_pick):
+        # input("Checkpoint path already exists. Press Enter to resume training.")
+        ckpt = checkpoints.restore_checkpoint(
+            os.path.abspath(FLAGS.checkpoint_path_pick),
+            agent_pick.state,
+        )
+        agent_pick = agent_pick.replace(state=ckpt)
+        # print_green(f"Loaded previous checkpoint at step {step}.")
+        ckpt_number = os.path.basename(
+            checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path_pick))
+        )[11:]
+        print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
+        
+
     def create_replay_buffer_and_wandb_logger():
         replay_buffer = MemoryEfficientReplayBufferDataStore(
             env.observation_space,
@@ -488,7 +538,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-keyboard-10-2",
+            project="hil-serl-pick_keyboard-10-4",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
@@ -567,6 +617,7 @@ def main(_):
         print_green("starting actor loop")
         actor(
             agent,
+            agent_pick,
             data_store,
             intvn_data_store,
             env,
