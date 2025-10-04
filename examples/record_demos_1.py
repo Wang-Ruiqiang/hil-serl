@@ -180,10 +180,10 @@ def main(_):
                 # print("stacked_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 # print("stacked_next_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 # print("obs keys:", obs.keys())
-                if is_pick:
-                    reward = comupute_reward(obs, classifier_pick)
-                else:
-                    reward = comupute_reward(obs, classifier_place)
+                # if is_pick:
+                #     reward = comupute_reward(obs, classifier_pick)
+                # else:
+                reward = comupute_reward(obs, classifier_place)
 
 
                 done = reward or terminate

@@ -1167,3 +1167,933 @@ events:
         
       exitCode: 2
 ...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+      clang: error: linker command failed with exit code 1 (use -v to see invocation)
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/3.30.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_3b338/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_3b338.dir/build.make CMakeFiles/cmTC_3b338.dir/build
+        gmake[1]: Entering directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe'
+        Building CXX object CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/clang++-14   -v -MD -MT CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o -c /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         (in-process)
+         "/usr/lib/llvm-14/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -mrelax-all --mrelax-relocations -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -mllvm -treat-scalable-fixed-error-as-warning -debugger-tuning=gdb -v -fcoverage-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe -resource-dir /usr/lib/llvm-14/lib/clang/14.0.0 -dependency-file CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++ -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward -internal-isystem /usr/lib/llvm-14/lib/clang/14.0.0/include -internal-isystem /usr/local/include -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fdebug-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe -ferror-limit 19 -fgnuc-version=4.2.1 -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o -x c++ /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 14.0.0 based upon LLVM 14.0.0 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
+        ignoring nonexistent directory "/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++
+         /usr/lib/llvm-14/lib/clang/14.0.0/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Linking CXX executable cmTC_3b338
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_3b338.dir/link.txt --verbose=1
+        /usr/bin/clang++-14  -v -Wl,-v CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_3b338
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         "/usr/bin/ld" -pie -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_3b338 /lib/x86_64-linux-gnu/Scrt1.o /lib/x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtbeginS.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../lib64 -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib64 -L/usr/lib/llvm-14/bin/../lib -L/lib -L/usr/lib -v CMakeFiles/cmTC_3b338.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtendS.o /lib/x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Ubuntu) 2.38
+        /usr/bin/ld: cannot find -lstdc++: No such file or directory
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_3b338.dir/build.make:100: cmTC_3b338] Error 1
+        gmake[1]: Leaving directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-YfEGpe'
+        gmake: *** [Makefile:127: cmTC_3b338/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/bin/clang++-14"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-4wHij2"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-4wHij2"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-4wHij2'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_eca6c/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_eca6c.dir/build.make CMakeFiles/cmTC_eca6c.dir/build
+        gmake[1]: 进入目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-4wHij2”
+        Building CXX object CMakeFiles/cmTC_eca6c.dir/testCXXCompiler.cxx.o
+        /usr/bin/clang++-14    -MD -MT CMakeFiles/cmTC_eca6c.dir/testCXXCompiler.cxx.o -MF CMakeFiles/cmTC_eca6c.dir/testCXXCompiler.cxx.o.d -o CMakeFiles/cmTC_eca6c.dir/testCXXCompiler.cxx.o -c /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-4wHij2/testCXXCompiler.cxx
+        Linking CXX executable cmTC_eca6c
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_eca6c.dir/link.txt --verbose=1
+        /usr/bin/clang++-14 CMakeFiles/cmTC_eca6c.dir/testCXXCompiler.cxx.o -o cmTC_eca6c
+        /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_eca6c.dir/build.make:100：cmTC_eca6c] 错误 1
+        gmake[1]: 离开目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-4wHij2”
+        gmake: *** [Makefile:127：cmTC_eca6c/fast] 错误 2
+        
+      exitCode: 2
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+      clang: error: linker command failed with exit code 1 (use -v to see invocation)
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/3.30.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_14014/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_14014.dir/build.make CMakeFiles/cmTC_14014.dir/build
+        gmake[1]: Entering directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF'
+        Building CXX object CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/clang++-14   -v -MD -MT CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o -c /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         (in-process)
+         "/usr/lib/llvm-14/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -mrelax-all --mrelax-relocations -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -mllvm -treat-scalable-fixed-error-as-warning -debugger-tuning=gdb -v -fcoverage-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF -resource-dir /usr/lib/llvm-14/lib/clang/14.0.0 -dependency-file CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++ -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward -internal-isystem /usr/lib/llvm-14/lib/clang/14.0.0/include -internal-isystem /usr/local/include -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fdebug-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF -ferror-limit 19 -fgnuc-version=4.2.1 -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o -x c++ /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 14.0.0 based upon LLVM 14.0.0 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
+        ignoring nonexistent directory "/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++
+         /usr/lib/llvm-14/lib/clang/14.0.0/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Linking CXX executable cmTC_14014
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_14014.dir/link.txt --verbose=1
+        /usr/bin/clang++-14  -v -Wl,-v CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_14014
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         "/usr/bin/ld" -pie -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_14014 /lib/x86_64-linux-gnu/Scrt1.o /lib/x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtbeginS.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../lib64 -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib64 -L/usr/lib/llvm-14/bin/../lib -L/lib -L/usr/lib -v CMakeFiles/cmTC_14014.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtendS.o /lib/x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Ubuntu) 2.38
+        /usr/bin/ld: cannot find -lstdc++: No such file or directory
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_14014.dir/build.make:100: cmTC_14014] Error 1
+        gmake[1]: Leaving directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-dW4PhF'
+        gmake: *** [Makefile:127: cmTC_14014/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/bin/clang++-14"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-AQaLkF"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-AQaLkF"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-AQaLkF'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_d1444/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_d1444.dir/build.make CMakeFiles/cmTC_d1444.dir/build
+        gmake[1]: 进入目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-AQaLkF”
+        Building CXX object CMakeFiles/cmTC_d1444.dir/testCXXCompiler.cxx.o
+        /usr/bin/clang++-14    -MD -MT CMakeFiles/cmTC_d1444.dir/testCXXCompiler.cxx.o -MF CMakeFiles/cmTC_d1444.dir/testCXXCompiler.cxx.o.d -o CMakeFiles/cmTC_d1444.dir/testCXXCompiler.cxx.o -c /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-AQaLkF/testCXXCompiler.cxx
+        Linking CXX executable cmTC_d1444
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d1444.dir/link.txt --verbose=1
+        /usr/bin/clang++-14 CMakeFiles/cmTC_d1444.dir/testCXXCompiler.cxx.o -o cmTC_d1444
+        /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_d1444.dir/build.make:100：cmTC_d1444] 错误 1
+        gmake[1]: 离开目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-AQaLkF”
+        gmake: *** [Makefile:127：cmTC_d1444/fast] 错误 2
+        
+      exitCode: 2
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+      clang: error: linker command failed with exit code 1 (use -v to see invocation)
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/3.30.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4efeb/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4efeb.dir/build.make CMakeFiles/cmTC_4efeb.dir/build
+        gmake[1]: Entering directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5'
+        Building CXX object CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/clang++-14   -v -MD -MT CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o -c /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         (in-process)
+         "/usr/lib/llvm-14/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -mrelax-all --mrelax-relocations -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -mllvm -treat-scalable-fixed-error-as-warning -debugger-tuning=gdb -v -fcoverage-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5 -resource-dir /usr/lib/llvm-14/lib/clang/14.0.0 -dependency-file CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++ -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward -internal-isystem /usr/lib/llvm-14/lib/clang/14.0.0/include -internal-isystem /usr/local/include -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fdebug-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5 -ferror-limit 19 -fgnuc-version=4.2.1 -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o -x c++ /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 14.0.0 based upon LLVM 14.0.0 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
+        ignoring nonexistent directory "/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++
+         /usr/lib/llvm-14/lib/clang/14.0.0/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Linking CXX executable cmTC_4efeb
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4efeb.dir/link.txt --verbose=1
+        /usr/bin/clang++-14  -v -Wl,-v CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_4efeb
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         "/usr/bin/ld" -pie -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_4efeb /lib/x86_64-linux-gnu/Scrt1.o /lib/x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtbeginS.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../lib64 -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib64 -L/usr/lib/llvm-14/bin/../lib -L/lib -L/usr/lib -v CMakeFiles/cmTC_4efeb.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtendS.o /lib/x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Ubuntu) 2.38
+        /usr/bin/ld: cannot find -lstdc++: No such file or directory
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_4efeb.dir/build.make:100: cmTC_4efeb] Error 1
+        gmake[1]: Leaving directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-nBmhk5'
+        gmake: *** [Makefile:127: cmTC_4efeb/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/bin/clang++-14"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-STFyrg"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-STFyrg"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-STFyrg'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_1dc9e/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_1dc9e.dir/build.make CMakeFiles/cmTC_1dc9e.dir/build
+        gmake[1]: 进入目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-STFyrg”
+        Building CXX object CMakeFiles/cmTC_1dc9e.dir/testCXXCompiler.cxx.o
+        /usr/bin/clang++-14    -MD -MT CMakeFiles/cmTC_1dc9e.dir/testCXXCompiler.cxx.o -MF CMakeFiles/cmTC_1dc9e.dir/testCXXCompiler.cxx.o.d -o CMakeFiles/cmTC_1dc9e.dir/testCXXCompiler.cxx.o -c /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-STFyrg/testCXXCompiler.cxx
+        Linking CXX executable cmTC_1dc9e
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_1dc9e.dir/link.txt --verbose=1
+        /usr/bin/clang++-14 CMakeFiles/cmTC_1dc9e.dir/testCXXCompiler.cxx.o -o cmTC_1dc9e
+        /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_1dc9e.dir/build.make:100：cmTC_1dc9e] 错误 1
+        gmake[1]: 离开目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-STFyrg”
+        gmake: *** [Makefile:127：cmTC_1dc9e/fast] 错误 2
+        
+      exitCode: 2
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+      clang: error: linker command failed with exit code 1 (use -v to see invocation)
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/3.30.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b4c30/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_b4c30.dir/build.make CMakeFiles/cmTC_b4c30.dir/build
+        gmake[1]: Entering directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa'
+        Building CXX object CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/clang++-14   -v -MD -MT CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o -c /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         (in-process)
+         "/usr/lib/llvm-14/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -mrelax-all --mrelax-relocations -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -mllvm -treat-scalable-fixed-error-as-warning -debugger-tuning=gdb -v -fcoverage-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa -resource-dir /usr/lib/llvm-14/lib/clang/14.0.0 -dependency-file CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++ -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward -internal-isystem /usr/lib/llvm-14/lib/clang/14.0.0/include -internal-isystem /usr/local/include -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fdebug-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa -ferror-limit 19 -fgnuc-version=4.2.1 -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o -x c++ /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 14.0.0 based upon LLVM 14.0.0 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
+        ignoring nonexistent directory "/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++
+         /usr/lib/llvm-14/lib/clang/14.0.0/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Linking CXX executable cmTC_b4c30
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b4c30.dir/link.txt --verbose=1
+        /usr/bin/clang++-14  -v -Wl,-v CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_b4c30
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         "/usr/bin/ld" -pie -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_b4c30 /lib/x86_64-linux-gnu/Scrt1.o /lib/x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtbeginS.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../lib64 -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib64 -L/usr/lib/llvm-14/bin/../lib -L/lib -L/usr/lib -v CMakeFiles/cmTC_b4c30.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtendS.o /lib/x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Ubuntu) 2.38
+        /usr/bin/ld: cannot find -lstdc++: No such file or directory
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_b4c30.dir/build.make:100: cmTC_b4c30] Error 1
+        gmake[1]: Leaving directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-I2FZKa'
+        gmake: *** [Makefile:127: cmTC_b4c30/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/bin/clang++-14"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-TrWlEu"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-TrWlEu"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-TrWlEu'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_79560/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_79560.dir/build.make CMakeFiles/cmTC_79560.dir/build
+        gmake[1]: 进入目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-TrWlEu”
+        Building CXX object CMakeFiles/cmTC_79560.dir/testCXXCompiler.cxx.o
+        /usr/bin/clang++-14    -MD -MT CMakeFiles/cmTC_79560.dir/testCXXCompiler.cxx.o -MF CMakeFiles/cmTC_79560.dir/testCXXCompiler.cxx.o.d -o CMakeFiles/cmTC_79560.dir/testCXXCompiler.cxx.o -c /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-TrWlEu/testCXXCompiler.cxx
+        Linking CXX executable cmTC_79560
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_79560.dir/link.txt --verbose=1
+        /usr/bin/clang++-14 CMakeFiles/cmTC_79560.dir/testCXXCompiler.cxx.o -o cmTC_79560
+        /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_79560.dir/build.make:100：cmTC_79560] 错误 1
+        gmake[1]: 离开目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-TrWlEu”
+        gmake: *** [Makefile:127：cmTC_79560/fast] 错误 2
+        
+      exitCode: 2
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+      clang: error: linker command failed with exit code 1 (use -v to see invocation)
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/3.30.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_9da71/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_9da71.dir/build.make CMakeFiles/cmTC_9da71.dir/build
+        gmake[1]: Entering directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3'
+        Building CXX object CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/clang++-14   -v -MD -MT CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o -c /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         (in-process)
+         "/usr/lib/llvm-14/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -mrelax-all --mrelax-relocations -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -mllvm -treat-scalable-fixed-error-as-warning -debugger-tuning=gdb -v -fcoverage-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3 -resource-dir /usr/lib/llvm-14/lib/clang/14.0.0 -dependency-file CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++ -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward -internal-isystem /usr/lib/llvm-14/lib/clang/14.0.0/include -internal-isystem /usr/local/include -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fdebug-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3 -ferror-limit 19 -fgnuc-version=4.2.1 -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o -x c++ /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 14.0.0 based upon LLVM 14.0.0 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
+        ignoring nonexistent directory "/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++
+         /usr/lib/llvm-14/lib/clang/14.0.0/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Linking CXX executable cmTC_9da71
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9da71.dir/link.txt --verbose=1
+        /usr/bin/clang++-14  -v -Wl,-v CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_9da71
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         "/usr/bin/ld" -pie -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_9da71 /lib/x86_64-linux-gnu/Scrt1.o /lib/x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtbeginS.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../lib64 -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib64 -L/usr/lib/llvm-14/bin/../lib -L/lib -L/usr/lib -v CMakeFiles/cmTC_9da71.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtendS.o /lib/x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Ubuntu) 2.38
+        /usr/bin/ld: cannot find -lstdc++: No such file or directory
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_9da71.dir/build.make:100: cmTC_9da71] Error 1
+        gmake[1]: Leaving directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-DnjAB3'
+        gmake: *** [Makefile:127: cmTC_9da71/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/bin/clang++-14"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-CSYm65"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-CSYm65"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-CSYm65'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_de7f8/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_de7f8.dir/build.make CMakeFiles/cmTC_de7f8.dir/build
+        gmake[1]: 进入目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-CSYm65”
+        Building CXX object CMakeFiles/cmTC_de7f8.dir/testCXXCompiler.cxx.o
+        /usr/bin/clang++-14    -MD -MT CMakeFiles/cmTC_de7f8.dir/testCXXCompiler.cxx.o -MF CMakeFiles/cmTC_de7f8.dir/testCXXCompiler.cxx.o.d -o CMakeFiles/cmTC_de7f8.dir/testCXXCompiler.cxx.o -c /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-CSYm65/testCXXCompiler.cxx
+        Linking CXX executable cmTC_de7f8
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_de7f8.dir/link.txt --verbose=1
+        /usr/bin/clang++-14 CMakeFiles/cmTC_de7f8.dir/testCXXCompiler.cxx.o -o cmTC_de7f8
+        /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_de7f8.dir/build.make:100：cmTC_de7f8] 错误 1
+        gmake[1]: 离开目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-CSYm65”
+        gmake: *** [Makefile:127：cmTC_de7f8/fast] 错误 2
+        
+      exitCode: 2
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+      clang: error: linker command failed with exit code 1 (use -v to see invocation)
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/clang++-14 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/3.30.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_e59b3/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_e59b3.dir/build.make CMakeFiles/cmTC_e59b3.dir/build
+        gmake[1]: Entering directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh'
+        Building CXX object CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/clang++-14   -v -MD -MT CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o -c /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         (in-process)
+         "/usr/lib/llvm-14/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -mrelax-all --mrelax-relocations -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -mllvm -treat-scalable-fixed-error-as-warning -debugger-tuning=gdb -v -fcoverage-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh -resource-dir /usr/lib/llvm-14/lib/clang/14.0.0 -dependency-file CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++ -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward -internal-isystem /usr/lib/llvm-14/lib/clang/14.0.0/include -internal-isystem /usr/local/include -internal-isystem /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fdebug-compilation-dir=/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh -ferror-limit 19 -fgnuc-version=4.2.1 -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o -x c++ /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 14.0.0 based upon LLVM 14.0.0 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/backward"
+        ignoring nonexistent directory "/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
+        ignoring nonexistent directory "/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../include/c++
+         /usr/lib/llvm-14/lib/clang/14.0.0/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Linking CXX executable cmTC_e59b3
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e59b3.dir/link.txt --verbose=1
+        /usr/bin/clang++-14  -v -Wl,-v CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_e59b3
+        Ubuntu clang version 14.0.0-1ubuntu1.1
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /usr/bin
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/11
+        Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/12
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+        Found CUDA installation: /usr/local/cuda, version 
+         "/usr/bin/ld" -pie -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e59b3 /lib/x86_64-linux-gnu/Scrt1.o /lib/x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtbeginS.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/12/../../../../lib64 -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib64 -L/usr/lib/llvm-14/bin/../lib -L/lib -L/usr/lib -v CMakeFiles/cmTC_e59b3.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/12/crtendS.o /lib/x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Ubuntu) 2.38
+        /usr/bin/ld: cannot find -lstdc++: No such file or directory
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_e59b3.dir/build.make:100: cmTC_e59b3] Error 1
+        gmake[1]: Leaving directory '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-j1wQGh'
+        gmake: *** [Makefile:127: cmTC_e59b3/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/bin/clang++-14"
+    directories:
+      source: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-sjG1qO"
+      binary: "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-sjG1qO"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/usr/bin/clang-scan-deps-14"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-sjG1qO'
+        
+        Run Build Command(s): /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_9535e/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_9535e.dir/build.make CMakeFiles/cmTC_9535e.dir/build
+        gmake[1]: 进入目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-sjG1qO”
+        Building CXX object CMakeFiles/cmTC_9535e.dir/testCXXCompiler.cxx.o
+        /usr/bin/clang++-14    -MD -MT CMakeFiles/cmTC_9535e.dir/testCXXCompiler.cxx.o -MF CMakeFiles/cmTC_9535e.dir/testCXXCompiler.cxx.o.d -o CMakeFiles/cmTC_9535e.dir/testCXXCompiler.cxx.o -c /home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-sjG1qO/testCXXCompiler.cxx
+        Linking CXX executable cmTC_9535e
+        /home/ruiqiang/.local/lib/python3.10/site-packages/cmake/data/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9535e.dir/link.txt --verbose=1
+        /usr/bin/clang++-14 CMakeFiles/cmTC_9535e.dir/testCXXCompiler.cxx.o -o cmTC_9535e
+        /usr/bin/ld: 找不到 -lstdc++: 没有那个文件或目录
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_9535e.dir/build.make:100：cmTC_9535e] 错误 1
+        gmake[1]: 离开目录“/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/build/CMakeFiles/CMakeScratch/TryCompile-sjG1qO”
+        gmake: *** [Makefile:127：cmTC_9535e/fast] 错误 2
+        
+      exitCode: 2
+...

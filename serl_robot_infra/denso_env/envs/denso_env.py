@@ -582,6 +582,8 @@ class DensoEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
+        
+        print("action before clip = ", action)
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
         print("action = ", action)

@@ -164,19 +164,22 @@ class TrainConfig(DefaultTrainingConfig):
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                if is_pick:
-                    print("classifier = classifier_pick")
-                    classifier = classifier_pick
-                else:
-                    print("classifier = classifier_place")
-                    classifier = classifier_normal
-                # classifier = classifier_normal
+                # if is_pick:
+                #     print("classifier = classifier_pick")
+                #     classifier = classifier_pick
+                # else:
+                #     print("classifier = classifier_place")
+                #     classifier = classifier_normal
+                classifier = classifier_normal
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
                 success = prob > 0.95
+                # if classifier == classifier_pick:
+                #     reward = 0.3 if success else 0
+                # else:
                 reward = 1 if success else 0
                 state = obs["state"]
                 ee_pos = state[0, :3] if state.ndim > 1 else state[:3]

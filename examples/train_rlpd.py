@@ -90,9 +90,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             step=FLAGS.eval_checkpoint_step,
         )
         agent = agent.replace(state=ckpt)
-
+        
+        obs, _ = env.reset()
         for episode in range(FLAGS.eval_n_trajs):
-            obs, _ = env.reset()
             done = False
             start_time = time.time()
 
@@ -100,7 +100,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
 
                 sampling_rng, key = jax.random.split(sampling_rng)
 
-                print_green(f"obs[state] =  {obs['state']}")
+                # print_green(f"obs[state] =  {obs['state']}")
                 actions = agent.sample_actions(
                     observations=jax.device_put(obs),
                     argmax=False,
@@ -110,8 +110,16 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
 
                 next_obs, reward, done, truncated, info = env.step(actions)
                 obs = next_obs
+                # if "is_pick" in info:
+                #     is_pick = info["is_pick"]
+                # else:
+                #     is_pick = True
+                
+                # if done and is_pick:
+                #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
 
                 if done:
+                # if done and not is_pick:
                     if reward:
                         dt = time.time() - start_time
                         time_list.append(dt)
@@ -194,7 +202,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             next_obs, reward, done, truncated, info = env.step(actions)
             print("reward = ", reward)
 
-            print_red(f"next_obs[state] =  {next_obs['state']}")
+            # print_red(f"next_obs[state] =  {next_obs['state']}")
 
             # override the action with the intervention action
             if "intervene_action" in info:
@@ -207,10 +215,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             else:
                 already_intervened = False
             
-            if "is_pick" in info:
-                is_pick = info["is_pick"]
-            else:
-                is_pick = True
+            # if "is_pick" in info:
+            #     is_pick = info["is_pick"]
+            # else:
+            #     is_pick = True
 
             # if done == 1:
             #     time.sleep(0.5)
@@ -236,11 +244,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 demo_transitions.append(copy.deepcopy(transition))
 
             obs = next_obs
-            if done and is_pick:
-                print_green("pick task done")
+            # if done and is_pick:
+            #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
 
-            if done and not is_pick:
-            # if done == 1:
+            # if done and not is_pick:
+            if done == 1:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
@@ -456,7 +464,7 @@ def main(_):
     agent = jax.device_put(
         jax.tree_map(jnp.array, agent), sharding.replicate()
     )
-
+    # if FLAGS.checkpoint_path is not None and os.path.exists(os.path.join(FLAGS.checkpoint_path, "checkpoint*")):
     if FLAGS.checkpoint_path is not None and os.path.exists(FLAGS.checkpoint_path):
         # input("Checkpoint path already exists. Press Enter to resume training.")
         ckpt = checkpoints.restore_checkpoint(
@@ -480,7 +488,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-pick_place-keyboard-9-29",
+            project="hil-serl-keyboard-10-2",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
