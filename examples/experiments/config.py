@@ -6,7 +6,7 @@ class DefaultTrainingConfig:
 
     agent: str = "drq"
     max_traj_length: int = 100
-    batch_size: int = 256
+    batch_size: int = 128
     cta_ratio: int = 3
     discount: float = 0.97
 
@@ -33,6 +33,7 @@ class DefaultTrainingConfig:
     classifier_keys: List[str] = None
     classifier_key_weights: dict[str, float] | None = None
     proprio_keys: List[str] = None
+    state_weights: List[float] | None = None
     
     # "single-arm-learned-gripper", "dual-arm-learned-gripper" for with learned gripper, 
     # "single-arm-fixed-gripper", "dual-arm-fixed-gripper" for without learned gripper (i.e. pregrasped)

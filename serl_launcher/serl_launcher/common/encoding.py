@@ -23,6 +23,7 @@ class EncodingWrapper(nn.Module):
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
     image_weights: Optional[Dict[str, float]] = None
+    state_weights: Optional[Iterable[float]] = None
 
     @nn.compact
     def __call__(
@@ -59,6 +60,7 @@ class EncodingWrapper(nn.Module):
         if self.use_proprio:
             # project state to embeddings as well
             state = observations["state"]
+            state = jnp.asarray(state)
             if self.enable_stacking:
                 # Combine stacking and channels into a single dimension
                 if len(state.shape) == 2:
@@ -66,6 +68,14 @@ class EncodingWrapper(nn.Module):
                     encoded = encoded.reshape(-1)
                 if len(state.shape) == 3:
                     state = rearrange(state, "B T C -> B (T C)")
+            
+            if self.state_weights is not None:
+                weights = jnp.asarray(self.state_weights, dtype=state.dtype)
+                feature_dim = state.shape[-1]
+                base_weights = jnp.ones((feature_dim,), dtype=state.dtype)
+                limit = min(feature_dim, weights.shape[0])
+                base_weights = base_weights.at[:limit].set(weights[:limit])
+                state = state * base_weights
             state = nn.Dense(
                 self.proprio_latent_dim, kernel_init=nn.initializers.xavier_uniform()
             )(state)

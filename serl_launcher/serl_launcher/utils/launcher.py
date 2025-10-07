@@ -56,6 +56,7 @@ def make_sac_pixel_agent(
     reward_bias=0.0,
     target_entropy=None,
     discount=0.97,
+    state_weights=None,
 ):
     agent = SACAgent.create_pixels(
         jax.random.PRNGKey(seed),
@@ -63,6 +64,7 @@ def make_sac_pixel_agent(
         sample_action,
         encoder_type=encoder_type,
         use_proprio=True,
+        state_weights=state_weights,
         image_keys=image_keys,
         policy_kwargs={
             "tanh_squash_distribution": True,

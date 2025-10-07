@@ -59,10 +59,10 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         start_time = time.time()
         obs, rew, done, truncated, info = self.env.step(action)
         rew = self.compute_reward(obs)
-        if rew < 0:
+        if rew <= 0:
             done = 0
         else:
-            done  = rew
+            done = 1
 
         info['succeed'] = bool(rew)
         info['is_pick'] = self.is_pick

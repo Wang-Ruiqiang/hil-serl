@@ -106,7 +106,13 @@ class TrainConfig(DefaultTrainingConfig):
     image_keys = ["front_camera", "tactile_data"]
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera", "tactile_data"]
-    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
+    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
+    state_weights = np.concatenate(
+        [
+            np.full(6, 1.0, dtype=np.float32),  # arm joints
+            np.full(1, 1.0, dtype=np.float32),  # leaphand joints
+        ]
+    )
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
@@ -183,9 +189,13 @@ class TrainConfig(DefaultTrainingConfig):
                 reward = 1 if success else 0
                 state = obs["state"]
                 ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-                if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-                    reward -= 0.01
-                if ee_pos[2] < 0.02:
+                gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]
+                print("gripper_pose = ", gripper_pose)
+                # if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
+                #     reward -= 0.01
+                # if ee_pos[2] < 0.02:
+                #     reward -= 0.05
+                if not is_pick and -0.30 < ee_pos[1] < -0.04 and gripper_pose < 0.8:
                     reward -= 0.05
                 return reward
 

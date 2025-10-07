@@ -583,7 +583,6 @@ class DensoEnv(gym.Env):
         """standard gym step function."""
         start_time = time.time()
         
-        print("action before clip = ", action)
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
         print("action = ", action)
@@ -902,7 +901,7 @@ class DensoEnv(gym.Env):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
         step_time = 0.05  # Example step time
-        steps = 20     # Example number of steps
+        steps = 10    # Example number of steps
 
         if self.interpolation_thread and self.interpolation_thread.is_alive():
             return

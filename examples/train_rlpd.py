@@ -247,6 +247,8 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
             print("actions before intervene= ", actions)
+            # if actions[6] < 0.8:
+            #     actions[6] = 1.0
             next_obs, reward, done, truncated, info = env.step(actions)
             print("reward = ", reward)
 
@@ -290,7 +292,7 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
             #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
 
             # if done and not is_pick:
-            if done == 1:
+            if done:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
@@ -477,6 +479,7 @@ def main(_):
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
             discount=config.discount,
+            state_weights=config.state_weights,
         )
         include_grasp_penalty = False
         
@@ -487,6 +490,7 @@ def main(_):
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
             discount=config.discount,
+            state_weights=config.state_weights,
         )
         include_grasp_penalty = False
     else:
@@ -538,7 +542,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-pick_keyboard-10-4",
+            project="hil-serl-keyboard-place-10-6",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
