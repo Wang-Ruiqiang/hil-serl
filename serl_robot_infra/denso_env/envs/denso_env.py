@@ -250,7 +250,7 @@ class ROSNodeInterface(Node):
 class DensoEnv(gym.Env):
     def __init__(
         self,
-        hz=2,
+        hz=10,
         fake_env=False,
         save_video=False,
         config: DefaultEnvConfig = None,
@@ -329,9 +329,10 @@ class DensoEnv(gym.Env):
             )
         elif self.enable_tactile:
             print("init arm with tactile")
-            low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
-            high = np.ones(7, dtype=np.float32)
-            self.action_space = gym.spaces.Box(low, high, dtype=np.float32)
+            # low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
+            # high = np.ones(7, dtype=np.float32)
+            self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
+            # self.action_space = gym.spaces.Box(low, high, dtype=np.float32)
 
             self.observation_space = gym.spaces.Dict(
                 {
@@ -496,20 +497,12 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-9-27-2"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-10-11-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_oritation = np.zeros(4, dtype=np.float32)
-
-        # initial close pose
-        # self.gripper_close_joint = [
-        #     3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
-        #     3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
-        #     3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
-        #     4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
-        # ]
 
         # grip with index
         self.gripper_close_joint = [
@@ -519,11 +512,18 @@ class DensoEnv(gym.Env):
             4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
         ]
 
+        # self.gripper_open_joint = [
+        #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+        #     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+        #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        #     4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
+        # ]
+        
         self.gripper_open_joint = [
             2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
             2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
             3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
+            4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
         ]
 
         #grip with middle
@@ -550,14 +550,21 @@ class DensoEnv(gym.Env):
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
 
-        self.changed_hand_pos = [
-            2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-            2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
-            3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
-        ]
+        # self.changed_hand_pos = [
+        #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+        #     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+        #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        #     4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
+        # ]
 
         self.hand_state = 0.0 #hand opened lable
+        
+        self.gripper_close_joint_np = np.asarray(self.gripper_close_joint, dtype=np.float32)
+        self.gripper_open_joint_np = np.asarray(self.gripper_open_joint, dtype=np.float32)
+        self.gripper_direction = np.sign(self.gripper_close_joint_np - self.gripper_open_joint_np)
+        self.max_gripper_step = np.abs(self.gripper_close_joint_np - self.gripper_open_joint_np) / 10.0
+        # Ensure direction is either -1 or 1 where movement is required
+        self.gripper_direction[self.gripper_direction == 0] = 1.0
 
         print("Initialized Denso")
 
@@ -605,20 +612,47 @@ class DensoEnv(gym.Env):
             * Rotation.from_quat(self.cur_oritation)
         ).as_quat()
 
-        grip_ratio = np.clip(action[6], 0.0, 1.0)
-        self.changed_hand_pos = (
-            (1 - grip_ratio) * np.array(self.gripper_open_joint) +
-            grip_ratio * np.array(self.gripper_close_joint)
-        )
 
-        # print("nextpos = ", self.nextpos)
+        grip_action = float(np.clip(action[6], -1.0, 1.0))
+        current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
+        proposed_hand_pos = current_hand_pos + grip_action * self.max_gripper_step * self.gripper_direction
+        close_ge_open_mask = self.gripper_close_joint_np >= self.gripper_open_joint_np
+        # print("current_hand_pos = ", current_hand_pos)
+        if grip_action > 0:
+            target_hand_pos = np.where(
+                close_ge_open_mask,
+                np.minimum(proposed_hand_pos, self.gripper_close_joint_np),
+                np.maximum(proposed_hand_pos, self.gripper_close_joint_np),
+            )
+        elif grip_action < 0:
+            target_hand_pos = np.where(
+                close_ge_open_mask,
+                np.maximum(proposed_hand_pos, self.gripper_open_joint_np),
+                np.minimum(proposed_hand_pos, self.gripper_open_joint_np),
+            )
+        else:
+            target_hand_pos = current_hand_pos.copy()
+            
+        # print("target_hand_pos = ", target_hand_pos)
+
         self.ros_interface.publish_arm_action(self.nextpos)
 
-        diff = np.asarray(self.curr_leap_hand_pos, dtype=np.float32) - \
-        np.asarray(self.changed_hand_pos, dtype=np.float32)
-        # print("np.max(np.abs(diff)) = ", np.max(np.abs(diff)))
-        if np.max(np.abs(diff)) > 0.15:
-            self._send_leap_hand_command(self.changed_hand_pos)
+        diff = target_hand_pos - current_hand_pos
+        # # print("np.max(np.abs(diff)) = ", np.max(np.abs(diff)))
+        # if np.max(np.abs(diff)) > 0.15:
+        diff = target_hand_pos - current_hand_pos
+
+        # 判断当前是否已经是open或close状态
+        is_open_now = np.allclose(current_hand_pos, self.gripper_open_joint_np, atol=0.01)
+        is_close_now = np.allclose(current_hand_pos, self.gripper_close_joint_np, atol=0.01)
+
+        # 如果当前位置和目标位置都处于相同极限状态，则不发送命令
+        if (grip_action >=0 and is_close_now) or (grip_action < 0 and is_open_now):
+            pass  # 不调用_send_leap_hand_command
+        else:
+            if np.max(np.abs(diff)) > 0.01:
+                self._send_leap_hand_command(target_hand_pos.copy())
+
 
         # time.sleep(1.5)
         dt = time.time() - start_time
@@ -628,7 +662,7 @@ class DensoEnv(gym.Env):
 
         self.curr_path_length += 1
         self._update_cur_position(self.nextpos)
-        self.hand_state = grip_ratio
+        self.hand_state = grip_action
 
         # t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
@@ -643,7 +677,18 @@ class DensoEnv(gym.Env):
         done = reward or self.terminate
         # t_end = time.time()
         # print(f"[Step End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
+        # print("curr hand pos = ", self.curr_leap_hand_pos)
+        # input("debug for hand pos")
         return ob, int(reward), done, False, {"succeed": reward}
+    
+    def move_up(self):
+        print("move up to avoid collision")
+        pos = self.cur_position.copy()
+        pos[2] += 0.1
+        ori = self.cur_oritation.copy()
+        nextpos = np.concatenate((pos, ori), axis=0)
+        self.ros_interface.publish_arm_action(nextpos)
+        time.sleep(2.0)
     
 
     def compute_reward(self, obs) -> bool:
@@ -897,17 +942,18 @@ class DensoEnv(gym.Env):
         requests.post(self.url + "clearerr")
 
 
-    def _send_leap_hand_command(self, leap_hand_action: np.ndarray):
+    def _send_leap_hand_command(self, leap_hand_action: np.ndarray, steps=10, step_time=0.01):
         """Internal function to send leap hand command to the robot."""
         hand_action = leap_hand_action
-        step_time = 0.05  # Example step time
-        steps = 10    # Example number of steps
+        # step_time = 0.01  # Example step time
+        # steps = 10    # Example number of steps
 
         if self.interpolation_thread and self.interpolation_thread.is_alive():
             return
         
         current_pos = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(current_pos, dtype=np.float32).copy()
+        # print("in send_leap_hand_command curr_leap_hand_pos = ", self.curr_leap_hand_pos)
 
         with self.thread_lock:
             self.interpolation_thread = threading.Thread(
@@ -928,6 +974,7 @@ class DensoEnv(gym.Env):
             # Publish the interpolated position
             self.curr_leap_hand_pos = np.asarray(interpolated_position, dtype=np.float32).copy()
             self.ros_interface.publish_hand_action(interpolated_position)
+            # print("in leap_interpolate_and_publish curr_leap_hand_pos = ", self.curr_leap_hand_pos)
             time.sleep(step_time)
             
 
@@ -942,6 +989,7 @@ class DensoEnv(gym.Env):
 
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
+        # print("in _update_cur_position curr_leap_hand_pos = ", self.curr_leap_hand_pos)
 
         diff = np.asarray(arm_action[:3], dtype=np.float32) - np.asarray(self.cur_position, dtype=np.float32)
         while np.max(np.abs(diff)) > wait_threshold:
@@ -955,11 +1003,6 @@ class DensoEnv(gym.Env):
             hand_joint_msg = self.ros_interface.get_current_leap_position()
             self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
             diff = np.linalg.norm(arm_action[:3] - self.cur_position)
-
-        # if self.changed_hand_pos == self.gripper_close_joint:
-        #     self.hand_state = 1
-        # else:
-        #     self.hand_state = 0
 
 
     def _get_obs(self) -> dict:

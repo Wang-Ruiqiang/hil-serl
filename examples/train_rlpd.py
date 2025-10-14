@@ -55,6 +55,7 @@ flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint
 flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
+flags.DEFINE_boolean("is_pick", True, "read exist data or not.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -199,7 +200,8 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
                 demo_transitions = []
         
         sampling_rng, key = jax.random.split(sampling_rng)
-        if mode == "S1_INFER":
+
+        if not FLAGS.is_pick and mode == "S1_INFER":
             # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
             actions = agent_pick.sample_actions(
                 observations=jax.device_put(obs),
@@ -241,8 +243,8 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
                 seed=key,
             )
             actions = np.asarray(jax.device_get(actions_sample)).copy()
-            actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
-            actions[..., 6] = np.clip(actions[..., 6], 0.0, 1.0)
+            # actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
+            actions[..., 6] = np.clip(actions[..., 6], -1.0, 1.0)
         # Step environment
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
@@ -542,7 +544,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-keyboard-place-10-6",
+            project="hil-serl-keyboard-place-10-11",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

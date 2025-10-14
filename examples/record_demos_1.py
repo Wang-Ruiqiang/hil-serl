@@ -33,7 +33,7 @@ flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/record
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_boolean("is_arm_only", True, "read exist data or not.")
-flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
+flags.DEFINE_boolean("is_pick_task", True, "read exist data or not.")
 flags.DEFINE_boolean("is_pick_and_place", False, "read exist data or not.")
 
 # camera_keys = ["front_camera", "side_camera"]
@@ -82,9 +82,10 @@ def main(_):
                 np.ones((22,), dtype=np.float32),
             )
     else :
-        low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
-        high = np.ones(7, dtype=np.float32)
-        action_space = gym.spaces.Box(low, high, dtype=np.float32)
+        # low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
+        # high = np.ones(7, dtype=np.float32)
+        # action_space = gym.spaces.Box(low, high, dtype=np.float32)
+        action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
         
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
@@ -157,13 +158,15 @@ def main(_):
             
             for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
+                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
+                next_next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 2]) if i < end_frame - 1 else next_frame_path
 
-                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, True)
+                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, next_frame_path, True)
                 if i == end_frame:
                     next_obs = obs
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, True)
+                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, next_next_frame_path, True)
                 # print("obs state shape = ", obs["state"].shape)
                 # input("debug")
                 tcp_ori = obs["state"][3:7]  # 四元数部分
@@ -183,7 +186,7 @@ def main(_):
                 # if is_pick:
                 #     reward = comupute_reward(obs, classifier_pick)
                 # else:
-                reward = comupute_reward(obs, classifier_place)
+                reward = comupute_reward(obs, classifier_pick)
 
 
                 done = reward or terminate

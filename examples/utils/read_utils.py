@@ -71,7 +71,7 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
+def get_frame_data(frame_path, robot_urdf_path,  next_frame_path=None, enable_tactile=False):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
@@ -93,6 +93,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image, middle_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
+        
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
@@ -101,32 +102,35 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
 
         with open(joint_file_path, "r") as f:
             all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
-            # Change the order of robot arm joint data
-
-            # print("all_joint_values ori = ", all_joint_values)
-            # wrist_joint_index = [2,0,1,3,4,5]
-            # all_joint_values[:6] = all_joint_values[wrist_joint_index]
-
             hand_joint = all_joint_values[6:]
-            # print("all_joint_values = ", all_joint_values)
-            # input("enter")
+            
+    
+    if next_frame_path is not None:
+        next_joint_file_path = os.path.join(next_frame_path, "right_arm_joint.txt")
+        if os.path.exists(next_joint_file_path):
 
-    open_j  = np.array(gripper_open_joint,  dtype=np.float32)
-    close_j = np.array(gripper_close_joint, dtype=np.float32)
-    curr    = np.array(hand_joint,          dtype=np.float32)
+            with open(next_joint_file_path, "r") as f:
+                next_all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
+                next_hand_joint = next_all_joint_values[6:]
+            
+            
+        open_j  = np.array(gripper_open_joint,  dtype=np.float32)
+        close_j = np.array(gripper_close_joint, dtype=np.float32)
+        gripper_direction = np.sign(close_j - open_j)
+        gripper_direction[gripper_direction == 0] = 1.0
+        max_gripper_step = np.abs(close_j - open_j) / 10.0
+        max_gripper_step = np.clip(max_gripper_step, 1e-6, None)
 
-    delta = close_j - open_j
-    denominator = np.dot(delta, delta) + 1e-8
-    hand_state = float(np.clip(np.dot(curr - open_j, delta) / denominator, 0.0, 1.0))
+        hand_state = float(np.clip(
+            np.dot(next_hand_joint - hand_joint,
+                max_gripper_step * gripper_direction)
+            / (np.dot(max_gripper_step * gripper_direction,
+                    max_gripper_step * gripper_direction) + 1e-8),
+            -1.0, 1.0
+        ))
+    
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
-    # print("tcp_pos = ", tcp_pos)
-    # print("tcp_ori = ", tcp_ori)
-    # ori_index = [3, 0, 1, 2]
-    # tcp_ori = np.array(tcp_ori)[ori_index]
     tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
-    # print("tcp_pos 1= ", tcp_pos)
-    # print("tcp_ori 1= ", tcp_ori)
-    # input("debug")
 
     # state_flattened = np.concatenate([
     #     np.array(tcp_pos, dtype=np.float32).flatten(),

@@ -116,7 +116,7 @@ class TrainConfig(DefaultTrainingConfig):
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
-    buffer_period = 500
+    buffer_period = 1000
     checkpoint_period = 1000 
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
@@ -170,19 +170,19 @@ class TrainConfig(DefaultTrainingConfig):
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                if is_pick:
-                    print("classifier = classifier_pick")
-                    classifier = classifier_pick
-                else:
-                    print("classifier = classifier_place")
-                    classifier = classifier_normal
-                # classifier = classifier_normal
+                # if is_pick:
+                #     print("classifier = classifier_pick")
+                #     classifier = classifier_pick
+                # else:
+                #     print("classifier = classifier_place")
+                #     classifier = classifier_normal
+                classifier = classifier_pick
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.95
+                success = prob > 0.80
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:
@@ -190,13 +190,12 @@ class TrainConfig(DefaultTrainingConfig):
                 state = obs["state"]
                 ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
                 gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]
-                print("gripper_pose = ", gripper_pose)
-                # if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-                #     reward -= 0.01
-                # if ee_pos[2] < 0.02:
-                #     reward -= 0.05
-                if not is_pick and -0.30 < ee_pos[1] < -0.04 and gripper_pose < 0.8:
+                if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
+                    reward -= 0.01
+                if ee_pos[2] < 0.02:
                     reward -= 0.05
+                # if not is_pick and -0.30 < ee_pos[1] < -0.04 and gripper_pose < 0.8:
+                #     reward -= 0.05
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
