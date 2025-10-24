@@ -70,6 +70,7 @@ class RAMEnv(DensoEnv):
         self.curr_path_length = 0
         # self.ros_interface.reset_cur_pose()
         self._update_cur_position(init_arm_action)
+        self.gripper_open_joint_np = self.curr_leap_hand_pos.copy()
         # print("self.cur_position = ", self.cur_position)
         # self.save_training_frame()
         obs = self._get_obs()

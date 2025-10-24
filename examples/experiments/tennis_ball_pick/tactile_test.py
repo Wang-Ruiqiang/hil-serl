@@ -5,7 +5,7 @@ import yaml
 from shape_reconstruction import Sensor
 import numpy as np
 
-def process_tactile_data(sensor, img_size=(640, 480)):
+def process_tactile_data(sensor, img_size=(128,128)):
     raw_img = sensor.get_rectify_crop_image()
     img_GRAY = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
     height_map = sensor.raw_image_2_height_map(img_GRAY)
@@ -48,6 +48,8 @@ def main():
         # canvas = cv2.hconcat([thumb_heat, index_heat, middle_heat])
         cv2.imshow("thumb Heatmaps", thumb_heat)
         cv2.imshow("index Heatmaps", index_heat)
+        cv2.imshow("middle Heatmaps", middle_heat)
+    
 
         # 按 'q' 退出
         if cv2.waitKey(1) & 0xFF == ord('q'):

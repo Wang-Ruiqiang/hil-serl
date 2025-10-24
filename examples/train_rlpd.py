@@ -84,6 +84,7 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
     if FLAGS.eval_checkpoint_step:
         print("in eval mode")
         success_counter = 0
+        intervention_label = 0
         time_list = []
         print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
         ckpt = checkpoints.restore_checkpoint(
@@ -112,6 +113,8 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
 
                 next_obs, reward, done, truncated, info = env.step(actions)
                 obs = next_obs
+                if "intervene_action" in info:
+                    intervention_label = 1
                 # if "is_pick" in info:
                 #     is_pick = info["is_pick"]
                 # else:
@@ -119,17 +122,17 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
                 
                 # if done and is_pick:
                 #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-
                 if done:
                 # if done and not is_pick:
                     if reward:
                         dt = time.time() - start_time
                         time_list.append(dt)
                         print(dt)
-
-                    success_counter += reward
+                    if not intervention_label:
+                        success_counter += 1
                     print(reward)
                     print(f"{success_counter}/{episode + 1}")
+                    intervention_label = 0
                     input("reset env")
                     obs, _ = env.reset()
 

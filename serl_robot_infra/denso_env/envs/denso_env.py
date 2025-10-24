@@ -641,7 +641,6 @@ class DensoEnv(gym.Env):
         # # print("np.max(np.abs(diff)) = ", np.max(np.abs(diff)))
         # if np.max(np.abs(diff)) > 0.15:
         diff = target_hand_pos - current_hand_pos
-
         # 判断当前是否已经是open或close状态
         is_open_now = np.allclose(current_hand_pos, self.gripper_open_joint_np, atol=0.01)
         is_close_now = np.allclose(current_hand_pos, self.gripper_close_joint_np, atol=0.01)
@@ -650,9 +649,8 @@ class DensoEnv(gym.Env):
         if (grip_action >=0 and is_close_now) or (grip_action < 0 and is_open_now):
             pass  # 不调用_send_leap_hand_command
         else:
-            if np.max(np.abs(diff)) > 0.01:
+            if np.max(np.abs(diff)) > 0.01 and (-0.3 > grip_action or grip_action > 0):
                 self._send_leap_hand_command(target_hand_pos.copy())
-
 
         # time.sleep(1.5)
         dt = time.time() - start_time
