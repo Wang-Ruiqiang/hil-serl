@@ -200,39 +200,43 @@ class KeyboardIntervention(gym.ActionWrapper):
     def __init__(self, env, action_indices=None):
         super().__init__(env)
 
-        # self.gripper_enabled = True
-        # if self.action_space.shape == (6,):
-        #     self.gripper_enabled = False
-
         self.expert = KeyboardExpert()
         self.action_indices = action_indices
+        self.exp_name = env.config.EXP_NAME
 
-        self.gripper_open_joint = [
-            2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-            2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
-            3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
-        ]
-        # self.gripper_close_joint = [
-        #     3.552699565887451172, 3.572641372680664062, 4.193903446197509766, 3.380893707275390625,
-        #     3.423845052719116211, 3.796602487564086914, 3.713767528533935547, 3.592582941055297852,
-        #     3.144660711288452148, 3.288854837417602539, 2.890019893646240234, 3.325670242309570312,
-        #     4.592738628387451172, 3.472932577133178711, 3.713767528533935547, 3.051087856292724609
-        # ]   
-        self.gripper_close_joint = [
-            3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
-            3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-            3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
-            4.661767482757568359, 3.366175127029418945, 3.374757766723632812, 3.397184896469116211
-        ]
+        if self.exp_name == "tennis_ball_pick":
+            self.gripper_open_joint = self.env.gripper_open_joint
+            # self.gripper_open_joint = [
+            #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+            #     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            #     4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
+            # ]
+            
+            self.gripper_closen_joint = self.env.gripper_close_joint
+            
+            # self.gripper_close_joint = [
+            #     3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
+            #     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+            #     3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
+            #     4.661767482757568359, 3.366175127029418945, 3.374757766723632812, 3.397184896469116211
+            # ]
+        elif self.exp_name == "twist_bottle_cap":
+            self.gripper_open_joint = self.env.gripper_open_joint
+            # self.gripper_open_joint = [
+            #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+            #     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            #     4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
+            # ]
 
-        #grip with middle
-        # self.gripper_close_joint = [
-        #     3.132388830184936523, 3.186078071594238281, 3.153864383697509766, 3.147728681564331055,
-        #     3.201417922973632812, 4.543651103973388672, 2.943709135055541992, 3.740427684783935547,
-        #     3.144660711288452148, 3.181476116180419922, 3.144660711288452148, 3.140058755874633789,
-        #     4.825903415679931641, 3.525670242309570312, 3.230563640594482422, 3.240349960327148438
-        # ]
+            self.gripper_closen_joint = self.env.gripper_close_joint
+            # self.gripper_close_joint = [
+            #     3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
+            #     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+            #     3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
+            #     4.661767482757568359, 3.366175127029418945, 3.374757766723632812, 3.397184896469116211
+            # ]
 
     def action(self, action: np.ndarray) -> np.ndarray:
         """
@@ -256,10 +260,11 @@ class KeyboardIntervention(gym.ActionWrapper):
         if intervened:
             new_action = np.zeros(7, dtype=np.float32)
             new_action[:3] = expert_a[:3]
-            if expert_a[3] > 0.8 :
+            new_action[5] = expert_a[3]
+            if expert_a[4] > 0.8 :
                 # hand_joint = self.gripper_close_joint
                 new_action[6] = 1.0
-            if expert_a[4] > 0.8 :
+            if expert_a[5] > 0.8 :
                 # hand_joint = self.gripper_open_joint
                 new_action[6] = -1.0
 
@@ -269,38 +274,6 @@ class KeyboardIntervention(gym.ActionWrapper):
 
     def step(self, action):
         new_action, replaced = self.action(action)
-        # if replaced:
-        #     print("Keyboard intervention action true")
-        #     current_obs = self.env._get_obs()  # 获取当前状态（注意根据你的 wrapper 修改）
-            
-        #     state = current_obs["state"]
-        #     # print("state tcp pos in keyboardintervention = ", state[:3])
-        #     tcp_pos = state[:3]
-        #     tcp_ori = state[3:7]
-        #     # 如果训练包含hand
-        #     hand_included = False
-        #     if hand_included:
-        #         hand_joint = state[7:]
-
-
-        #     # 对 xyz 增量应用到当前坐标
-        #     delta_pos = new_action[:3]
-        #     new_tcp_pos = tcp_pos + delta_pos
-        #     if new_action[3] > 0 :
-        #         hand_joint = self.gripper_close_joint
-        #         self.env.changed_hand_joint = self.gripper_close_joint
-        #     if new_action[4] > 0 :
-        #         hand_joint = self.gripper_open_joint
-        #         self.env.changed_hand_joint = self.gripper_open_joint
-
-        #     # 对四元数方向的旋转做增量（简化处理，只做平移）
-        #     # 或者你可以用 scipy.spatial.transform.Rotation 实现四元数旋转叠加
-        #     if hand_included:
-        #         new_action = np.concatenate([new_tcp_pos, tcp_ori, hand_joint])
-        #     else:
-        #         new_action = np.concatenate([new_tcp_pos, tcp_ori])
-
-        #     self.print_action = True
         
         obs, rew, done, truncated, info = self.env.step(new_action)
 

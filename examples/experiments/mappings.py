@@ -3,6 +3,7 @@
 # from experiments.object_handover.config import TrainConfig as ObjectHandoverTrainConfig
 # from experiments.egg_flip.config import TrainConfig as EggFlipTrainConfig
 from experiments.tennis_ball_pick.config import TrainConfig as TennisBallPickTrainConfig
+from experiments.twist_bottle_cap.config import TrainConfig as TwistBottleCapTrainConfig
 
 # CONFIG_MAPPING = {
 #                 "ram_insertion": RAMInsertionTrainConfig,
@@ -14,4 +15,5 @@ from experiments.tennis_ball_pick.config import TrainConfig as TennisBallPickTra
 
 NEW_MAPPING = {
     "tennis_ball_pick": TennisBallPickTrainConfig,
+    "twist_bottle_cap":TwistBottleCapTrainConfig,
             }
