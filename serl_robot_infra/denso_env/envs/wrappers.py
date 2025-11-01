@@ -247,7 +247,7 @@ class KeyboardIntervention(gym.ActionWrapper):
         """
         expert_a = self.expert.get_action()
         intervened = False
-        
+        print("expert_a = ", expert_a)
         # 人为输入动作非0,触发干预
         if np.linalg.norm(expert_a) > 0.001:
             intervened = True
@@ -274,7 +274,7 @@ class KeyboardIntervention(gym.ActionWrapper):
 
     def step(self, action):
         new_action, replaced = self.action(action)
-        
+        print("new_action = ", new_action)
         obs, rew, done, truncated, info = self.env.step(new_action)
 
         if replaced:

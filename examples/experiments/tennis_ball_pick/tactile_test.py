@@ -5,7 +5,7 @@ import yaml
 from shape_reconstruction import Sensor
 import numpy as np
 
-def process_tactile_data(sensor, img_size=(128,128)):
+def process_tactile_data(sensor, img_size=(320,240)):
     raw_img = sensor.get_rectify_crop_image()
     img_GRAY = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
     height_map = sensor.raw_image_2_height_map(img_GRAY)

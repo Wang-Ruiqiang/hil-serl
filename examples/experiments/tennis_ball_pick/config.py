@@ -100,6 +100,7 @@ class EnvConfig(DefaultEnvConfig):
     IS_ARM_ONLY = True
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    EXP_NAME = "tennis_ball_pick"
 
 
 class TrainConfig(DefaultTrainingConfig):

@@ -36,7 +36,7 @@ def main(_):
             actions = np.zeros(env.action_space.sample().shape)
             actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
-            print("reward = ", rew)
+            # print("reward = ", rew)
             returns += rew
             if "intervene_action" in info:
                 actions = info["intervene_action"]

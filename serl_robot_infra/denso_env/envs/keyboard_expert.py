@@ -114,6 +114,7 @@ class KeyboardExpert:
 
     def get_action(self) -> tuple[np.ndarray, list]:
         action = self.latest_data["action"]
+        print("a    ction = ", action)
         if np.linalg.norm(action) > 0.001:
             self.latest_data["action"] = [0.0] * 6  # 只在非零动作时清空
         # self.latest_data["action"] = [0.0] * 6

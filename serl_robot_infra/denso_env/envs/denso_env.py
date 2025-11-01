@@ -45,10 +45,17 @@ class ImageDisplayer(threading.Thread):
             if img_array is None:  # None is our signal to exit
                 break
 
-            frame = np.concatenate(
-                [cv2.resize(v, (128, 128)) for k, v in img_array.items() if "full" not in k], axis=1
-            )
-            cv2.imshow(self.name, frame)
+            # frame = np.concatenate(
+            #     [cv2.resize(v, (128, 128)) for k, v in img_array.items() if "full" not in k], axis=1
+            # )
+            # cv2.imshow(self.name, frame)
+            # cv2.waitKey(1)
+            for k, v in img_array.items():
+                if "full" in k:
+                        continue  # 忽略 full 图像
+                img = cv2.resize(v, (256, 256))  # 每个窗口显示 256×256
+                cv2.imshow(f"{self.name} - {k}", img)
+
             cv2.waitKey(1)
 
 
@@ -563,7 +570,7 @@ class DensoEnv(gym.Env):
         
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        print("action = ", action)
+        # print("action = ", action)
 
         xyz_delta = action[:3]
 
@@ -575,6 +582,7 @@ class DensoEnv(gym.Env):
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         rpy_delta[2] = action[5]
+        print("rpy_delta = ", rpy_delta)
         self.nextpos[3:6] = self.nextpos[3:6] + rpy_delta * self.action_scale[1]
         # self.nextpos[3:] = (
         #     Rotation.from_euler("xyz", action[3:6] * self.action_scale[1])
@@ -718,7 +726,10 @@ class DensoEnv(gym.Env):
             with self.tac_index_lock:
                 # index_heat_map_resized = cv2.resize(self.index_heat_map, (128, 128))  # 如果想缩放
                 heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-                display_image = {"heat_map": heat_map}
+                display_image = {
+                    "heat_map": heat_map,
+                    "front_camera": display_images["front_camera"],
+                }
             self.img_queue.put(display_image)
         return images
 

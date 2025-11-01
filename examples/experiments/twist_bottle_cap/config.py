@@ -100,7 +100,7 @@ class EnvConfig(DefaultEnvConfig):
     IS_ARM_ONLY = True
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
-    EXP_NAME = "tennis_ball_pick"
+    EXP_NAME = "twist_bottle_cap"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -123,9 +123,8 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False, exp_name="tennis_ball_pick"):
+    def get_environment(self, fake_env=False, save_video=False, classifier=False):
         env_config = EnvConfig()
-        env_config.EXP_NAME = exp_name
 
         env = RAMEnv(
             fake_env=fake_env,
