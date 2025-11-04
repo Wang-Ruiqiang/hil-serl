@@ -48,7 +48,7 @@ class KeyboardExpert:
         listener.start()
 
         while not stop_event.is_set():
-            action = [0.0] * 6
+            action = [0.0] * 7
 
             # 控制 xyz 方向移动
             if 'w' in current_keys:
@@ -91,15 +91,15 @@ class KeyboardExpert:
 
             # rotate toward z-axis
             if 'k' in current_keys:
-                action[3] += 0.2
+                action[3] += 1
             if 'l' in current_keys:
-                action[3] -= 0.2
+                action[3] -= 1
 
             # 可选：gripper 控制（c = close, o = open）
             if 'i' in current_keys:
-                action[4] = 1.0
+                action[6] += 1.0
             if 'o' in current_keys:
-                action[5] = 1.0
+                action[6] -= 1.0
 
             # 缩放动作大小
             action = [a * 1 for a in action]
@@ -114,9 +114,8 @@ class KeyboardExpert:
 
     def get_action(self) -> tuple[np.ndarray, list]:
         action = self.latest_data["action"]
-        print("a    ction = ", action)
         if np.linalg.norm(action) > 0.001:
-            self.latest_data["action"] = [0.0] * 6  # 只在非零动作时清空
+            self.latest_data["action"] = [0.0] * 7  # 只在非零动作时清空
         # self.latest_data["action"] = [0.0] * 6
         return np.array(action)
 

@@ -247,7 +247,6 @@ class KeyboardIntervention(gym.ActionWrapper):
         """
         expert_a = self.expert.get_action()
         intervened = False
-        print("expert_a = ", expert_a)
         # 人为输入动作非0,触发干预
         if np.linalg.norm(expert_a) > 0.001:
             intervened = True
@@ -259,14 +258,9 @@ class KeyboardIntervention(gym.ActionWrapper):
 
         if intervened:
             new_action = np.zeros(7, dtype=np.float32)
-            new_action[:3] = expert_a[:3]
-            new_action[5] = expert_a[3]
-            if expert_a[4] > 0.8 :
-                # hand_joint = self.gripper_close_joint
-                new_action[6] = 1.0
-            if expert_a[5] > 0.8 :
-                # hand_joint = self.gripper_open_joint
-                new_action[6] = -1.0
+            # new_action[:3] = expert_a[:3]
+            # new_action[3:6] = expert_a[3:6]
+            new_action[:] = expert_a[:]
 
             return new_action, True
 
@@ -274,7 +268,6 @@ class KeyboardIntervention(gym.ActionWrapper):
 
     def step(self, action):
         new_action, replaced = self.action(action)
-        print("new_action = ", new_action)
         obs, rew, done, truncated, info = self.env.step(new_action)
 
         if replaced:

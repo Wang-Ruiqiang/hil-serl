@@ -140,12 +140,12 @@ class TrainConfig(DefaultTrainingConfig):
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
-            )
+            # classifier_pick = load_classifier_func(
+            #     key=jax.random.PRNGKey(0),
+            #     sample=env.observation_space.sample(),
+            #     image_keys=self.classifier_keys,
+            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
+            # )
 
             # classifier_place = load_classifier_func(
             #     key=jax.random.PRNGKey(0),
@@ -177,13 +177,13 @@ class TrainConfig(DefaultTrainingConfig):
                 # else:
                 #     print("classifier = classifier_place")
                 #     classifier = classifier_normal
-                classifier = classifier_pick
+                classifier = classifier_normal
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.3
+                success = prob > 0.9
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:

@@ -16,7 +16,6 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import Dict
 
-from franka_env.utils.rotations import euler_2_quat, quat_2_euler
 from scipy.spatial.transform import Rotation as R
 
 import rclpy
@@ -53,7 +52,7 @@ class ImageDisplayer(threading.Thread):
             for k, v in img_array.items():
                 if "full" in k:
                         continue  # 忽略 full 图像
-                img = cv2.resize(v, (256, 256))  # 每个窗口显示 256×256
+                img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
                 cv2.imshow(f"{self.name} - {k}", img)
 
             cv2.waitKey(1)
@@ -490,7 +489,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-10-11-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-5-6"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -519,19 +518,29 @@ class DensoEnv(gym.Env):
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
             ]
+            
+            
         elif self.exp_name == "twist_bottle_cap":
-            self.gripper_close_joint = [
-                3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
-                3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-                3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
-            ]
-
-            self.gripper_open_joint = [
-                2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-                2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+            # self.gripper_close_joint = np.array([
+            #     3.150796651840209961, 4.911806583404541016, 2.906893491744995117, 3.489806175231933594,
+            #     3.058757781982421875, 4.950156211853027344, 2.959048986434936523, 3.364019870758056641,
+            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            #     4.753806591033935547, 3.235165596008300781, 2.848602294921875000, 3.522019863128662109
+            # ])
+            
+            self.gripper_close_joint = ([
+                3.173806190490722656,4.615087795257568359,2.977456808090209961,3.634000539779663086,
+                3.077165365219116211,4.664175319671630859,2.988194465637207031,3.614058732986450195,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
-            ]
+                4.763010501861572266,3.354815959930419922,3.084835290908813477,3.285786867141723633
+            ])
+
+            self.gripper_open_joint = np.array([
+                3.160000324249267578, 4.144815921783447266, 2.949845075607299805, 3.945398569107055664,
+                3.067961692810058594, 4.141747951507568359, 3.003534317016601562, 3.874835491180419922,
+                3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+                4.781418323516845703, 3.385495662689208984, 2.001844882965087891, 4.227651119232177734
+            ])
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
 
@@ -570,7 +579,7 @@ class DensoEnv(gym.Env):
         
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        # print("action = ", action)
+        print("action = ", action)
 
         xyz_delta = action[:3]
 
@@ -581,7 +590,7 @@ class DensoEnv(gym.Env):
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        rpy_delta[2] = action[5]
+        rpy_delta[0] = action[3]
         print("rpy_delta = ", rpy_delta)
         self.nextpos[3:6] = self.nextpos[3:6] + rpy_delta * self.action_scale[1]
         # self.nextpos[3:] = (
@@ -647,7 +656,7 @@ class DensoEnv(gym.Env):
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
         self.frame_count += 1
-        # self.save_training_frame()
+        self.save_training_frame()
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
@@ -725,10 +734,10 @@ class DensoEnv(gym.Env):
         if self.display_image:
             with self.tac_index_lock:
                 # index_heat_map_resized = cv2.resize(self.index_heat_map, (128, 128))  # 如果想缩放
-                heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+                heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map,self.middle_heat_map])
                 display_image = {
                     "heat_map": heat_map,
-                    "front_camera": display_images["front_camera"],
+                    "front_camera": cropped_rgb,
                 }
             self.img_queue.put(display_image)
         return images

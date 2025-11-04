@@ -7,22 +7,65 @@ import pickle as pkl
 import datetime
 from absl import app, flags
 import time
+import sys, threading, queue, termios, tty, select
 
 # 提前输入export PYTHONPATH=$(pwd)/../serl_robot_infra:$PYTHONPATH
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
-sys.path.insert(0, project_root)
+# project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+# sys.path.insert(0, project_root)
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
+
+
+# def _stdin_key_pressed(target_char="1"):
+#     """若用户按下 target_char（默认 '1'）则返回 True。否则 False。"""
+#     # 检查是否有可读的输入（不阻塞）
+#     if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+#         ch = sys.stdin.read(1)
+#         return ch == '1'
+#     return False
+
+class KeyReader(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.q = queue.Queue()
+        self._stop = threading.Event()
+        self.fd = sys.stdin.fileno()
+        self.old = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)  # 立即读取，无需回车
+
+    def run(self):
+        try:
+            while not self._stop.is_set():
+                if sys.stdin in select.select([sys.stdin], [], [], 0.01)[0]:
+                    ch = sys.stdin.read(1)
+                    self.q.put(ch)
+        finally:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
+
+    def get_key_nowait(self):
+        try:
+            return self.q.get_nowait()
+        except queue.Empty:
+            return None
+
+    def stop(self):
+        self._stop.set()
 
 
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
     env = config.get_environment(fake_env=False, save_video=False, classifier=True)
+    
+    fd = sys.stdin.fileno()
+    old_term_settings = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
     
     obs, info = env.reset()
     transitions = []
@@ -31,15 +74,33 @@ def main(_):
     pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
+    
+    key_reader = KeyReader()
+    key_reader.start()
     try:
         while success_count < success_needed:
             actions = np.zeros(env.action_space.sample().shape)
-            actions[1] = -0.1
+            # actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
             # print("reward = ", rew)
             returns += rew
             if "intervene_action" in info:
                 actions = info["intervene_action"]
+                
+            key = key_reader.get_key_nowait()
+            while key is not None:
+                if key == '1':
+                    done = True
+                    info = dict(info)
+                    info['succeed'] = True   # 你也可以不要这一行，只强制结束
+                key = key_reader.get_key_nowait()
+                
+            # force_end = _stdin_key_pressed("1")
+            # if force_end:
+            #     done = True
+            #     info = dict(info)  # 防止底层是只读映射
+            #     info["succeed"] = True
+            
             transition = copy.deepcopy(
                 dict(
                     observations=obs,
