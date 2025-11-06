@@ -23,12 +23,12 @@ palm_lower2denso_end_tf = np.array([
 #     4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
 # ]
 
-gripper_open_joint = np.array([
-    3.160000324249267578, 4.144815921783447266, 2.949845075607299805, 3.945398569107055664,
-    3.067961692810058594, 4.141747951507568359, 3.003534317016601562, 3.874835491180419922,
-    3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-    4.781418323516845703, 3.385495662689208984, 2.001844882965087891, 4.227651119232177734
-])
+# gripper_open_joint = np.array([
+#     3.160000324249267578, 4.144815921783447266, 2.949845075607299805, 3.945398569107055664,
+#     3.067961692810058594, 4.141747951507568359, 3.003534317016601562, 3.874835491180419922,
+#     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+#     4.781418323516845703, 3.385495662689208984, 2.001844882965087891, 4.227651119232177734
+# ])
 
 # T_palm_lower_to_end_link = np.array([
 #     [ 9.99994927e-01, -3.18530179e-03,  5.11967137e-22, -3.40506487e-02],
@@ -61,9 +61,9 @@ class RAMEnv(DensoEnv):
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
         # print("self.curr_leap_hand_pos reset before= ", self.curr_leap_hand_pos)
-        self._send_leap_hand_command(gripper_open_joint, steps=20, step_time=0.05)
+        self._send_leap_hand_command(self.gripper_open_joint, steps=20, step_time=0.05)
         time.sleep(1)
-        self.curr_leap_hand_pos = np.array(gripper_open_joint, dtype=np.float32)
+        self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
         # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
 
         # init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
@@ -73,6 +73,9 @@ class RAMEnv(DensoEnv):
         # init_ori = np.array([0, 0.7071, -0.7071, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.publish_arm_action(init_arm_action)
+        
+        self._segmented_ready = False
+        self._segmented_init(self.curr_leap_hand_pos)
 
         time.sleep(5)
 

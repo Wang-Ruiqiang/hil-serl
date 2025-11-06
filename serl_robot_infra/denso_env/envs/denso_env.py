@@ -321,10 +321,10 @@ class DensoEnv(gym.Env):
             )
         elif self.enable_tactile:
             print("init arm with tactile")
-            # low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
-            # high = np.ones(7, dtype=np.float32)
             self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
-            # self.action_space = gym.spaces.Box(low, high, dtype=np.float32)
+            # low = np.array([-1] * 6 + [0], dtype=np.float32)
+            # high = np.array([1] * 6 + [4], dtype=np.float32)
+            # self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
             self.observation_space = gym.spaces.Dict(
                 {
@@ -489,7 +489,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-5-6"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-6-3"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -521,37 +521,46 @@ class DensoEnv(gym.Env):
             
             
         elif self.exp_name == "twist_bottle_cap":
-            # self.gripper_close_joint = np.array([
-            #     3.150796651840209961, 4.911806583404541016, 2.906893491744995117, 3.489806175231933594,
-            #     3.058757781982421875, 4.950156211853027344, 2.959048986434936523, 3.364019870758056641,
-            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            #     4.753806591033935547, 3.235165596008300781, 2.848602294921875000, 3.522019863128662109
-            # ])
+            self.gripper_close_joint = np.array([
+                3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
+                2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+                3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+                4.709321022033691406, 3.160000324249267578, 2.954447031021118164, 3.816544294357299805
+            ], dtype=np.float32)
             
-            self.gripper_close_joint = ([
-                3.173806190490722656,4.615087795257568359,2.977456808090209961,3.634000539779663086,
-                3.077165365219116211,4.664175319671630859,2.988194465637207031,3.614058732986450195,
+            self.gripper_twist_joint = np.array([
+                2.659922599792480469, 4.605010509490966797, 3.118582963943481445, 3.745980978012084961,
+                2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                4.763010501861572266,3.354815959930419922,3.084835290908813477,3.285786867141723633
-            ])
-
+                5.062136650085449219, 2.856272220611572266, 2.954447031021118164, 3.816544294357299805
+            ], dtype=np.float32)
+            
+            
+            # self.gripper_close_joint = np.array([
+            #     3.691010093688964844, 4.459281921386718750, 3.118582963943481445, 3.445980978012084961,
+            #     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            #     4.709321022033691406, 3.160000324249267578, 3.454447031021118164, 3.298058748245239258
+            # ], dtype=np.float32)
+            
+            # self.gripper_twist_joint = np.array([
+            #     3.694505224227905273, 4.459281921386718750, 3.118582963943481445, 3.445980978012084961,
+            #     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+            #     5.336350345611572266, 3.130854845046997070, 3.45447031021118164, 3.298058748245239258
+            # ], dtype=np.float32)
+            
             self.gripper_open_joint = np.array([
-                3.160000324249267578, 4.144815921783447266, 2.949845075607299805, 3.945398569107055664,
-                3.067961692810058594, 4.141747951507568359, 3.003534317016601562, 3.874835491180419922,
+                2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,
+                3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                4.781418323516845703, 3.385495662689208984, 2.001844882965087891, 4.227651119232177734
-            ])
+                4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
+            ], dtype=np.float32)
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
 
-        self.hand_state = 0.0 #hand opened lable
-        
-        self.gripper_close_joint_np = np.asarray(self.gripper_close_joint, dtype=np.float32)
-        self.gripper_open_joint_np = np.asarray(self.gripper_open_joint, dtype=np.float32)
-        self.gripper_direction = np.sign(self.gripper_close_joint_np - self.gripper_open_joint_np)
-        self.max_gripper_step = np.abs(self.gripper_close_joint_np - self.gripper_open_joint_np) / 10.0
-        # Ensure direction is either -1 or 1 where movement is required
-        self.gripper_direction[self.gripper_direction == 0] = 1.0
+        self.hand_state = 0.0
+        self._grip_inited = False
 
         print("Initialized Denso")
 
@@ -590,7 +599,7 @@ class DensoEnv(gym.Env):
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        rpy_delta[0] = action[3]
+        # rpy_delta[0] = action[3]
         print("rpy_delta = ", rpy_delta)
         self.nextpos[3:6] = self.nextpos[3:6] + rpy_delta * self.action_scale[1]
         # self.nextpos[3:] = (
@@ -602,45 +611,18 @@ class DensoEnv(gym.Env):
             * Rotation.from_quat(self.cur_oritation)
         ).as_quat()
 
-
-        grip_action = float(np.clip(action[6], -1.0, 1.0))
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
-        proposed_hand_pos = current_hand_pos + grip_action * self.max_gripper_step * self.gripper_direction
-        close_ge_open_mask = self.gripper_close_joint_np >= self.gripper_open_joint_np
         # print("current_hand_pos = ", current_hand_pos)
-        if grip_action > 0:
-            target_hand_pos = np.where(
-                close_ge_open_mask,
-                np.minimum(proposed_hand_pos, self.gripper_close_joint_np),
-                np.maximum(proposed_hand_pos, self.gripper_close_joint_np),
-            )
-        elif grip_action < 0:
-            target_hand_pos = np.where(
-                close_ge_open_mask,
-                np.maximum(proposed_hand_pos, self.gripper_open_joint_np),
-                np.minimum(proposed_hand_pos, self.gripper_open_joint_np),
-            )
-        else:
-            target_hand_pos = current_hand_pos.copy()
-            
+        grip_action = float(np.clip(action[6], -1.0, 1.0))
+                
+        target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
+
         # print("target_hand_pos = ", target_hand_pos)
 
         self.ros_interface.publish_arm_action(self.nextpos)
 
-        diff = target_hand_pos - current_hand_pos
-        # # print("np.max(np.abs(diff)) = ", np.max(np.abs(diff)))
-        # if np.max(np.abs(diff)) > 0.15:
-        diff = target_hand_pos - current_hand_pos
-        # 判断当前是否已经是open或close状态
-        is_open_now = np.allclose(current_hand_pos, self.gripper_open_joint_np, atol=0.01)
-        is_close_now = np.allclose(current_hand_pos, self.gripper_close_joint_np, atol=0.01)
-
-        # 如果当前位置和目标位置都处于相同极限状态，则不发送命令
-        if (grip_action >=0 and is_close_now) or (grip_action < 0 and is_open_now):
-            pass  # 不调用_send_leap_hand_command
-        else:
-            if np.max(np.abs(diff)) > 0.01 and (-0.3 > grip_action or grip_action > 0):
-                self._send_leap_hand_command(target_hand_pos.copy())
+        if -0.3 > grip_action or grip_action > 0.3:
+            self._send_leap_hand_command(target_hand_pos.copy())
 
         # time.sleep(1.5)
         dt = time.time() - start_time
@@ -656,7 +638,7 @@ class DensoEnv(gym.Env):
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
         self.frame_count += 1
-        self.save_training_frame()
+        # self.save_training_frame()
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
@@ -668,6 +650,140 @@ class DensoEnv(gym.Env):
         # print("curr hand pos = ", self.curr_leap_hand_pos)
         # input("debug for hand pos")
         return ob, int(reward), done, False, {"succeed": reward}
+
+
+    def _segmented_init(self, current_hand_pos: np.ndarray):
+        wp_open  = np.asarray(self.gripper_open_joint,  dtype=np.float32)
+        wp_close = np.asarray(self.gripper_close_joint, dtype=np.float32)
+        wp_twist = np.asarray(self.gripper_twist_joint, dtype=np.float32)
+
+        # 仅 3 个点，形成闭环（0→1→2→0）
+        self._waypoints = np.stack([wp_open, wp_close, wp_twist], axis=0)  # (3, D)
+        self._num_wp = 3
+
+        # 上下界
+        self._lower = np.minimum.reduce(self._waypoints)
+        self._upper = np.maximum.reduce(self._waypoints)
+
+        # 选择最近的路标作为当前段起点
+        diffs_wp = self._waypoints - np.asarray(current_hand_pos, dtype=np.float32)
+        self._seg_start_idx = int(np.argmin(np.linalg.norm(diffs_wp, axis=1)))
+
+        # 方向与步幅
+        self._seg_dir = +1
+        seg_vecs = self._waypoints[(np.arange(self._num_wp) + 1) % self._num_wp] - self._waypoints
+        seg_lens = np.linalg.norm(seg_vecs, axis=1)
+        mean_len = float(np.mean(seg_lens))
+        self._per_step_path_len = max(1e-6, mean_len / 10.0)
+        self._max_joint_delta = float(np.max(np.abs(seg_vecs))) / 10.0
+        self._snap_eps = 1e-6
+        self._segmented_ready = True
+
+        self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
+        self._stop_on_waypoint = False
+        
+        
+    def _project_to_current_segment(self, p: np.ndarray, start_idx: int, seg_dir: int):
+        p = np.asarray(p, dtype=np.float32)
+        end_idx = (start_idx + seg_dir) % self._num_wp
+        start = self._waypoints[start_idx]
+        end   = self._waypoints[end_idx]
+        seg   = end - start
+        seg_len2 = float(np.dot(seg, seg))
+        if seg_len2 < 1e-12:
+            return 0.0, start  # （正常不会发生，因为 3 个路标互不相同）
+        t = float(np.dot(p - start, seg) / seg_len2)
+        t = max(0.0, min(1.0, t))
+        proj = start + t * seg
+        return t, proj
+
+
+    def calculate_hand_pos_segmented(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
+        if not hasattr(self, "_segmented_ready") or not self._segmented_ready:
+            self._segmented_init(current_hand_pos)
+
+        a = float(np.clip(grip_action, -1.0, 1.0))
+        if abs(a) < 1e-6:
+            # 不推进，直接维持上次指令；也可改为返回当前反馈
+            return np.asarray(self._cmd_pos, dtype=np.float32)
+
+        # 动作决定方向
+        self._seg_dir = (+1 if a > 0 else -1)
+
+        # 用“指令位置”推进（不受真实到位与否的影响）
+        pos = np.asarray(self._cmd_pos, dtype=np.float32)
+        remaining_path_len = abs(a) * self._per_step_path_len
+
+        while remaining_path_len > 0:
+            start_idx = self._seg_start_idx
+            end_idx   = (start_idx + self._seg_dir) % self._num_wp
+
+            start_wp = self._waypoints[start_idx]
+            end_wp   = self._waypoints[end_idx]
+            seg_vec  = end_wp - start_wp
+            seg_len  = float(np.linalg.norm(seg_vec))
+            if seg_len < 1e-9:
+                # 极端退化：直接切到下一段并继续消耗
+                self._seg_start_idx = end_idx
+                if self._stop_on_waypoint:
+                    break
+                else:
+                    continue
+
+            # 注意：这里把“投影”的参考改成 pos（指令位置），而不是 current_hand_pos（真实反馈）
+            t, proj = self._project_to_current_segment(pos, start_idx, self._seg_dir)
+
+            # 吸附端点，避免在端点附近数值抖动
+            if t <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
+                pos = start_wp.copy(); t = 0.0
+            if (1.0 - t) <= self._snap_eps and np.linalg.norm(pos - end_wp) <= self._snap_eps:
+                pos = end_wp.copy();   t = 1.0
+
+            if self._seg_dir > 0:
+                path_left = (1.0 - t) * seg_len
+                step_here = min(remaining_path_len, path_left)
+                unit = seg_vec / seg_len
+                pos = pos + unit * step_here
+                remaining_path_len -= step_here
+
+                # 到了段末端：吸附并切段；若不想阻塞，则不break，继续吃剩余步长
+                if abs(step_here - path_left) <= self._snap_eps:
+                    pos = end_wp.copy()
+                    self._seg_start_idx = end_idx
+                    if self._stop_on_waypoint:
+                        break
+                    else:
+                        continue
+            else:
+                path_left = t * seg_len
+                step_here = min(remaining_path_len, path_left)
+                unit = seg_vec / seg_len
+                pos = pos - unit * step_here
+                remaining_path_len -= step_here
+
+                if abs(step_here - path_left) <= self._snap_eps:
+                    pos = start_wp.copy()
+                    # 反向时“下一段”的起点仍是 start_idx（dir=-1 会去前一个路标）
+                    self._seg_start_idx = start_idx
+                    if self._stop_on_waypoint:
+                        break
+                    else:
+                        continue
+
+            # （可选）如果仍需要单步限幅，就把上面这段放到 pos 更新之后再裁剪
+            delta = pos - self._cmd_pos
+            norm = float(np.linalg.norm(delta))
+            max_move = max(1e-9, abs(a) * self._max_joint_delta)
+            if norm > max_move:
+                pos = self._cmd_pos + delta * (max_move / norm)
+                break
+
+        # 更新“指令侧”的位置状态，并裁剪到合法范围
+        pos = np.clip(pos, self._lower, self._upper)
+        self._cmd_pos = pos.copy()
+
+        # 返回“指令目标”，不阻塞等待真实到位
+        return pos
     
     def move_up(self):
         print("move up to avoid collision")

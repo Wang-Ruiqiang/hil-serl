@@ -17,7 +17,7 @@ class KeyboardExpert:
         # 创建共享字典用于跨进程通信
         self.manager = multiprocessing.Manager()
         self.latest_data = self.manager.dict()
-        self.latest_data["action"] = [0.0] * 5
+        self.latest_data["action"] = [0.0] * 7
 
         # self.process = multiprocessing.Process(target=self._read_keyboard)
         self._stop_event = multiprocessing.Event()
@@ -90,19 +90,22 @@ class KeyboardExpert:
                 action[1] -= 0.2
 
             # rotate toward z-axis
-            if 'k' in current_keys:
-                action[3] += 1
-            if 'l' in current_keys:
-                action[3] -= 1
+            # if 'k' in current_keys:
+            #     action[6] = 0.1
+            # if 'l' in current_keys:
+            #     action[6] = 0.5
+                
+            # if 'j' in current_keys:
+            #     action[6] = 1
 
-            # 可选：gripper 控制（c = close, o = open）
+            # 可选：gripper 控制（i = close, o = open）
             if 'i' in current_keys:
-                action[6] += 1.0
+                action[6] = 1
             if 'o' in current_keys:
-                action[6] -= 1.0
+                action[6] = -1
 
             # 缩放动作大小
-            action = [a * 1 for a in action]
+            # action = [a * 1 for a in action]
 
             # 更新共享状态
             try:
