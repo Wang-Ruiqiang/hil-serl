@@ -352,7 +352,7 @@ class DensoEnv(gym.Env):
                         {
                             **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS},
-                            "tactile_data": gym.spaces.Box(0, 255, shape=(128, 384, 3), dtype=np.uint8),
+                            "tactile_data": gym.spaces.Box(0, 255, shape=(128, 256, 3), dtype=np.uint8),
                         }
                     ),
                 }
@@ -444,6 +444,7 @@ class DensoEnv(gym.Env):
         self.side_color_buffer = []           #  D435i 2 color
         self.side_depth_buffer = []           #  D435i 2 depth
         self.joint_buffer = []
+        self.hand_state_buffer = []
 
         # robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
         # self.data_count = 0
@@ -489,7 +490,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-6-3"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-13-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -523,36 +524,21 @@ class DensoEnv(gym.Env):
         elif self.exp_name == "twist_bottle_cap":
             self.gripper_close_joint = np.array([
                 3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
-                2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+                3.144854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 4.709321022033691406, 3.160000324249267578, 2.954447031021118164, 3.816544294357299805
             ], dtype=np.float32)
             
             self.gripper_twist_joint = np.array([
                 2.659922599792480469, 4.605010509490966797, 3.118582963943481445, 3.745980978012084961,
-                2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+                3.144854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 5.062136650085449219, 2.856272220611572266, 2.954447031021118164, 3.816544294357299805
             ], dtype=np.float32)
             
-            
-            # self.gripper_close_joint = np.array([
-            #     3.691010093688964844, 4.459281921386718750, 3.118582963943481445, 3.445980978012084961,
-            #     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            #     4.709321022033691406, 3.160000324249267578, 3.454447031021118164, 3.298058748245239258
-            # ], dtype=np.float32)
-            
-            # self.gripper_twist_joint = np.array([
-            #     3.694505224227905273, 4.459281921386718750, 3.118582963943481445, 3.445980978012084961,
-            #     3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            #     5.336350345611572266, 3.130854845046997070, 3.45447031021118164, 3.298058748245239258
-            # ], dtype=np.float32)
-            
             self.gripper_open_joint = np.array([
                 2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,
-                3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+                3.146330614089965820, 3.529689788818359375, 3.438389015197753906, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
             ], dtype=np.float32)
@@ -683,12 +669,12 @@ class DensoEnv(gym.Env):
         self._stop_on_waypoint = False
         
         
-    def _project_to_current_segment(self, p: np.ndarray, start_idx: int, seg_dir: int):
-        p = np.asarray(p, dtype=np.float32)
-        end_idx = (start_idx + seg_dir) % self._num_wp
-        start = self._waypoints[start_idx]
-        end   = self._waypoints[end_idx]
-        seg   = end - start
+    def _project_to_current_segment(self, p: np.ndarray, start: np.ndarray, seg: np.ndarray) -> tuple:
+        # p = np.asarray(p, dtype=np.float32)
+        # end_idx = (start_idx + seg_dir) % self._num_wp
+        # start = self._waypoints[start_idx]
+        # end   = self._waypoints[end_idx]
+        # seg   = end - start
         seg_len2 = float(np.dot(seg, seg))
         if seg_len2 < 1e-12:
             return 0.0, start  # （正常不会发生，因为 3 个路标互不相同）
@@ -717,7 +703,6 @@ class DensoEnv(gym.Env):
         while remaining_path_len > 0:
             start_idx = self._seg_start_idx
             end_idx   = (start_idx + self._seg_dir) % self._num_wp
-
             start_wp = self._waypoints[start_idx]
             end_wp   = self._waypoints[end_idx]
             seg_vec  = end_wp - start_wp
@@ -731,7 +716,7 @@ class DensoEnv(gym.Env):
                     continue
 
             # 注意：这里把“投影”的参考改成 pos（指令位置），而不是 current_hand_pos（真实反馈）
-            t, proj = self._project_to_current_segment(pos, start_idx, self._seg_dir)
+            t, proj = self._project_to_current_segment(pos, start_wp, seg_vec)
 
             # 吸附端点，避免在端点附近数值抖动
             if t <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
@@ -850,7 +835,7 @@ class DensoEnv(gym.Env):
         if self.display_image:
             with self.tac_index_lock:
                 # index_heat_map_resized = cv2.resize(self.index_heat_map, (128, 128))  # 如果想缩放
-                heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map,self.middle_heat_map])
+                heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
                 display_image = {
                     "heat_map": heat_map,
                     "front_camera": cropped_rgb,
@@ -1130,7 +1115,7 @@ class DensoEnv(gym.Env):
                 np.array(self.hand_state, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
             ])
         if self.enable_tactile:
-            heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map, self.middle_heat_map])
+            heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
             obs = copy.deepcopy({
             "front_camera": front_camera_image,
             # "side_camera": side_camera_image,
@@ -1190,7 +1175,7 @@ class DensoEnv(gym.Env):
             
             self.joint_buffer.append(
                             copy.deepcopy(joint_pose))
-            
+            self.hand_state_buffer.append(copy.deepcopy(self.hand_state))
             # 保存图像
             images, depth_img = self.get_rgb_and_dpth_im()
             for cam_name, img in images.items():
@@ -1239,3 +1224,4 @@ class DensoEnv(gym.Env):
             # 保存 state（TCP + orientation + hand joints）
             # if not self.is_arm_only:
             np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
+            np.savetxt(os.path.join(frame_dir, "hand_state.txt"), np.atleast_1d(self.hand_state_buffer[frame_id]), fmt="%.6f")

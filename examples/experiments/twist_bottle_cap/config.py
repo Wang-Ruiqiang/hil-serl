@@ -167,6 +167,13 @@ class TrainConfig(DefaultTrainingConfig):
                 image_key_weights=self.classifier_key_weights,
                 checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
             )
+            classifier_bottle_twist = load_classifier_func(
+                key=jax.random.PRNGKey(0),
+                sample=env.observation_space.sample(),
+                image_keys=self.classifier_keys,
+                image_key_weights=self.classifier_key_weights,
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
+            )
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
@@ -177,7 +184,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # else:
                 #     print("classifier = classifier_place")
                 #     classifier = classifier_normal
-                classifier = classifier_normal
+                classifier = classifier_bottle_twist
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)

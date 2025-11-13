@@ -27,7 +27,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
-flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
 
 
@@ -51,7 +52,9 @@ def main(_):
         include_label=True,
     )
     
-    if FLAGS.is_pick_and_place_task:
+    if FLAGS.is_bottle_twist:
+        success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*success*.pkl"))
+    elif FLAGS.is_pick_and_place_task:
         success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
     elif FLAGS.is_pick_task:
         success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*success*.pkl"))
@@ -88,7 +91,9 @@ def main(_):
         include_label=True,
     )
 
-    if FLAGS.is_pick_and_place_task:
+    if FLAGS.is_bottle_twist:
+        failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*failure*.pkl"))
+    elif FLAGS.is_pick_and_place_task:
         failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
     elif FLAGS.is_pick_task:
         failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*failure*.pkl"))
@@ -182,7 +187,14 @@ def main(_):
             f"Epoch: {epoch+1}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}"
         )
 
-    if FLAGS.is_pick_and_place_task:
+    if FLAGS.is_bottle_twist:
+        checkpoints.save_checkpoint(
+            os.path.join(os.getcwd(), "classifier_ckpt_bottle_twist/"),
+            classifier,
+            step=FLAGS.num_epochs,
+            overwrite=True,
+        )
+    elif FLAGS.is_pick_and_place_task:
         checkpoints.save_checkpoint(
             os.path.join(os.getcwd(), "classifier_ckpt/"),
             classifier,

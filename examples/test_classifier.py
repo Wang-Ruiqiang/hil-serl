@@ -36,7 +36,7 @@ log_file = "classifier_log.txt"
 
 
 def main(_):
-    data, _ = read_utils.read_data(robot_urdf_path, True, enable_tactile=True)
+    data, _ = read_utils.read_data(robot_urdf_path, True, enable_tactile=True, task_type="twist_bottle_cap")
     success_count = 0
     record_success_count = 0
     success_as_fail = 0
@@ -52,7 +52,7 @@ def main(_):
         sample=env.observation_space.sample(),
         image_keys=classifier_keys,
         image_key_weights=classifier_key_weights,
-        checkpoint_path=os.path.abspath("classifier_ckpt/"),
+        checkpoint_path=os.path.abspath("classifier_ckpt_bottle_twist/"),
     )
 
     def reward_func(obs):

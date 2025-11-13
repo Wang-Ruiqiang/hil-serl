@@ -16,19 +16,6 @@ palm_lower2denso_end_tf = np.array([
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
 ])
 
-gripper_open_joint = [
-    2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-    2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
-    3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-    4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
-]
-
-gripper_close_joint = [
-    3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
-    3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-    3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
-    4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
-]
 
 class ObsHistoryBuffer:
     # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
@@ -71,7 +58,7 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-def get_frame_data(frame_path, robot_urdf_path,  next_frame_path=None, enable_tactile=False):
+def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
@@ -90,44 +77,20 @@ def get_frame_data(frame_path, robot_urdf_path,  next_frame_path=None, enable_ta
     index_heat_map_image = cv2.resize(index_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
     thumb_heat_map_image = cv2.resize(thumb_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
     middle_heat_map_image = cv2.resize(middle_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
-    heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image, middle_heat_map_image])
+    heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
         
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
+    hand_state = np.loadtxt(os.path.join(frame_path, "hand_state.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "hand_state.txt")) else 0.0
 
     if os.path.exists(joint_file_path):
 
         with open(joint_file_path, "r") as f:
             all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
             hand_joint = all_joint_values[6:]
-            
-    
-    if next_frame_path is not None:
-        next_joint_file_path = os.path.join(next_frame_path, "right_arm_joint.txt")
-        if os.path.exists(next_joint_file_path):
-
-            with open(next_joint_file_path, "r") as f:
-                next_all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
-                next_hand_joint = next_all_joint_values[6:]
-            
-            
-        open_j  = np.array(gripper_open_joint,  dtype=np.float32)
-        close_j = np.array(gripper_close_joint, dtype=np.float32)
-        gripper_direction = np.sign(close_j - open_j)
-        gripper_direction[gripper_direction == 0] = 1.0
-        max_gripper_step = np.abs(close_j - open_j) / 10.0
-        max_gripper_step = np.clip(max_gripper_step, 1e-6, None)
-
-        hand_state = float(np.clip(
-            np.dot(next_hand_joint - hand_joint,
-                max_gripper_step * gripper_direction)
-            / (np.dot(max_gripper_step * gripper_direction,
-                    max_gripper_step * gripper_direction) + 1e-8),
-            -1.0, 1.0
-        ))
     
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
     tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
@@ -137,7 +100,6 @@ def get_frame_data(frame_path, robot_urdf_path,  next_frame_path=None, enable_ta
     #     np.array(tcp_ori, dtype=np.float32).flatten(),
     #     np.array(hand_joint, dtype=np.float32).flatten()
     # ])
-
     state_flattened = np.concatenate([
         np.array(tcp_pos, dtype=np.float32).flatten(),
         np.array(tcp_ori, dtype=np.float32).flatten(),
@@ -192,7 +154,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=Fals
             [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
-        clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
+        clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
 
@@ -209,10 +171,9 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=Fals
                     next_frame_path = current_frame_path
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-
+                
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
-
 
                 obs, is_record_success= get_frame_data(current_frame_path, robot_urdf_path, enable_tactile)
                 if i == end_frame:

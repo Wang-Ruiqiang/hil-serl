@@ -20,12 +20,13 @@ sys.path.insert(0, project_root)
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_pick", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_bottle_twist", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
-flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
@@ -53,11 +54,14 @@ def main(_):
 
     successes = []
     failures = []
-    if FLAGS.is_pick_and_place_task:
+    if FLAGS.is_bottle_twist:
+        if not os.path.exists("./classifier_data_bottle_twist"):
+            os.makedirs("./classifier_data_bottle_twist")
+        file_dir_name = "./classifier_data_bottle_twist"
+    elif FLAGS.is_pick_and_place_task:
         if not os.path.exists("./classifier_data"):
             os.makedirs("./classifier_data")
         file_dir_name = "./classifier_data"
-
     elif FLAGS.is_pick_task:
         if not os.path.exists("./classifier_data_pick"):
             os.makedirs("./classifier_data_pick")
@@ -85,7 +89,7 @@ def main(_):
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
 
-        if FLAGS.is_pick_and_place_task:
+        if FLAGS.is_pick_and_place_task or FLAGS.is_bottle_twist:
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         elif FLAGS.is_pick_task:
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
@@ -108,18 +112,17 @@ def main(_):
             # for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
-                next_next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 2]) if i < end_frame - 1 else next_frame_path
+                
                 if not os.path.isdir(current_frame_path):
                     continue
-                obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, next_frame_path,
-                                                                  FLAGS.enable_tactile)
+                obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
                 if i == end_frame:
                     next_obs = obs
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                     if not os.path.isdir(next_frame_path):
                         continue
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, next_next_frame_path, FLAGS.enable_tactile)
+                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
 
                 # if i == start_frame:
                 #     history_obs.reset(obs)

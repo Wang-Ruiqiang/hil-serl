@@ -33,8 +33,9 @@ flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/record
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_boolean("is_arm_only", True, "read exist data or not.")
-flags.DEFINE_boolean("is_pick_task", True, "read exist data or not.")
+flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
 flags.DEFINE_boolean("is_pick_and_place", False, "read exist data or not.")
+flags.DEFINE_boolean("is_bottle_twist", True, "read exist data or not.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -97,7 +98,13 @@ def main(_):
     actions = np.zeros(action_space.sample().shape) 
     data_dir = FLAGS.data_dir
     # print("env.observation_space.sample().shape = ", env.observation_space.sample()["front_camera"].shape)
-
+    classifier_bottle_twist = load_classifier_func(
+            key=jax.random.PRNGKey(0),
+            sample=env.observation_space.sample(),
+            image_keys=config.classifier_keys,
+            image_key_weights = config.classifier_key_weights,
+            checkpoint_path=os.path.abspath("classifier_ckpt_pick_bottle_twist/"),
+        )
     classifier_pick = load_classifier_func(
         key=jax.random.PRNGKey(0),
         sample=env.observation_space.sample(),
@@ -136,7 +143,7 @@ def main(_):
             is_pick = False
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
         
-        if FLAGS.is_pick_and_place:
+        if FLAGS.is_pick_and_place or FLAGS.is_bottle_twist:
             print("clip_marks")
             is_pick = False
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
@@ -161,12 +168,12 @@ def main(_):
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
                 next_next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 2]) if i < end_frame - 1 else next_frame_path
 
-                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, next_frame_path, True)
+                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, True)
                 if i == end_frame:
                     next_obs = obs
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, next_next_frame_path, True)
+                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, True)
                 # print("obs state shape = ", obs["state"].shape)
                 # input("debug")
                 tcp_ori = obs["state"][3:7]  # 四元数部分
@@ -186,7 +193,7 @@ def main(_):
                 # if is_pick:
                 #     reward = comupute_reward(obs, classifier_pick)
                 # else:
-                reward = comupute_reward(obs, classifier_pick)
+                reward = comupute_reward(obs, classifier_bottle_twist)
 
 
                 done = reward or terminate
@@ -243,9 +250,8 @@ def main(_):
         file_name = f"./demo_data/{FLAGS.exp_name}_pick_{success_needed}_demos_{uuid}.pkl"
     else:
         file_name = f"./demo_data/{FLAGS.exp_name}_place_{success_needed}_demos_{uuid}.pkl"
-        
-    if FLAGS.is_pick_and_place:
-        
+
+    if FLAGS.is_pick_and_place or FLAGS.is_bottle_twist:
         file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
     with open(file_name, "wb") as f:
         pkl.dump(transitions, f)
