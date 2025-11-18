@@ -25,11 +25,12 @@ class EnvConfig(DefaultEnvConfig):
             "exposure": 40000,
             "depth": True,
         },
-        # "side_camera": {
-        #     "serial_number": "234222300515",
-        #     "dim": (640, 480),
-        #     "exposure": 40000,
-        # },
+        "wrist_camera": {
+            "serial_number": "218622271185",
+            "dim": (640, 480),
+            "exposure": 40000,
+            "depth": True,
+        },
     }
     EXTRA_REALSENSE_CAMERAS = {
         "side_camera": {
@@ -39,6 +40,14 @@ class EnvConfig(DefaultEnvConfig):
             "depth": True,
         },
     }
+    # WRIST_REALSENSE_CAMERAS = {
+    #     "wrist_camera": {
+    #         "serial_number": "218622271185",
+    #         "dim": (640, 480),
+    #         "exposure": 40000,
+    #         "depth": True,
+    #     },
+    # }
     IMAGE_CROP = {
         "front_camera": lambda img: img[150:450, 350:1100],
         "side_camera": lambda img: img[100:500, 400:900],
@@ -104,7 +113,7 @@ class EnvConfig(DefaultEnvConfig):
 
 
 class TrainConfig(DefaultTrainingConfig):
-    image_keys = ["front_camera", "tactile_data"]
+    image_keys = ["front_camera", "wrist_camera", "tactile_data"]
     # image_keys = ["front_camera", "side_camera"]
     classifier_keys = ["front_camera", "tactile_data"]
     classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
@@ -190,7 +199,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.9
+                success = prob > 0.8
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:

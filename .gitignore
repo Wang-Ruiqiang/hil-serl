@@ -6,5 +6,7 @@ examples/demo_data/*
 examples/demo_data copy/*
 examples/test_data/*
 examples/experiments/tennis_ball_pick/2025*
+examples/experiments/twist_bottle_cap/2025*
 examples/experiments/tennis_ball_pick/__pycache__/*
+examples/experiments/twist_bottle_cap/__pycache__/*
 serl_robot_infra/denso_env/envs/__pycache__/*

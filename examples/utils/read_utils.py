@@ -60,6 +60,7 @@ class ObsHistoryBuffer:
 
 def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
+    color_image_path_wrist = os.path.join(frame_path, "color_image3.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
@@ -67,6 +68,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
     color_image = cv2.imread(color_image_path) if os.path.exists(color_image_path) else None
+    color_image_wrist = cv2.imread(color_image_path_wrist) if os.path.exists(color_image_path_wrist) else None
     # color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
@@ -107,12 +109,15 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     ])
 
     resized_image = cv2.resize(color_image, (128,128))
+    resized_image_wrist = cv2.resize(color_image_wrist, (128,128))
     # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
+    wrist_camera_image = resized_image_wrist[..., ::-1]
     # side_camera_image = resized_image2[..., ::-1]
     if enable_tactile:
         obs = {
             "front_camera": front_camera_image,
+            "wrist_camera": wrist_camera_image,
             # "side_camera": side_camera_image,
             "tactile_data": heatmap_canvas,
             "state": state_flattened

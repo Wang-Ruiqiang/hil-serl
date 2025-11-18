@@ -142,6 +142,7 @@ def main(_):
             print("Shutting down keyboard process...")
             env.keyboard_process.terminate()
             env.keyboard_process.join()
+        env.close()
             
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")

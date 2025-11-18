@@ -27,8 +27,8 @@ from examples.utils import read_utils
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
+flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
+flags.DEFINE_integer("successes_needed", 22, "Number of successful demos to collect.")
 flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/demo_data", "demo data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")

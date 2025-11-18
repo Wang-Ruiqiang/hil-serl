@@ -50,8 +50,6 @@ class ImageDisplayer(threading.Thread):
             # cv2.imshow(self.name, frame)
             # cv2.waitKey(1)
             for k, v in img_array.items():
-                if "full" in k:
-                        continue  # 忽略 full 图像
                 img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
                 cv2.imshow(f"{self.name} - {k}", img)
 
@@ -67,6 +65,7 @@ class DefaultEnvConfig:
     REALSENSE_CAMERAS: Dict = {
         "front_camera": "242422303461",
         # "side_camera": "234222300515",
+        "wrist_camera": "218622271185",
     }
     EXTRA_REALSENSE_CAMERAS: Dict = {
         # "front_camera": "242422303461",
@@ -357,33 +356,6 @@ class DensoEnv(gym.Env):
                     ),
                 }
             )
-        else:
-            print("init arm only")
-            self.action_space = gym.spaces.Box(
-                np.ones((6,), dtype=np.float32) * -1,
-                np.ones((6,), dtype=np.float32),
-            )
-            self.observation_space = gym.spaces.Dict(
-                {
-                    "state": gym.spaces.Dict(
-                        {
-                            "tcp_pos": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(3,)
-                            ),
-                            "tcp_ori": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(4,)
-                            ),
-                            # "gripper_pose": gym.spaces.Box(
-                            #     -np.inf, np.inf, shape=(1,), dtype=np.int32
-                            # )
-                        }
-                    ),
-                    "images": gym.spaces.Dict(
-                        {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
-                                    for key in config.REALSENSE_CAMERAS}
-                    ),
-                }
-            )
 
 
         if self.enable_tactile and not self.fake_env:
@@ -443,6 +415,8 @@ class DensoEnv(gym.Env):
         self.front_depth_buffer = []            #  D435i depth 
         self.side_color_buffer = []           #  D435i 2 color
         self.side_depth_buffer = []           #  D435i 2 depth
+        self.wrist_color_buffer = []           #  D405 color
+        self.wrist_depth_buffer = []           #  D405 depth
         self.joint_buffer = []
         self.hand_state_buffer = []
 
@@ -490,7 +464,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-13-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-17-4"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -524,21 +498,21 @@ class DensoEnv(gym.Env):
         elif self.exp_name == "twist_bottle_cap":
             self.gripper_close_joint = np.array([
                 3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
-                3.144854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+                3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 4.709321022033691406, 3.160000324249267578, 2.954447031021118164, 3.816544294357299805
             ], dtype=np.float32)
             
             self.gripper_twist_joint = np.array([
                 2.659922599792480469, 4.605010509490966797, 3.118582963943481445, 3.745980978012084961,
-                3.144854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+                3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 5.062136650085449219, 2.856272220611572266, 2.954447031021118164, 3.816544294357299805
             ], dtype=np.float32)
             
             self.gripper_open_joint = np.array([
                 2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,
-                3.146330614089965820, 3.529689788818359375, 3.438389015197753906, 3.969689750671386719,
+                3.406330614089965820, 3.529689788818359375, 3.438389015197753906, 3.969689750671386719,
                 3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
                 4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
             ], dtype=np.float32)
@@ -570,6 +544,7 @@ class DensoEnv(gym.Env):
 
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
+        print("in denso_env step wang")
         start_time = time.time()
         
         action = np.clip(action, self.action_space.low, self.action_space.high)
@@ -586,7 +561,6 @@ class DensoEnv(gym.Env):
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         # rpy_delta[0] = action[3]
-        print("rpy_delta = ", rpy_delta)
         self.nextpos[3:6] = self.nextpos[3:6] + rpy_delta * self.action_scale[1]
         # self.nextpos[3:] = (
         #     Rotation.from_euler("xyz", action[3:6] * self.action_scale[1])
@@ -614,7 +588,7 @@ class DensoEnv(gym.Env):
         dt = time.time() - start_time
         time.sleep(max(0, (1.0 / self.hz) - dt))
         t_end = time.time()
-        print(f"[publish End] {t_end:.6f}, Step总耗时(含sleep): {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
+        # print(f"[publish End] {t_end:.6f}, Step总耗时(含sleep): {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
 
         self.curr_path_length += 1
         self._update_cur_position(self.nextpos)
@@ -687,7 +661,6 @@ class DensoEnv(gym.Env):
     def calculate_hand_pos_segmented(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
         if not hasattr(self, "_segmented_ready") or not self._segmented_ready:
             self._segmented_init(current_hand_pos)
-
         a = float(np.clip(grip_action, -1.0, 1.0))
         if abs(a) < 1e-6:
             # 不推进，直接维持上次指令；也可改为返回当前反馈
@@ -716,16 +689,23 @@ class DensoEnv(gym.Env):
                     continue
 
             # 注意：这里把“投影”的参考改成 pos（指令位置），而不是 current_hand_pos（真实反馈）
-            t, proj = self._project_to_current_segment(pos, start_wp, seg_vec)
+            segment_progress, proj = self._project_to_current_segment(pos, start_wp, seg_vec)
 
             # 吸附端点，避免在端点附近数值抖动
-            if t <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
-                pos = start_wp.copy(); t = 0.0
-            if (1.0 - t) <= self._snap_eps and np.linalg.norm(pos - end_wp) <= self._snap_eps:
-                pos = end_wp.copy();   t = 1.0
+            if segment_progress <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
+                pos = start_wp.copy(); segment_progress = 0.0
+            if (1.0 - segment_progress) <= self._snap_eps and np.linalg.norm(pos - end_wp) <= self._snap_eps:
+                pos = end_wp.copy();   segment_progress = 1.0
+
+            if self._seg_dir < 0 and segment_progress <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
+                # 上一段的起点索引：例如在 close(1) 反向，就切到 open->close 这一段（start_idx=0）
+                prev_idx = (start_idx - 1) % self._num_wp
+                self._seg_start_idx = prev_idx
+                # 重新进下一轮 while，用新段重新计算 t、path_left
+                continue
 
             if self._seg_dir > 0:
-                path_left = (1.0 - t) * seg_len
+                path_left = (1.0 - segment_progress) * seg_len
                 step_here = min(remaining_path_len, path_left)
                 unit = seg_vec / seg_len
                 pos = pos + unit * step_here
@@ -740,7 +720,7 @@ class DensoEnv(gym.Env):
                     else:
                         continue
             else:
-                path_left = t * seg_len
+                path_left = segment_progress * seg_len
                 step_here = min(remaining_path_len, path_left)
                 unit = seg_vec / seg_len
                 pos = pos - unit * step_here
@@ -838,7 +818,8 @@ class DensoEnv(gym.Env):
                 heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
                 display_image = {
                     "heat_map": heat_map,
-                    "front_camera": cropped_rgb,
+                    "front_camera": display_images["front_camera_full"],
+                    "wrist_camera": display_images["wrist_camera_full"],
                 }
             self.img_queue.put(display_image)
         return images
@@ -1100,6 +1081,7 @@ class DensoEnv(gym.Env):
     def _get_obs(self) -> dict:
         images = self.get_im()
         front_camera_image = images["front_camera"]
+        wrist_camera_image = images["wrist_camera"]
         # side_camera_image = images["side_camera"]
 
         if not self.is_arm_only:
@@ -1118,7 +1100,7 @@ class DensoEnv(gym.Env):
             heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
             obs = copy.deepcopy({
             "front_camera": front_camera_image,
-            # "side_camera": side_camera_image,
+            "wrist_camera": wrist_camera_image,
             "tactile_data":heatmap_canvas,
             "state": state_flattened
         })
@@ -1159,9 +1141,6 @@ class DensoEnv(gym.Env):
             self.executor.shutdown()
 
 
-    def set_data_count(self, data_count):
-        self.data_count = data_count + 1
-
     def pose_callback(self, msg):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
         self.arm_orientation = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
@@ -1186,6 +1165,9 @@ class DensoEnv(gym.Env):
                 elif cam_name == "side_camera":
                     self.side_color_buffer.append(copy.deepcopy(img[..., ::-1]))
                     self.side_depth_buffer.append(copy.deepcopy(depth))
+                elif cam_name == "wrist_camera":
+                    self.wrist_color_buffer.append(copy.deepcopy(img[..., ::-1]))
+                    self.wrist_depth_buffer.append(copy.deepcopy(depth))
 
             if self.enable_tactile:
                 self.rthumb_raw_buffer.append(copy.deepcopy(self.thumb_raw_img))
@@ -1211,6 +1193,8 @@ class DensoEnv(gym.Env):
             cv2.imwrite(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
             cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), self.side_color_buffer[frame_id])
             cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), self.side_depth_buffer[frame_id])
+            cv2.imwrite(os.path.join(frame_dir, "color_image3.jpg"), self.wrist_color_buffer[frame_id])
+            cv2.imwrite(os.path.join(frame_dir, "depth_image3.png"), self.wrist_depth_buffer[frame_id])
 
             if self.enable_tactile:
                 cv2.imwrite(os.path.join(frame_dir, "thumb_raw_image.jpg"), self.rthumb_raw_buffer[frame_id])

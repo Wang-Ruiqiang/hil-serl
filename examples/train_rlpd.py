@@ -77,7 +77,7 @@ def print_red(x):
 ##############################################################################
 
 
-def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
+def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=None):
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
@@ -203,8 +203,7 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
                 demo_transitions = []
         
         sampling_rng, key = jax.random.split(sampling_rng)
-
-        if not FLAGS.is_pick and mode == "S1_INFER":
+        if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick and mode == "S1_INFER":
             # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
             actions = agent_pick.sample_actions(
                 observations=jax.device_put(obs),
@@ -234,7 +233,7 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
         
         timer.tick("total")
         with timer.context("sample_actions"):
-            print_green(f"obs[state] =  {obs['state']}")
+            # print_green(f"obs[state] =  {obs['state']}")
             # if step < config.random_steps:
             #     print("random actions")
             #     actions = env.action_space.sample()
@@ -255,7 +254,7 @@ def actor(agent, agent_pick, data_store, intvn_data_store, env, sampling_rng):
             # if actions[6] < 0.8:
             #     actions[6] = 1.0
             next_obs, reward, done, truncated, info = env.step(actions)
-            print("reward = ", reward)
+            # print("reward = ", reward)
 
             # print_red(f"next_obs[state] =  {next_obs['state']}")
 
@@ -475,41 +474,21 @@ def main(_):
     env = RecordEpisodeStatistics(env)
 
     # rng, sampling_rng = jax.random.split(rng)
+    agent: SACAgent = make_sac_pixel_agent(
+        seed=FLAGS.seed,
+        sample_obs=env.observation_space.sample(),
+        sample_action=env.action_space.sample(),
+        image_keys=config.image_keys,
+        encoder_type=config.encoder_type,
+        discount=config.discount,
+        state_weights=config.state_weights,
+    )
+    include_grasp_penalty = False
     
-    if config.setup_mode == 'single-arm-fixed-gripper' or config.setup_mode == 'dual-arm-fixed-gripper':
-        agent: SACAgent = make_sac_pixel_agent(
-            seed=FLAGS.seed,
-            sample_obs=env.observation_space.sample(),
-            sample_action=env.action_space.sample(),
-            image_keys=config.image_keys,
-            encoder_type=config.encoder_type,
-            discount=config.discount,
-            state_weights=config.state_weights,
-        )
-        include_grasp_penalty = False
-        
-        agent_pick: SACAgent = make_sac_pixel_agent(
-            seed=FLAGS.seed,
-            sample_obs=env.observation_space.sample(),
-            sample_action=env.action_space.sample(),
-            image_keys=config.image_keys,
-            encoder_type=config.encoder_type,
-            discount=config.discount,
-            state_weights=config.state_weights,
-        )
-        include_grasp_penalty = False
-    else:
-        raise NotImplementedError(f"Unknown setup mode: {config.setup_mode}")
-
-    # replicate agent across devices
-    # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     agent = jax.device_put(
         jax.tree_map(jnp.array, agent), sharding.replicate()
     )
-    agent_pick = jax.device_put(
-        jax.tree_map(jnp.array, agent_pick), sharding.replicate()
-    )
-    # if FLAGS.checkpoint_path is not None and os.path.exists(os.path.join(FLAGS.checkpoint_path, "checkpoint*")):
+    
     if FLAGS.checkpoint_path is not None and os.path.exists(FLAGS.checkpoint_path):
         # input("Checkpoint path already exists. Press Enter to resume training.")
         ckpt = checkpoints.restore_checkpoint(
@@ -522,20 +501,40 @@ def main(_):
             checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
         )[11:]
         print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
-
-    if FLAGS.checkpoint_path_pick is not None and os.path.exists(FLAGS.checkpoint_path_pick):
-        # input("Checkpoint path already exists. Press Enter to resume training.")
-        ckpt = checkpoints.restore_checkpoint(
-            os.path.abspath(FLAGS.checkpoint_path_pick),
-            agent_pick.state,
-        )
-        agent_pick = agent_pick.replace(state=ckpt)
-        # print_green(f"Loaded previous checkpoint at step {step}.")
-        ckpt_number = os.path.basename(
-            checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path_pick))
-        )[11:]
-        print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
         
+    include_grasp_penalty = False
+    agent_pick = None
+    if FLAGS.exp_name == "tennis_ball_pick":
+        agent_pick: SACAgent = make_sac_pixel_agent(
+        seed=FLAGS.seed,
+        sample_obs=env.observation_space.sample(),
+        sample_action=env.action_space.sample(),
+        image_keys=config.image_keys,
+        encoder_type=config.encoder_type,
+        discount=config.discount,
+        state_weights=config.state_weights,
+    )
+    # replicate agent across devices
+    # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
+    
+        agent_pick = jax.device_put(
+            jax.tree_map(jnp.array, agent_pick), sharding.replicate()
+        )
+        
+        if FLAGS.checkpoint_path_pick is not None and os.path.exists(FLAGS.checkpoint_path_pick):
+        # input("Checkpoint path already exists. Press Enter to resume training.")
+            ckpt = checkpoints.restore_checkpoint(
+                os.path.abspath(FLAGS.checkpoint_path_pick),
+                agent_pick.state,
+            )
+            agent_pick = agent_pick.replace(state=ckpt)
+            # print_green(f"Loaded previous checkpoint at step {step}.")
+            ckpt_number = os.path.basename(
+                checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path_pick))
+            )[11:]
+            print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
+        
+    # if FLAGS.checkpoint_path is not None and os.path.exists(os.path.join(FLAGS.checkpoint_path, "checkpoint*")):
 
     def create_replay_buffer_and_wandb_logger():
         replay_buffer = MemoryEfficientReplayBufferDataStore(
@@ -547,7 +546,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl-keyboard-place-10-11",
+            project="bottle-twist-11-17",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
@@ -626,11 +625,11 @@ def main(_):
         print_green("starting actor loop")
         actor(
             agent,
-            agent_pick,
             data_store,
             intvn_data_store,
             env,
             sampling_rng,
+            agent_pick,
         )
 
     else:
