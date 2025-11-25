@@ -114,17 +114,17 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     front_camera_image = resized_image[..., ::-1]
     wrist_camera_image = resized_image_wrist[..., ::-1]
     # side_camera_image = resized_image2[..., ::-1]
-    if enable_tactile:
+    if not enable_tactile:
         obs = {
             "front_camera": front_camera_image,
             "wrist_camera": wrist_camera_image,
-            # "side_camera": side_camera_image,
-            "tactile_data": heatmap_canvas,
             "state": state_flattened
         }
     else:
         obs = {
             "front_camera": front_camera_image,
+            "wrist_camera": wrist_camera_image,
+            "tactile_data": heatmap_canvas,
             "state": state_flattened
         }
     # print("state_flattened = ", state_flattened)

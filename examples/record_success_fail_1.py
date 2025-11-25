@@ -26,9 +26,10 @@ flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/record
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_ball_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 
@@ -58,18 +59,19 @@ def main(_):
         if not os.path.exists("./classifier_data_bottle_twist"):
             os.makedirs("./classifier_data_bottle_twist")
         file_dir_name = "./classifier_data_bottle_twist"
-    elif FLAGS.is_pick_and_place_task:
-        if not os.path.exists("./classifier_data"):
-            os.makedirs("./classifier_data")
-        file_dir_name = "./classifier_data"
-    elif FLAGS.is_pick_task:
-        if not os.path.exists("./classifier_data_pick"):
-            os.makedirs("./classifier_data_pick")
-        file_dir_name = "./classifier_data_pick"
-    else:
-        if not os.path.exists("./classifier_data_place"):
-            os.makedirs("./classifier_data_place")
-        file_dir_name = "./classifier_data_place"
+    elif FLAGS.is_ball_pick_task:
+        if FLAGS.is_pick_and_place_task:
+            if not os.path.exists("./classifier_data"):
+                os.makedirs("./classifier_data")
+            file_dir_name = "./classifier_data"
+        elif FLAGS.is_pick_task:
+            if not os.path.exists("./classifier_data_pick"):
+                os.makedirs("./classifier_data_pick")
+            file_dir_name = "./classifier_data_pick"
+        else:
+            if not os.path.exists("./classifier_data_place"):
+                os.makedirs("./classifier_data_place")
+            file_dir_name = "./classifier_data_place"
 
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     success_file = os.path.join(file_dir_name, f"success_images_{uuid}.pkl")
@@ -88,13 +90,16 @@ def main(_):
             [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
-
-        if FLAGS.is_pick_and_place_task or FLAGS.is_bottle_twist:
+        
+        if FLAGS.is_bottle_twist:
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
-        elif FLAGS.is_pick_task:
-            clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
-        else:
-            clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
+        elif FLAGS.is_ball_pick_task:
+            if FLAGS.is_pick_and_place_task:
+                clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
+            elif FLAGS.is_pick_task:
+                clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
+            else:
+                clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
 
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)

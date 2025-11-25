@@ -24,18 +24,20 @@ from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_ball_pick", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=True, save_video=False, classifier=False)
+    env = config.get_environment(fake_env=True, save_video=False, classifier=False, enable_tactile=FLAGS.enable_tactile)
 
     devices = jax.local_devices()
     sharding = jax.sharding.PositionalSharding(devices)
@@ -54,12 +56,13 @@ def main(_):
     
     if FLAGS.is_bottle_twist:
         success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*success*.pkl"))
-    elif FLAGS.is_pick_and_place_task:
-        success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
-    elif FLAGS.is_pick_task:
-        success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*success*.pkl"))
-    else:
-        success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*success*.pkl"))
+    elif FLAGS.is_ball_pick:
+        if FLAGS.is_pick_and_place_task:
+            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
+        elif FLAGS.is_pick_task:
+            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*success*.pkl"))
+        else:
+            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*success*.pkl"))
 
     for path in success_paths:
         success_data = []
@@ -93,12 +96,13 @@ def main(_):
 
     if FLAGS.is_bottle_twist:
         failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*failure*.pkl"))
-    elif FLAGS.is_pick_and_place_task:
-        failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
-    elif FLAGS.is_pick_task:
-        failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*failure*.pkl"))
-    else:
-        failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*failure*.pkl"))
+    elif FLAGS.is_ball_pick:
+        if FLAGS.is_pick_and_place_task:
+            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
+        elif FLAGS.is_pick_task:
+            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*failure*.pkl"))
+        else:
+            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*failure*.pkl"))
 
     for path in failure_paths:
          failure_data = []
@@ -194,27 +198,28 @@ def main(_):
             step=FLAGS.num_epochs,
             overwrite=True,
         )
-    elif FLAGS.is_pick_and_place_task:
-        checkpoints.save_checkpoint(
-            os.path.join(os.getcwd(), "classifier_ckpt/"),
-            classifier,
-            step=FLAGS.num_epochs,
-            overwrite=True,
-        )
-    elif FLAGS.is_pick_task:
-        checkpoints.save_checkpoint(
-            os.path.join(os.getcwd(), "classifier_ckpt_pick/"),
-            classifier,
-            step=FLAGS.num_epochs,
-            overwrite=True,
-        )
-    else:
-        checkpoints.save_checkpoint(
-            os.path.join(os.getcwd(), "classifier_ckpt_place/"),
-            classifier,
-            step=FLAGS.num_epochs,
-            overwrite=True,
-        )
+    elif FLAGS.is_ball_pick:
+        if FLAGS.is_pick_and_place_task:
+            checkpoints.save_checkpoint(
+                os.path.join(os.getcwd(), "classifier_ckpt_ball_pick/"),
+                classifier,
+                step=FLAGS.num_epochs,
+                overwrite=True,
+            )
+        elif FLAGS.is_pick_task:
+            checkpoints.save_checkpoint(
+                os.path.join(os.getcwd(), "classifier_ckpt_pick/"),
+                classifier,
+                step=FLAGS.num_epochs,
+                overwrite=True,
+            )
+        else:
+            checkpoints.save_checkpoint(
+                os.path.join(os.getcwd(), "classifier_ckpt_place/"),
+                classifier,
+                step=FLAGS.num_epochs,
+                overwrite=True,
+            )
     # env.close()
     
 

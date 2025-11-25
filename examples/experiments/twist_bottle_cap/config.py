@@ -76,17 +76,15 @@ class EnvConfig(DefaultEnvConfig):
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
         4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
     ], dtype=np.float32)
-    IS_ARM_ONLY = True
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     EXP_NAME = "twist_bottle_cap"
 
 
 class TrainConfig(DefaultTrainingConfig):
-    image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-    # image_keys = ["front_camera", "side_camera"]
-    classifier_keys = ["front_camera", "tactile_data"]
-    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
+    # image_keys = ["front_camera", "wrist_camera", "tactile_data"]
+    # classifier_keys = ["front_camera", "wrist_camera"]
+    # classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
     state_weights = np.concatenate(
         [
             np.full(6, 1.0, dtype=np.float32),  # arm joints
@@ -102,9 +100,18 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False):
+    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=False):
         env_config = EnvConfig()
-
+        env_config.ENABLE_TACTILE = enable_tactile
+        if enable_tactile:
+            self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
+            self.classifier_keys = ["front_camera", "tactile_data"]
+            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
+        else:
+            self.image_keys = ["front_camera", "wrist_camera"]
+            self.classifier_keys = ["front_camera", "wrist_camera"]
+            self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
+            
         env = RAMEnv(
             fake_env=fake_env,
             save_video=save_video,

@@ -43,15 +43,10 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         super().__init__(env)
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
-        self.log_file_path = "classifier_test.txt"
         self.is_pick = True  # whether the task is pick or place, used for classifier
 
     def compute_reward(self, obs):
         if self.reward_classifier_func is not None:
-            with open(self.log_file_path, "w") as f:
-                log_msg = f"obs = {obs}\n"
-                f.write(log_msg)
-                f.flush()
             return self.reward_classifier_func(obs, self.is_pick)
         return 0
 

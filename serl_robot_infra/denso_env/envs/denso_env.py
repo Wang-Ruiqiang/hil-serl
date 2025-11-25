@@ -270,7 +270,6 @@ class DensoEnv(gym.Env):
         self.max_episode_length = config.MAX_EPISODE_LENGTH
         self.display_image = config.DISPLAY_IMAGE
         # self.gripper_sleep = config.GRIPPER_SLEEP
-        self.is_arm_only = config.IS_ARM_ONLY
         self.tact_base_path = config.TACT_BASE_PATH
         self.enable_tactile = config.ENABLE_TACTILE
         self.fake_env = fake_env
@@ -292,11 +291,12 @@ class DensoEnv(gym.Env):
             self.recording_frames = []
 
         # Action/Observation Space
+        low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+        high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+        self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
+        
         if not self.enable_tactile:
             print("init arm without tactaile data")
-            low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-            high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
-            self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
             self.observation_space = gym.spaces.Dict(
                 {
@@ -314,19 +314,16 @@ class DensoEnv(gym.Env):
                         }
                     ),
                     "images": gym.spaces.Dict(
-                        {key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
+                        {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS}
                     ),
                 }
             )
         else:
             print("init arm with tactile data")
-            low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-            high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
             # self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
             # low = np.array([-1] * 6 + [0], dtype=np.float32)
             # high = np.array([1] * 6 + [4], dtype=np.float32)
-            self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
             self.observation_space = gym.spaces.Dict(
                 {
@@ -354,7 +351,19 @@ class DensoEnv(gym.Env):
             )
 
 
-        if self.enable_tactile and not self.fake_env:
+        self.front_color_buffer = []            #  D435i color 
+        self.front_depth_buffer = []            #  D435i depth 
+        self.side_color_buffer = []           #  D435i 2 color
+        self.side_depth_buffer = []           #  D435i 2 depth
+        self.wrist_color_buffer = []           #  D405 color
+        self.wrist_depth_buffer = []           #  D405 depth
+        self.joint_buffer = []
+        self.hand_state_buffer = []
+        
+        if fake_env:
+            return
+        
+        if self.enable_tactile:
             # tactile configuration loading and init
             thumb_cfg_path = os.path.join(self.tact_base_path, "shape_config_thumb.yaml")
             # assert the path exists
@@ -405,25 +414,6 @@ class DensoEnv(gym.Env):
             # Start threads for each tactile sensor
             self.start_tac_processing()
         
-        self.cycle_count = 0
-
-        self.front_color_buffer = []            #  D435i color 
-        self.front_depth_buffer = []            #  D435i depth 
-        self.side_color_buffer = []           #  D435i 2 color
-        self.side_depth_buffer = []           #  D435i 2 depth
-        self.wrist_color_buffer = []           #  D405 color
-        self.wrist_depth_buffer = []           #  D405 depth
-        self.joint_buffer = []
-        self.hand_state_buffer = []
-
-        # robot_urdf_path = "/home/qiangqiang/workspaces/HK_TACTEXO_DATA/denso_robot_with_ati_4.urdf"
-        # self.data_count = 0
-        # self.data = read_utils.read_data(robot_urdf_path,True)
-        # self._update_cur_position()
-
-        if fake_env:
-            return
-
         self.cap = None
         self.init_cameras(config.REALSENSE_CAMERAS, config.EXTRA_REALSENSE_CAMERAS)
         if self.display_image:
@@ -536,10 +526,12 @@ class DensoEnv(gym.Env):
         ).as_quat()
 
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
-        # print("current_hand_pos = ", current_hand_pos)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
-                
-        target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
+
+        if self.exp_name == "twist_bottle_cap":
+            target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
+        elif self.exp_name == "tennis_ball_pick":
+            target_hand_pos = self._cal_hand_pos_ball_pick(grip_action, current_hand_pos)
 
         # print("target_hand_pos = ", target_hand_pos)
 
@@ -574,15 +566,55 @@ class DensoEnv(gym.Env):
         # print("curr hand pos = ", self.curr_leap_hand_pos)
         # input("debug for hand pos")
         return ob, int(reward), done, False, {"succeed": reward}
+    
+    def _ball_pick_cal_init(self, current_hand_pos: np.ndarray):
+        self._binary_lower = np.minimum(self.gripper_open_joint, self.gripper_close_joint)
+        self._binary_upper = np.maximum(self.gripper_open_joint, self.gripper_close_joint)
 
+        self._binary_cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
+
+        diff = self.gripper_close_joint - self.gripper_open_joint
+        self.max_joint_delta = float(np.max(np.abs(diff))) / 10.0
+
+        self.is_ball_pick_cal_init = True
+        
+
+    def _cal_hand_pos_ball_pick(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
+        if not hasattr(self, "is_ball_pick_cal_init") or not self.is_ball_pick_cal_init:
+            self._ball_pick_cal_init(current_hand_pos)
+
+        if abs(grip_action) < 1e-6:
+            return np.asarray(self._cmd_pos, dtype=np.float32)
+
+        if grip_action > 0:
+            target = self.gripper_close_joint   # open -> close
+        else:
+            target = self.gripper_open_joint    # close -> open
+
+        pos  = np.asarray(self._cmd_pos, dtype=np.float32)
+        diff = target - pos
+        dist = float(np.linalg.norm(diff))
+
+        if dist < 1e-9:
+            return target.copy()
+
+        # 一步最多移动多少（和 |a| 成比例）
+        max_step = max(1e-9, abs(grip_action) * self.max_joint_delta)
+
+        if dist <= max_step:
+            new_pos = target.copy()
+        else:
+            direction = diff / dist
+            new_pos = pos + direction * max_step
+
+        new_pos = np.clip(new_pos, self._binary_lower, self._binary_upper)
+        self._cmd_pos = new_pos.copy()
+        return new_pos
+    
 
     def _segmented_init(self, current_hand_pos: np.ndarray):
-        wp_open  = np.asarray(self.gripper_open_joint,  dtype=np.float32)
-        wp_close = np.asarray(self.gripper_close_joint, dtype=np.float32)
-        wp_twist = np.asarray(self.gripper_twist_joint, dtype=np.float32)
-
         # 仅 3 个点，形成闭环（0→1→2→0）
-        self._waypoints = np.stack([wp_open, wp_close, wp_twist], axis=0)  # (3, D)
+        self._waypoints = np.stack([self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint], axis=0)  # (3, D)
         self._num_wp = 3
 
         # 上下界
@@ -601,7 +633,7 @@ class DensoEnv(gym.Env):
         self._per_step_path_len = max(1e-6, mean_len / 10.0)
         self._max_joint_delta = float(np.max(np.abs(seg_vecs))) / 10.0
         self._snap_eps = 1e-6
-        self._segmented_ready = True
+        self.is_segmented_init = True
 
         self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
         self._stop_on_waypoint = False
@@ -623,7 +655,7 @@ class DensoEnv(gym.Env):
 
 
     def calculate_hand_pos_segmented(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
-        if not hasattr(self, "_segmented_ready") or not self._segmented_ready:
+        if not hasattr(self, "is_segmented_init") or not self.is_segmented_init:
             self._segmented_init(current_hand_pos)
         a = float(np.clip(grip_action, -1.0, 1.0))
         if abs(a) < 1e-6:
@@ -660,46 +692,8 @@ class DensoEnv(gym.Env):
                 pos = start_wp.copy(); segment_progress = 0.0
             if (1.0 - segment_progress) <= self._snap_eps and np.linalg.norm(pos - end_wp) <= self._snap_eps:
                 pos = end_wp.copy();   segment_progress = 1.0
-
-            # if self._seg_dir < 0 and segment_progress <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
-            #     # 上一段的起点索引：例如在 close(1) 反向，就切到 open->close 这一段（start_idx=0）
-            #     prev_idx = (start_idx - 1) % self._num_wp
-            #     self._seg_start_idx = prev_idx
-            #     # 重新进下一轮 while，用新段重新计算 t、path_left
-            #     continue       
+     
             unit = seg_vec / seg_len
-            
-            
-            # if self._seg_dir > 0:
-            #     path_left = (1.0 - segment_progress) * seg_len
-            #     step_here = min(remaining_path_len, path_left)
-            #     unit = seg_vec / seg_len
-            #     pos = pos + unit * step_here
-            #     remaining_path_len -= step_here
-
-            #     # 到了段末端：吸附并切段；若不想阻塞，则不break，继续吃剩余步长
-            #     if abs(step_here - path_left) <= self._snap_eps:
-            #         pos = end_wp.copy()
-            #         self._seg_start_idx = end_idx
-            #         if self._stop_on_waypoint:
-            #             break
-            #         else:
-            #             continue
-            # else:
-            #     path_left = segment_progress * seg_len
-            #     step_here = min(remaining_path_len, path_left)
-            #     unit = seg_vec / seg_len
-            #     pos = pos - unit * step_here
-            #     remaining_path_len -= step_here
-
-            #     if abs(step_here - path_left) <= self._snap_eps:
-            #         pos = start_wp.copy()
-            #         # 反向时“下一段”的起点仍是 start_idx（dir=-1 会去前一个路标）
-            #         self._seg_start_idx = start_idx
-            #         if self._stop_on_waypoint:
-            #             break
-            #         else:
-            #             continue
 
             if self._seg_dir > 0:
                 # 正向：从 segment_progress → 1.0（start_wp → end_wp）
@@ -815,21 +809,26 @@ class DensoEnv(gym.Env):
                 self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_im()
 
-        heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-        full_res_images["tactile_data"] = heat_map
-        # Store full resolution cropped images separately
-        if self.save_video:
-            self.recording_frames.append(full_res_images)
-
-        if self.display_image:
-            with self.tac_index_lock:
-                # index_heat_map_resized = cv2.resize(self.index_heat_map, (128, 128))  # 如果想缩放
+        if not self.enable_tactile:
+            if self.display_image:
                 display_image = {
-                    "heat_map": heat_map,
                     "front_camera": display_images["front_camera_full"],
                     "wrist_camera": display_images["wrist_camera_full"],
                 }
-            self.img_queue.put(display_image)
+        else:
+            heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+            full_res_images["tactile_data"] = heat_map
+            if self.display_image:
+                with self.tac_index_lock:
+                    display_image = {
+                        "heat_map": heat_map,
+                        "front_camera": display_images["front_camera_full"],
+                        "wrist_camera": display_images["wrist_camera_full"],
+                    }
+        
+        self.img_queue.put(display_image)
+        if self.save_video:
+            self.recording_frames.append(full_res_images)
         return images
 
 
@@ -848,7 +847,6 @@ class DensoEnv(gym.Env):
                 else:
                     rgb = frame
                     depth = None
-                # cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
                 cropped_rgb = rgb #当前不需要裁剪
                 if key in self.observation_space["images"]:
                     resized = cv2.resize(
@@ -887,9 +885,6 @@ class DensoEnv(gym.Env):
         heat_map_input = cv2.normalize(height_map, None, 0, 255, cv2.NORM_MINMAX)
         heat_map_input = np.uint8(heat_map_input)
         heat_map = cv2.applyColorMap(heat_map_input, cv2.COLORMAP_JET)
-        # Add subtitles to each image
-        # cv2.putText(heat_map, "Thumb", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        # Resize images for display
         target_size = img_size
         heat_map = cv2.resize(heat_map, target_size, interpolation=cv2.INTER_LINEAR)
         points, gradients = sensor.height_map_2_point_cloud_gradients(height_map)
@@ -940,11 +935,6 @@ class DensoEnv(gym.Env):
         # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         if self.save_video:
             self.save_video_recording()
-
-        self.cycle_count += 1
-        if self.joint_reset_cycle!=0 and self.cycle_count % self.joint_reset_cycle == 0:
-            self.cycle_count = 0
-            joint_reset = True
 
         # self._recover()
         # self.go_to_reset(joint_reset=joint_reset)
@@ -1097,16 +1087,10 @@ class DensoEnv(gym.Env):
             np.array(self.hand_state, dtype=np.float32).flatten(), 
         ])
         
-        state_observation = {
-            "tcp_pose": np.array(self.cur_position, dtype=np.float32).flatten(),
-            "tcp_ori": np.array(self.cur_oritation, dtype=np.float32).flatten(),
-            "gripper_pose": np.array(self.hand_state, dtype=np.float32).flatten(),
-        }
-        
         if not self.enable_tactile:
             obs = copy.deepcopy({
                 "front_camera": front_camera_image,
-                # "side_camera": side_camera_image,
+                "wrist_camera": wrist_camera_image,
                 "state": state_flattened
             })
         else:

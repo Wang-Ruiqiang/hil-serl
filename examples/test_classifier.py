@@ -32,7 +32,6 @@ robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/
 #     "state": gym.spaces.Box(-np.inf, np.inf, shape=(23,), dtype=np.float32)
 # })
 
-log_file = "classifier_log.txt"
 
 
 def main(_):
@@ -68,67 +67,55 @@ def main(_):
     failure_as_success_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success"
     success_as_failure_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/success_as_failure"
     try:
-        with open(log_file, "w") as f:
-            for data_count in range(len(data)):
-                obs = data[data_count]["observations"]
-                is_record_success = data[data_count]["is_record_success"]
+        for data_count in range(len(data)):
+            obs = data[data_count]["observations"]
+            is_record_success = data[data_count]["is_record_success"]
 
-                # log_msg = f"obs = {obs}\n"
-                # print(log_msg, end="")
-                # f.write(log_msg)
-                # if is_first_time:
-                #     history_obs.reset(obs)
-                #     is_first_time = False
-                # else:
-                #     history_obs.append(obs)
-                # stacked_obs = history_obs.get_stacked_obs()
+            reward = reward_func(obs)
+            if is_record_success:
+                print("is_record_success = ", is_record_success)
+                record_success_count+=1
+            print("reward = ", reward)
+            print("----------------------------------------")
 
-                reward = reward_func(obs)
-                if is_record_success:
-                    print("is_record_success = ", is_record_success)
-                    record_success_count+=1
-                print("reward = ", reward)
-                print("----------------------------------------")
+            if is_record_success and reward:
+                success_count+=1
+                print("success-------------------------------------------")
 
-                if is_record_success and reward:
-                    success_count+=1
-                    print("success-------------------------------------------")
+            if is_record_success==0 and reward:
+                fail_as_success+=1
+                print("seem failure sample as success-------------------------------------------")
 
-                if is_record_success==0 and reward:
-                    fail_as_success+=1
-                    print("seem failure sample as success-------------------------------------------")
+                # 保存 front_camera 图像
+                if "front_camera" in obs:
+                    img = obs["front_camera"]
+                    save_path = os.path.join(failure_as_success_dir, f"front_camera_{data_count}.jpg")
+                    cv2.imwrite(save_path, img)
+                    print(f"Saved front_camera image to {save_path}")
 
-                    # 保存 front_camera 图像
-                    if "front_camera" in obs:
-                        img = obs["front_camera"]
-                        save_path = os.path.join(failure_as_success_dir, f"front_camera_{data_count}.jpg")
-                        cv2.imwrite(save_path, img)
-                        print(f"Saved front_camera image to {save_path}")
-
-                    # 如果你还想保存 tactile_data
-                    if "tactile_data" in obs:
-                        tactile_img = obs["tactile_data"]
-                        save_path = os.path.join(failure_as_success_dir, f"tactile_data_{data_count}.jpg")
-                        cv2.imwrite(save_path, tactile_img)
-                        print(f"Saved tactile_data image to {save_path}")
+                # 如果你还想保存 tactile_data
+                if "tactile_data" in obs:
+                    tactile_img = obs["tactile_data"]
+                    save_path = os.path.join(failure_as_success_dir, f"tactile_data_{data_count}.jpg")
+                    cv2.imwrite(save_path, tactile_img)
+                    print(f"Saved tactile_data image to {save_path}")
 
 
-                if is_record_success and reward == 0:
-                    success_as_fail+=1
-                    print("seem success sample as failure-------------------------------------------")
-                    if "front_camera" in obs:
-                        img = obs["front_camera"]
-                        save_path = os.path.join(success_as_failure_dir, f"front_camera_{data_count}.jpg")
-                        cv2.imwrite(save_path, img)
-                        print(f"Saved front_camera image to {save_path}")
+            if is_record_success and reward == 0:
+                success_as_fail+=1
+                print("seem success sample as failure-------------------------------------------")
+                if "front_camera" in obs:
+                    img = obs["front_camera"]
+                    save_path = os.path.join(success_as_failure_dir, f"front_camera_{data_count}.jpg")
+                    cv2.imwrite(save_path, img)
+                    print(f"Saved front_camera image to {save_path}")
 
-                    # 如果你还想保存 tactile_data
-                    if "tactile_data" in obs:
-                        tactile_img = obs["tactile_data"]
-                        save_path = os.path.join(success_as_failure_dir, f"tactile_data_{data_count}.jpg")
-                        cv2.imwrite(save_path, tactile_img)
-                        print(f"Saved tactile_data image to {save_path}")
-                # f.flush()  
+                # 如果你还想保存 tactile_data
+                if "tactile_data" in obs:
+                    tactile_img = obs["tactile_data"]
+                    save_path = os.path.join(success_as_failure_dir, f"tactile_data_{data_count}.jpg")
+                    cv2.imwrite(save_path, tactile_img)
+                    print(f"Saved tactile_data image to {save_path}") 
 
     except KeyboardInterrupt:
         # 捕获 Ctrl+C 异常
@@ -143,7 +130,6 @@ def main(_):
         print("success rate of classifier:", {success_count / record_success_count})
         print("success_as_fail rate of classifier:", {success_as_fail / record_success_count})
         print("fail_as_success rate of data_count:", {fail_as_success / data_count})
-        print("日志文件路径:", os.path.abspath("classifier_log.txt"))
         # print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
         # print(f"average time: {np.mean(time_list)}")
         # env.close()

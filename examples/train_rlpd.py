@@ -56,6 +56,7 @@ flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 flags.DEFINE_boolean("is_pick", True, "read exist data or not.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -361,24 +362,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 mode = "S1_INFER"
                 input("reset env")
                 obs, _ = env.reset()
-
-        # if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
-        #     # dump to pickle file
-        #     buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
-        #     demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
-        #     if not os.path.exists(buffer_path):
-        #         os.makedirs(buffer_path)
-        #     if not os.path.exists(demo_buffer_path):
-        #         os.makedirs(demo_buffer_path)
-        #     with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
-        #         pkl.dump(transitions, f)
-        #         transitions = []
-        #     with open(
-        #         os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
-        #     ) as f:
-        #         pkl.dump(demo_transitions, f)
-        #         demo_transitions = []
-
+                
         timer.tock("total")
 
         if step % config.log_period == 0:
@@ -520,6 +504,7 @@ def main(_):
         fake_env=FLAGS.learner,
         save_video=FLAGS.save_video,
         classifier=True,
+        enable_tactile=FLAGS.enable_tactile
     )
     env = RecordEpisodeStatistics(env)
 
