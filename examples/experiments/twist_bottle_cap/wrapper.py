@@ -9,12 +9,12 @@ from denso_env.envs.denso_env import DensoEnv
 from examples.utils import kinematics_utils
 
 robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
-palm_lower2denso_end_tf = np.array([
-    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
-    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
-    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
-    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
-])
+# palm_lower2denso_end_tf = np.array([
+#     [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
+#     [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
+#     [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
+#     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
+# ])
 
 # gripper_open_joint = [
 #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index

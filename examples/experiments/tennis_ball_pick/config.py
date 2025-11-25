@@ -43,12 +43,7 @@ class EnvConfig(DefaultEnvConfig):
         "front_camera": lambda img: img[150:450, 350:1100],
         "side_camera": lambda img: img[100:500, 400:900],
     }
-    # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
-    # GRASP_POSE = np.array([0.5857508505445138,-0.22036261105675414,0.2731021902359492, np.pi, 0, 0])
-    # RESET_POSE = TARGET_POSE + np.array([0, 0, 0.05, 0, 0.05, 0])
-    # ABS_POSE_LIMIT_LOW = TARGET_POSE - np.array([0.03, 0.02, 0.01, 0.01, 0.1, 0.4])
-    # ABS_POSE_LIMIT_HIGH = TARGET_POSE + np.array([0.03, 0.02, 0.05, 0.01, 0.1, 0.4])
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
@@ -57,46 +52,19 @@ class EnvConfig(DefaultEnvConfig):
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
-    # COMPLIANCE_PARAM = {
-    #     "translational_stiffness": 2000,
-    #     "translational_damping": 89,
-    #     "rotational_stiffness": 150,
-    #     "rotational_damping": 7,
-    #     "translational_Ki": 0,
-    #     "translational_clip_x": 0.0075,
-    #     "translational_clip_y": 0.0016,
-    #     "translational_clip_z": 0.0055,
-    #     "translational_clip_neg_x": 0.002,
-    #     "translational_clip_neg_y": 0.0016,
-    #     "translational_clip_neg_z": 0.005,
-    #     "rotational_clip_x": 0.01,
-    #     "rotational_clip_y": 0.025,
-    #     "rotational_clip_z": 0.005,
-    #     "rotational_clip_neg_x": 0.01,
-    #     "rotational_clip_neg_y": 0.025,
-    #     "rotational_clip_neg_z": 0.005,
-    #     "rotational_Ki": 0,
-    # }
-    # PRECISION_PARAM = {
-    #     "translational_stiffness": 2000,
-    #     "translational_damping": 89,
-    #     "rotational_stiffness": 250,
-    #     "rotational_damping": 9,
-    #     "translational_Ki": 0.0,
-    #     "translational_clip_x": 0.1,
-    #     "translational_clip_y": 0.1,
-    #     "translational_clip_z": 0.1,
-    #     "translational_clip_neg_x": 0.1,
-    #     "translational_clip_neg_y": 0.1,
-    #     "translational_clip_neg_z": 0.1,
-    #     "rotational_clip_x": 0.5,
-    #     "rotational_clip_y": 0.5,
-    #     "rotational_clip_z": 0.5,
-    #     "rotational_clip_neg_x": 0.5,
-    #     "rotational_clip_neg_y": 0.5,
-    #     "rotational_clip_neg_z": 0.5,
-    #     "rotational_Ki": 0.0,
-    # }
+    GRIPPER_CLOSE_JOINT = np.array([
+        3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
+        3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
+        3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
+        4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
+    ], dtype=np.float32)
+    
+    GRIPPER_OPEN_JOINT = np.array([
+        2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
+        2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
+        3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
+    ], dtype=np.float32)
     IS_ARM_ONLY = True
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'

@@ -292,12 +292,11 @@ class DensoEnv(gym.Env):
             self.recording_frames = []
 
         # Action/Observation Space
-        if not self.is_arm_only:
-            print("init arm with hand")
-            self.action_space = gym.spaces.Box(
-                np.ones((22,), dtype=np.float32) * -1,
-                np.ones((22,), dtype=np.float32),
-            )
+        if not self.enable_tactile:
+            print("init arm without tactaile data")
+            low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+            high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+            self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
             self.observation_space = gym.spaces.Dict(
                 {
@@ -309,7 +308,9 @@ class DensoEnv(gym.Env):
                             "tcp_ori": gym.spaces.Box(
                                 -np.inf, np.inf, shape=(4,)
                             ),
-                            "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(16,)),
+                            "gripper_pose": gym.spaces.Box(
+                                -np.inf, np.inf, shape=(1,), dtype=np.float32
+                            )
                         }
                     ),
                     "images": gym.spaces.Dict(
@@ -318,9 +319,8 @@ class DensoEnv(gym.Env):
                     ),
                 }
             )
-        elif self.enable_tactile:
-            print("init arm with tactile")
-            
+        else:
+            print("init arm with tactile data")
             low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
             high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
             # self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
@@ -343,13 +343,6 @@ class DensoEnv(gym.Env):
                             )
                         }
                     ),
-                    # "images": gym.spaces.Dict(
-                    #     {
-                    #         **{key: gym.spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8) 
-                    #                 for key in config.REALSENSE_CAMERAS},
-                    #         "tactile_data": gym.spaces.Box(0, 255, shape=(240, 960, 3), dtype=np.uint8),
-                    #     }
-                    # ),
                     "images": gym.spaces.Dict(
                         {
                             **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
@@ -476,49 +469,13 @@ class DensoEnv(gym.Env):
 
         if self.exp_name == "tennis_ball_pick":
         # grip with index
-            self.gripper_close_joint = [
-                3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
-                3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-                3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
-                4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
-            ]
+            self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
+            self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
-            # self.gripper_open_joint = [
-            #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-            #     2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
-            #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-            #     4.312019824981689453, 3.905515193939208984, 3.374757766723632812, 3.597184896469116211    #thumb
-            # ]
-            
-            self.gripper_open_joint = [
-                2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-                2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
-                3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
-            ]
-            
-            
         elif self.exp_name == "twist_bottle_cap":
-            self.gripper_close_joint = np.array([
-                3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
-                3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
-                3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                4.709321022033691406, 3.160000324249267578, 2.954447031021118164, 3.816544294357299805
-            ], dtype=np.float32)
-            
-            self.gripper_twist_joint = np.array([
-                2.659922599792480469, 4.605010509490966797, 3.118582963943481445, 3.745980978012084961,
-                3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
-                3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                5.062136650085449219, 2.856272220611572266, 2.954447031021118164, 3.816544294357299805
-            ], dtype=np.float32)
-            
-            self.gripper_open_joint = np.array([
-                2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,
-                3.406330614089965820, 3.529689788818359375, 3.438389015197753906, 3.969689750671386719,
-                3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-                4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
-            ], dtype=np.float32)
+            self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
+            self.gripper_twist_joint = config.GRIPPER_TWIST_JOINT
+            self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
 
@@ -1134,35 +1091,34 @@ class DensoEnv(gym.Env):
         front_camera_image = images["front_camera"]
         wrist_camera_image = images["wrist_camera"]
         # side_camera_image = images["side_camera"]
-
-        if not self.is_arm_only:
-            state_flattened = np.concatenate([
-                np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
-                np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-                np.array(self.curr_leap_hand_pos, dtype=np.float32).flatten()  # 夹爪 (n,)
-            ])
-        else :
-            state_flattened = np.concatenate([
-                np.array(self.cur_position, dtype=np.float32).flatten(),  # TCP 位置 (3,)
-                np.array(self.cur_oritation, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-                np.array(self.hand_state, dtype=np.float32).flatten(),  # TCP 旋转 (4,)
-            ])
-        if self.enable_tactile:
+        state_flattened = np.concatenate([
+            np.array(self.cur_position, dtype=np.float32).flatten(),
+            np.array(self.cur_oritation, dtype=np.float32).flatten(),
+            np.array(self.hand_state, dtype=np.float32).flatten(), 
+        ])
+        
+        state_observation = {
+            "tcp_pose": np.array(self.cur_position, dtype=np.float32).flatten(),
+            "tcp_ori": np.array(self.cur_oritation, dtype=np.float32).flatten(),
+            "gripper_pose": np.array(self.hand_state, dtype=np.float32).flatten(),
+        }
+        
+        if not self.enable_tactile:
+            obs = copy.deepcopy({
+                "front_camera": front_camera_image,
+                # "side_camera": side_camera_image,
+                "state": state_flattened
+            })
+        else:
             heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
             obs = copy.deepcopy({
-            "front_camera": front_camera_image,
-            "wrist_camera": wrist_camera_image,
-            "tactile_data":heatmap_canvas,
-            "state": state_flattened
-        })
-        else:
-            obs = copy.deepcopy({
-            "front_camera": front_camera_image,
-            # "side_camera": side_camera_image,
-            "state": state_flattened
-        })
-            
-        return obs
+                "front_camera": front_camera_image,
+                "wrist_camera": wrist_camera_image,
+                "tactile_data":heatmap_canvas,
+                "state": state_flattened
+            })
+                
+        return copy.deepcopy(obs)
 
 
     def close(self):
@@ -1257,6 +1213,5 @@ class DensoEnv(gym.Env):
                 cv2.imwrite(os.path.join(frame_dir, "middle_raw_image.jpg"), self.rmiddle_raw_buffer[frame_id])
                 cv2.imwrite(os.path.join(frame_dir, "middle_heat_map.jpg"), self.rmiddle_heatmap_buffer[frame_id])
             # 保存 state（TCP + orientation + hand joints）
-            # if not self.is_arm_only:
             np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
             np.savetxt(os.path.join(frame_dir, "hand_state.txt"), np.atleast_1d(self.hand_state_buffer[frame_id]), fmt="%.6f")

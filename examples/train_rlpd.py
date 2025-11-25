@@ -169,8 +169,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                     print(reward)
                     print(f"{success_counter}/{episode + 1}")
                     intervention_label = 0
-                    
-                    env.unwrapped.save_video_recording()
+                    if FLAGS.save_video:
+                        env.unwrapped.save_video_recording()
                     input("reset env")
                     obs, _ = env.reset()
 

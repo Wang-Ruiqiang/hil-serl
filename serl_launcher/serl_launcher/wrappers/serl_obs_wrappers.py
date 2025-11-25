@@ -26,13 +26,13 @@ class SERLObsWrapper(gym.ObservationWrapper):
         )
 
     def observation(self, obs):
-        # obs = {
-        #     "state": flatten(
-        #         self.proprio_space,
-        #         {key: obs["state"][key] for key in self.proprio_keys},
-        #     ),
-        #     **(obs["images"]),
-        # }
+        obs = {
+            "state": flatten(
+                self.proprio_space,
+                {key: obs["state"][key] for key in self.proprio_keys},
+            ),
+            **(obs["images"]),
+        }
         return obs
 
     def reset(self, **kwargs):
