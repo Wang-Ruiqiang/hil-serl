@@ -320,10 +320,13 @@ class DensoEnv(gym.Env):
             )
         elif self.enable_tactile:
             print("init arm with tactile")
-            self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
+            
+            low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+            high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+            # self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
             # low = np.array([-1] * 6 + [0], dtype=np.float32)
             # high = np.array([1] * 6 + [4], dtype=np.float32)
-            # self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
+            self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
             self.observation_space = gym.spaces.Dict(
                 {
@@ -464,7 +467,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-17-4"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-22-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
 
@@ -544,19 +547,23 @@ class DensoEnv(gym.Env):
 
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
-        print("in denso_env step wang")
         start_time = time.time()
         
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        print("action = ", action)
-
-        xyz_delta = action[:3]
-
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
+        cond_x = (0.5 <= self.nextpos[0] <= 0.8)
+        cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
+        cond_z = (0.18 <= self.nextpos[2] <= 0.24)
+        
+        if cond_x and cond_y and cond_z:
+            # 限制三个方向的 action 范围
+            xyz_delta = np.clip(action[:3], -0.2, 0.2)
+        else:
+            # 原始范围（-1,1）
+            xyz_delta = action[:3]
+
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
-        if self.nextpos[2] < 0.03:
-            self.nextpos[2] = 0.03
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -697,21 +704,58 @@ class DensoEnv(gym.Env):
             if (1.0 - segment_progress) <= self._snap_eps and np.linalg.norm(pos - end_wp) <= self._snap_eps:
                 pos = end_wp.copy();   segment_progress = 1.0
 
-            if self._seg_dir < 0 and segment_progress <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
-                # 上一段的起点索引：例如在 close(1) 反向，就切到 open->close 这一段（start_idx=0）
-                prev_idx = (start_idx - 1) % self._num_wp
-                self._seg_start_idx = prev_idx
-                # 重新进下一轮 while，用新段重新计算 t、path_left
-                continue
+            # if self._seg_dir < 0 and segment_progress <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
+            #     # 上一段的起点索引：例如在 close(1) 反向，就切到 open->close 这一段（start_idx=0）
+            #     prev_idx = (start_idx - 1) % self._num_wp
+            #     self._seg_start_idx = prev_idx
+            #     # 重新进下一轮 while，用新段重新计算 t、path_left
+            #     continue       
+            unit = seg_vec / seg_len
+            
+            
+            # if self._seg_dir > 0:
+            #     path_left = (1.0 - segment_progress) * seg_len
+            #     step_here = min(remaining_path_len, path_left)
+            #     unit = seg_vec / seg_len
+            #     pos = pos + unit * step_here
+            #     remaining_path_len -= step_here
+
+            #     # 到了段末端：吸附并切段；若不想阻塞，则不break，继续吃剩余步长
+            #     if abs(step_here - path_left) <= self._snap_eps:
+            #         pos = end_wp.copy()
+            #         self._seg_start_idx = end_idx
+            #         if self._stop_on_waypoint:
+            #             break
+            #         else:
+            #             continue
+            # else:
+            #     path_left = segment_progress * seg_len
+            #     step_here = min(remaining_path_len, path_left)
+            #     unit = seg_vec / seg_len
+            #     pos = pos - unit * step_here
+            #     remaining_path_len -= step_here
+
+            #     if abs(step_here - path_left) <= self._snap_eps:
+            #         pos = start_wp.copy()
+            #         # 反向时“下一段”的起点仍是 start_idx（dir=-1 会去前一个路标）
+            #         self._seg_start_idx = start_idx
+            #         if self._stop_on_waypoint:
+            #             break
+            #         else:
+            #             continue
 
             if self._seg_dir > 0:
+                # 正向：从 segment_progress → 1.0（start_wp → end_wp）
                 path_left = (1.0 - segment_progress) * seg_len
+                if path_left < self._snap_eps:
+                    # 这一段已经走完，切下一段
+                    self._seg_start_idx = end_idx
+                    continue
+
                 step_here = min(remaining_path_len, path_left)
-                unit = seg_vec / seg_len
                 pos = pos + unit * step_here
                 remaining_path_len -= step_here
 
-                # 到了段末端：吸附并切段；若不想阻塞，则不break，继续吃剩余步长
                 if abs(step_here - path_left) <= self._snap_eps:
                     pos = end_wp.copy()
                     self._seg_start_idx = end_idx
@@ -719,17 +763,23 @@ class DensoEnv(gym.Env):
                         break
                     else:
                         continue
+
             else:
-                path_left = segment_progress * seg_len
+                # 反向：从 segment_progress → 0.0（往段起点退）
+                path_left = segment_progress * seg_len  # 距离 start_wp 的弧长
+                if path_left < self._snap_eps:
+                    # 这一段往回已经没有路了，直接切到“上一段”
+                    self._seg_start_idx = (start_idx - 1) % self._num_wp
+                    continue
+
                 step_here = min(remaining_path_len, path_left)
-                unit = seg_vec / seg_len
-                pos = pos - unit * step_here
+                pos = pos - unit * step_here  # 注意方向：减 unit 是往 start_wp 退
                 remaining_path_len -= step_here
 
                 if abs(step_here - path_left) <= self._snap_eps:
+                    # 正好退回到 start_wp：下一步应走上一段
                     pos = start_wp.copy()
-                    # 反向时“下一段”的起点仍是 start_idx（dir=-1 会去前一个路标）
-                    self._seg_start_idx = start_idx
+                    self._seg_start_idx = (start_idx - 1) % self._num_wp
                     if self._stop_on_waypoint:
                         break
                     else:
@@ -808,6 +858,8 @@ class DensoEnv(gym.Env):
                 self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_im()
 
+        heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+        full_res_images["tactile_data"] = heat_map
         # Store full resolution cropped images separately
         if self.save_video:
             self.recording_frames.append(full_res_images)
@@ -815,7 +867,6 @@ class DensoEnv(gym.Env):
         if self.display_image:
             with self.tac_index_lock:
                 # index_heat_map_resized = cv2.resize(self.index_heat_map, (128, 128))  # 如果想缩放
-                heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
                 display_image = {
                     "heat_map": heat_map,
                     "front_camera": display_images["front_camera_full"],

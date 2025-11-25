@@ -127,7 +127,7 @@ class TrainConfig(DefaultTrainingConfig):
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
     buffer_period = 1000
-    checkpoint_period = 1000 
+    checkpoint_period = 1000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
@@ -206,13 +206,8 @@ class TrainConfig(DefaultTrainingConfig):
                 reward = 1 if success else 0
                 state = obs["state"]
                 ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-                gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]
-                if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-                    reward -= 0.01
-                if ee_pos[2] < 0.02:
+                if ee_pos[2] < 0.16:
                     reward -= 0.05
-                # if not is_pick and -0.30 < ee_pos[1] < -0.04 and gripper_pose < 0.8:
-                #     reward -= 0.05
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)

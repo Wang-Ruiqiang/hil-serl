@@ -269,7 +269,6 @@ class KeyboardIntervention(gym.ActionWrapper):
     def step(self, action):
         new_action, replaced = self.action(action)
         obs, rew, done, truncated, info = self.env.step(new_action)
-
         if replaced:
             info["intervene_action"] = new_action
 

@@ -10,7 +10,7 @@ from absl import app, flags
 from flax.training import checkpoints
 import os
 import copy
-import sys
+import sys, threading, queue, termios, tty, select
 import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 60300, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
@@ -73,7 +73,32 @@ def print_green(x):
 def print_red(x):
     return print("\033[91m {}\033[00m".format(x))
 
+class KeyReader(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.q = queue.Queue()
+        self._stop = threading.Event()
+        self.fd = sys.stdin.fileno()
+        self.old = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)  # 立即读取，无需回车
 
+    def run(self):
+        try:
+            while not self._stop.is_set():
+                if sys.stdin in select.select([sys.stdin], [], [], 0.01)[0]:
+                    ch = sys.stdin.read(1)
+                    self.q.put(ch)
+        finally:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
+
+    def get_key_nowait(self):
+        try:
+            return self.q.get_nowait()
+        except queue.Empty:
+            return None
+
+    def stop(self):
+        self._stop.set()
 ##############################################################################
 
 
@@ -95,6 +120,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
         agent = agent.replace(state=ckpt)
         
         obs, _ = env.reset()
+        key_reader = KeyReader()
+        key_reader.start()
         for episode in range(FLAGS.eval_n_trajs):
             done = False
             start_time = time.time()
@@ -113,6 +140,15 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
 
                 next_obs, reward, done, truncated, info = env.step(actions)
                 obs = next_obs
+                
+                key = key_reader.get_key_nowait()
+                while key is not None:
+                    if key == '1':
+                        done = True
+                        info = dict(info)
+                        info['succeed'] = True
+                    key = key_reader.get_key_nowait()
+                    
                 if "intervene_action" in info:
                     intervention_label = 1
                 # if "is_pick" in info:
@@ -133,6 +169,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                     print(reward)
                     print(f"{success_counter}/{episode + 1}")
                     intervention_label = 0
+                    
+                    env.unwrapped.save_video_recording()
                     input("reset env")
                     obs, _ = env.reset()
 
@@ -233,7 +271,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
         
         timer.tick("total")
         with timer.context("sample_actions"):
-            # print_green(f"obs[state] =  {obs['state']}")
+            print_green(f"obs[state] =  {obs['state']}")
             # if step < config.random_steps:
             #     print("random actions")
             #     actions = env.action_space.sample()
@@ -246,7 +284,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             actions = np.asarray(jax.device_get(actions_sample)).copy()
             # actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
-            actions[..., 6] = np.clip(actions[..., 6], -1.0, 1.0)
+            low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+            high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+            # actions[..., 6] = np.clip(actions[..., 6], low, high)
+            actions = np.clip(actions, low, high)
+            
         # Step environment
         with timer.context("step_env"):
             # TODO: judge if the network need to be intervened
@@ -261,7 +303,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             # override the action with the intervention action
             if "intervene_action" in info:
                 actions = info.pop("intervene_action")
-                print("intervene_action = ", actions)
+                # print("intervene_action = ", actions)
                 intervention_steps += 1
                 if not already_intervened:
                     intervention_count += 1
@@ -273,7 +315,16 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             #     is_pick = info["is_pick"]
             # else:
             #     is_pick = True
+            cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
+            cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
+            cond_z = (0.18 <= obs["state"][0][2] <= 0.24)
             
+            if cond_x and cond_y and cond_z:
+                # 限制三个方向的 action 范围
+                actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+                
+            print("actions = ", actions)
+                
             running_return += reward
             transition = dict(
                 observations=obs,
@@ -294,7 +345,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             obs = next_obs
             # if done and is_pick:
             #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-
             # if done and not is_pick:
             if done:
                 print_green(f" task done = {done}")

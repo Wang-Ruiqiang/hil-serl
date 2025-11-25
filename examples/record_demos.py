@@ -83,6 +83,7 @@ def main(_):
             # actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
             # print("reward = ", rew)
+            print(f"obs[state] =  {obs['state']}")
             returns += rew
             if "intervene_action" in info:
                 actions = info["intervene_action"]
@@ -92,7 +93,7 @@ def main(_):
                 if key == '1':
                     done = True
                     info = dict(info)
-                    info['succeed'] = True   # 你也可以不要这一行，只强制结束
+                    info['succeed'] = True
                 key = key_reader.get_key_nowait()
                 
             # force_end = _stdin_key_pressed("1")

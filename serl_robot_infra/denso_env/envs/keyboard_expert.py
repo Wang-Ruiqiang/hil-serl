@@ -53,22 +53,22 @@ class KeyboardExpert:
             # 控制 xyz 方向移动
             if 'w' in current_keys:
                 # print("z+")
-                action[2] += 1
+                action[2] += 0.5
             if 's' in current_keys:
                 # print("z-")
-                action[2] -= 1
+                action[2] -= 0.5
             if 'a' in current_keys:
                 # print("x-")
-                action[0] -= 1
+                action[0] -= 0.5
             if 'd' in current_keys:
                 # print("x+")
-                action[0] += 1
+                action[0] += 0.5
             if 'q' in current_keys:
                 # print("y+")
-                action[1] += 1
+                action[1] += 0.5
             if 'e' in current_keys:
                 # print("y-")
-                action[1] -= 1
+                action[1] -= 0.5
 
             if 't' in current_keys:
                 # print("z+")
