@@ -501,7 +501,7 @@ class DensoEnv(gym.Env):
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
         cond_x = (0.5 <= self.nextpos[0] <= 0.8)
         cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
-        cond_z = (0.18 <= self.nextpos[2] <= 0.24)
+        cond_z = (0.14 <= self.nextpos[2] <= 0.24)
         
         if cond_x and cond_y and cond_z:
             # 限制三个方向的 action 范围

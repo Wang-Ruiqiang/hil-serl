@@ -29,11 +29,8 @@ flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_ball_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
-
-
-is_first_run = True
 
 def save_batch_to_pickle(batch_data, file_path):
     """

@@ -607,7 +607,7 @@ class SACAgent(flax.struct.PyTreeNode):
             augmentation_function=augmentation_function,
             **kwargs,
         )
-
+        print("image_keys = ", image_keys)
         if "pretrained" in encoder_type:  # load pretrained weights for ResNet-10
             from serl_launcher.utils.train_utils import load_resnet10_params
             agent = load_resnet10_params(agent, image_keys)

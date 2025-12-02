@@ -15,6 +15,8 @@ import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+sys.path.insert(0, project_root)
 from serl_launcher.agents.continuous.sac import SACAgent
 from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSingleArm
 from serl_launcher.agents.continuous.sac_hybrid_dual import SACAgentHybridDualArm
@@ -26,8 +28,6 @@ from agentlace.data.data_store import QueuedDataStore
 
 from serl_launcher.utils.launcher import (
     make_sac_pixel_agent,
-    make_sac_pixel_agent_hybrid_single_arm,
-    make_sac_pixel_agent_hybrid_dual_arm,
     make_trainer_config,
     make_wandb_logger,
 )
@@ -51,12 +51,12 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 60300, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 flags.DEFINE_boolean("is_pick", True, "read exist data or not.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -318,7 +318,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             #     is_pick = True
             cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
             cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
-            cond_z = (0.18 <= obs["state"][0][2] <= 0.24)
+            cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
             
             if cond_x and cond_y and cond_z:
                 # 限制三个方向的 action 范围
@@ -484,7 +484,7 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
             and step % config.checkpoint_period == 0
         ) or is_end:
             checkpoints.save_checkpoint(
-                os.path.abspath(FLAGS.checkpoint_path), agent.state, step=step, keep=100
+                os.path.abspath(FLAGS.checkpoint_path), agent.state, step=step, keep=1000
             )
 
 #############################################################################
@@ -518,8 +518,11 @@ def main(_):
         discount=config.discount,
         state_weights=config.state_weights,
     )
+    
     include_grasp_penalty = False
     
+    # replicate agent across devices
+    # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     agent = jax.device_put(
         jax.tree_map(jnp.array, agent), sharding.replicate()
     )
@@ -541,16 +544,16 @@ def main(_):
     agent_pick = None
     if FLAGS.exp_name == "tennis_ball_pick":
         agent_pick: SACAgent = make_sac_pixel_agent(
-        seed=FLAGS.seed,
-        sample_obs=env.observation_space.sample(),
-        sample_action=env.action_space.sample(),
-        image_keys=config.image_keys,
-        encoder_type=config.encoder_type,
-        discount=config.discount,
-        state_weights=config.state_weights,
-    )
-    # replicate agent across devices
-    # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
+            seed=FLAGS.seed,
+            sample_obs=env.observation_space.sample(),
+            sample_action=env.action_space.sample(),
+            image_keys=config.image_keys,
+            encoder_type=config.encoder_type,
+            discount=config.discount,
+            state_weights=config.state_weights,
+        )
+        # replicate agent across devices
+        # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     
         agent_pick = jax.device_put(
             jax.tree_map(jnp.array, agent_pick), sharding.replicate()
@@ -581,7 +584,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="bottle-twist-11-17",
+            project="bottle-twist-ablation-11-30",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

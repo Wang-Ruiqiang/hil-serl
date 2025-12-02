@@ -31,7 +31,7 @@ flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_ball_pick", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 
 def main(_):
@@ -131,6 +131,7 @@ def main(_):
     pos_sample = next(pos_iterator)
     neg_sample = next(neg_iterator)
     sample = concat_batches(pos_sample, neg_sample, axis=0)
+    print("config.classifier_keys = ", config.classifier_keys)
 
     rng, key = jax.random.split(rng)
     classifier = create_classifier(key, 
