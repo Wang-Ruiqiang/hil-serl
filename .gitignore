@@ -1,5 +1,6 @@
 examples/classifier_data*/*
 examples/classifier_ckpt*/*
+examples/classifier_ckpt_bottle_twist*/*
 examples/classifier_data copy/*
 examples/saved_clips*/*
 examples/demo_data/*
