@@ -41,8 +41,8 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     IMAGE_CROP = {
-        "front_camera": lambda img: img[150:450, 350:1100],
-        "side_camera": lambda img: img[100:500, 400:900],
+        "front_camera": lambda img: img[90:340, 150:400],
+        "wrist_camera": lambda img: img[0:480, 120:600],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])

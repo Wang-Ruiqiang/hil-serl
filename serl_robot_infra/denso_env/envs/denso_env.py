@@ -50,8 +50,8 @@ class ImageDisplayer(threading.Thread):
             # cv2.imshow(self.name, frame)
             # cv2.waitKey(1)
             for k, v in img_array.items():
-                img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
-                cv2.imshow(f"{self.name} - {k}", img)
+                # img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
+                cv2.imshow(f"{self.name} - {k}", v)
 
             cv2.waitKey(1)
 
@@ -314,7 +314,7 @@ class DensoEnv(gym.Env):
                         }
                     ),
                     "images": gym.spaces.Dict(
-                        {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
+                        {key: gym.spaces.Box(0, 255, shape=(64, 64, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS}
                     ),
                 }
@@ -788,7 +788,7 @@ class DensoEnv(gym.Env):
             try:
                 frame = cap.read()
                 if frame.ndim == 3 and frame.shape[2] == 4:
-                    rgb = frame[..., :3]   # BGR 彩色
+                    rgb = frame[..., :3] # 这里是bgr格式，cv2.imshow输入bgr,显示rgb图像
                 else:
                     rgb = frame
                 rgb = rgb.astype(np.uint8)

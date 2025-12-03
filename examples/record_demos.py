@@ -12,7 +12,8 @@ import sys, threading, queue, termios, tty, select
 # 提前输入export PYTHONPATH=$(pwd)/../serl_robot_infra:$PYTHONPATH
 # project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
 # sys.path.insert(0, project_root)
-
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from experiments.mappings import NEW_MAPPING
