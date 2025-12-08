@@ -20,6 +20,9 @@ from scipy.spatial.transform import Rotation as R
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
 sys.path.insert(0, project_root)
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+sys.path.insert(0, project_root)
+
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from examples.utils import read_utils
@@ -27,17 +30,14 @@ from examples.utils import read_utils
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 25, "Number of successful demos to collect.")
 flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/demo_data", "demo data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
-flags.DEFINE_boolean("is_arm_only", True, "read exist data or not.")
 flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
 flags.DEFINE_boolean("is_pick_and_place", False, "read exist data or not.")
-flags.DEFINE_boolean("is_bottle_twist", True, "read exist data or not.")
-flags.DEFINE_boolean("is_ball_pick", False, "read exist data or not.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -79,16 +79,7 @@ def main(_):
     pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
-    if not FLAGS.is_arm_only:
-        action_space = gym.spaces.Box(
-                np.ones((22,), dtype=np.float32) * -1,
-                np.ones((22,), dtype=np.float32),
-            )
-    else :
-        # low  = np.concatenate([np.ones(6, dtype=np.float32) * -1, [0]])
-        # high = np.ones(7, dtype=np.float32)
-        # action_space = gym.spaces.Box(low, high, dtype=np.float32)
-        action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
+    action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,))
         
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
@@ -100,7 +91,7 @@ def main(_):
     actions = np.zeros(action_space.sample().shape) 
     data_dir = FLAGS.data_dir
     # print("env.observation_space.sample().shape = ", env.observation_space.sample()["front_camera"].shape)
-    if FLAGS.is_bottle_twist:
+    if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "tube_insertion":
         classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
@@ -108,8 +99,8 @@ def main(_):
                 image_key_weights=config.classifier_key_weights,
                 checkpoint_path=os.path.abspath("classifier_ckpt_pick_bottle_twist/"),
             )
-    
-    elif FLAGS.is_ball_pick:
+
+    elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place:
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
@@ -142,12 +133,12 @@ def main(_):
         )
 
         # clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
-        if FLAGS.is_bottle_twist:
+        if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "tube_insertion":
             print("clip_marks")
             is_pick = False
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
-            
-        elif FLAGS.is_ball_pick:
+
+        elif FLAGS.exp_name == "tennis_ball_pick":
             if FLAGS.is_pick_and_place:
                 print("clip_marks")
                 is_pick = False
@@ -259,10 +250,10 @@ def main(_):
     if not os.path.exists("./demo_data"):
         os.makedirs("./demo_data")
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    
-    if FLAGS.is_bottle_twist:
+
+    if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "tube_insertion":
         file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
-    elif FLAGS.is_ball_pick:
+    elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place:
             file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
         elif FLAGS.is_pick_task:

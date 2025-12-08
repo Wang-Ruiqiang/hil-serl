@@ -52,11 +52,11 @@ flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
 flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 10, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_n_trajs", 30, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 flags.DEFINE_boolean("is_pick", True, "read exist data or not.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -167,11 +167,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         print(dt)
                     if not intervention_label:
                         success_counter += 1
-                    print(reward)
+                    if FLAGS.save_video:
+                        env.unwrapped.save_video_recording(episode)
                     print(f"{success_counter}/{episode + 1}")
                     intervention_label = 0
-                    if FLAGS.save_video:
-                        env.unwrapped.save_video_recording()
                     input("reset env")
                     obs, _ = env.reset()
 
@@ -584,7 +583,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="bottle-twist-ablation-11-30",
+            project="bottle-twist-ablation-12-03",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

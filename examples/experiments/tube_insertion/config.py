@@ -14,7 +14,7 @@ from serl_launcher.wrappers.chunking import ChunkingWrapper
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from experiments.config import DefaultTrainingConfig
-from experiments.twist_bottle_cap.wrapper import RAMEnv
+from experiments.tube_insertion.wrapper import RAMEnv
 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
@@ -41,7 +41,7 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     IMAGE_CROP = {
-        "front_camera": lambda img: img[90:340, 150:400],
+        "front_camera": lambda img: img[90:350, 180:420],
         "wrist_camera": lambda img: img[0:480, 120:600],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
@@ -56,29 +56,24 @@ class EnvConfig(DefaultEnvConfig):
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
     
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
+    
     GRIPPER_CLOSE_JOINT = np.array([
-        3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
+        3.121650934219360352, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.709321022033691406, 3.160000324249267578, 2.954447031021118164, 3.816544294357299805
-    ], dtype=np.float32)
-            
-    GRIPPER_TWIST_JOINT = np.array([
-        2.659922599792480469, 4.605010509490966797, 3.118582963943481445, 3.745980978012084961,
-        3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
-        3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        5.062136650085449219, 2.856272220611572266, 2.954447031021118164, 3.816544294357299805
+        4.580466747283935547, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492,
     ], dtype=np.float32)
     
     GRIPPER_OPEN_JOINT = np.array([
-        2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,
-        3.406330614089965820, 3.529689788818359375, 3.438389015197753906, 3.969689750671386719,
+        3.209087848663330078, 4.422466754913330078, 3.210621833801269531, 3.252039194107055664,
+        3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
+        4.644893646240234375, 3.060291767120361328, 2.528000354766845703, 3.739845275878906250,
     ], dtype=np.float32)
+    
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
-    EXP_NAME = "twist_bottle_cap"
+    EXP_NAME = "tube_insertion"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -100,7 +95,7 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=False):
+    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
         if enable_tactile:
@@ -109,7 +104,7 @@ class TrainConfig(DefaultTrainingConfig):
             # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 0.5}
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.classifier_keys = ["front_camera","tactile_data"]
-            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
+            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
             self.classifier_keys = ["front_camera", "wrist_camera"]
@@ -142,26 +137,12 @@ class TrainConfig(DefaultTrainingConfig):
             #     image_keys=self.classifier_keys,
             #     checkpoint_path=os.path.abspath("../../classifier_ckpt/"),
             # )
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_pick/"),
-            )
-            
-            classifier_normal = load_classifier_func(
+            classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
-            )
-            classifier_bottle_twist = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist/"),
             )
             # input("debug")
             def reward_func(obs, is_pick=True):
@@ -173,13 +154,12 @@ class TrainConfig(DefaultTrainingConfig):
                 # else:
                 #     print("classifier = classifier_place")
                 #     classifier = classifier_normal
-                classifier = classifier_bottle_twist
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.4
+                success = prob > 0.9
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:

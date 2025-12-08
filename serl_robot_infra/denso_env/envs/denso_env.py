@@ -453,11 +453,12 @@ class DensoEnv(gym.Env):
         self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-22-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
+        self.video_count = 0
 
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_oritation = np.zeros(4, dtype=np.float32)
 
-        if self.exp_name == "tennis_ball_pick":
+        if self.exp_name == "tennis_ball_pick" or self.exp_name == "tube_insertion":
         # grip with index
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
@@ -530,8 +531,8 @@ class DensoEnv(gym.Env):
 
         if self.exp_name == "twist_bottle_cap":
             target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
-        elif self.exp_name == "tennis_ball_pick":
-            target_hand_pos = self._cal_hand_pos_ball_pick(grip_action, current_hand_pos)
+        elif self.exp_name == "tennis_ball_pick" or self.exp_name == "tube_insertion":
+            target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
 
         # print("target_hand_pos = ", target_hand_pos)
 
@@ -567,21 +568,21 @@ class DensoEnv(gym.Env):
         # input("debug for hand pos")
         return ob, int(reward), done, False, {"succeed": reward}
     
-    def _ball_pick_cal_init(self, current_hand_pos: np.ndarray):
-        self._binary_lower = np.minimum(self.gripper_open_joint, self.gripper_close_joint)
-        self._binary_upper = np.maximum(self.gripper_open_joint, self.gripper_close_joint)
+    def _close_open_pose_init(self, current_hand_pos: np.ndarray):
+        self._lower = np.minimum(self.gripper_open_joint, self.gripper_close_joint)
+        self._upper = np.maximum(self.gripper_open_joint, self.gripper_close_joint)
 
-        self._binary_cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
+        self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
 
         diff = self.gripper_close_joint - self.gripper_open_joint
         self.max_joint_delta = float(np.max(np.abs(diff))) / 10.0
 
-        self.is_ball_pick_cal_init = True
+        self.is_close_open_pose_init = True
         
 
-    def _cal_hand_pos_ball_pick(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
-        if not hasattr(self, "is_ball_pick_cal_init") or not self.is_ball_pick_cal_init:
-            self._ball_pick_cal_init(current_hand_pos)
+    def _cal_hand_close_open(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
+        if not hasattr(self, "is_close_open_pose_init") or not self.is_close_open_pose_init:
+            self._close_open_pose_init(current_hand_pos)
 
         if abs(grip_action) < 1e-6:
             return np.asarray(self._cmd_pos, dtype=np.float32)
@@ -607,7 +608,7 @@ class DensoEnv(gym.Env):
             direction = diff / dist
             new_pos = pos + direction * max_step
 
-        new_pos = np.clip(new_pos, self._binary_lower, self._binary_upper)
+        new_pos = np.clip(new_pos, self._lower, self._upper)
         self._cmd_pos = new_pos.copy()
         return new_pos
     
@@ -792,8 +793,8 @@ class DensoEnv(gym.Env):
                 else:
                     rgb = frame
                 rgb = rgb.astype(np.uint8)
-                # cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
-                cropped_rgb = rgb #当前不需要裁剪
+                cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
+                # cropped_rgb = rgb #当前不需要裁剪
                 resized = cv2.resize(
                     cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
                 )
@@ -947,7 +948,7 @@ class DensoEnv(gym.Env):
         self.terminate = False
         return obs, {"succeed": False}
 
-    def save_video_recording(self):
+    def save_video_recording(self, count):
         try:
             if len(self.recording_frames):
                 if not os.path.exists('./videos'):
@@ -957,10 +958,14 @@ class DensoEnv(gym.Env):
                 
                 for camera_key in self.recording_frames[0].keys():
                     if self.url == "http://127.0.0.1:5000/":
-                        video_path = f'./videos/left_{camera_key}_{timestamp}.mp4'
+                        video_path = f'./videos/{count}/left_{camera_key}_{timestamp}.mp4'
                     else:
-                        video_path = f'./videos/right_{camera_key}_{timestamp}.mp4'
-                    
+                        video_path = f'./videos/{count}/right_{camera_key}_{timestamp}.mp4'
+                        
+                    video_dir = os.path.dirname(video_path)
+                    if not os.path.exists(video_dir):
+                        os.makedirs(video_dir, exist_ok=True)
+
                     # Get the shape of the first frame for this camera
                     first_frame = self.recording_frames[0][camera_key]
                     height, width = first_frame.shape[:2]

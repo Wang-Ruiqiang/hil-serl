@@ -108,8 +108,8 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
         np.array(hand_state, dtype=np.float32).flatten(),
     ])
 
-    resized_image = cv2.resize(color_image, (128,128))
-    resized_image_wrist = cv2.resize(color_image_wrist, (128,128))
+    resized_image = cv2.resize(color_image, (64, 64))
+    resized_image_wrist = cv2.resize(color_image_wrist, (64, 64))
     # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
     wrist_camera_image = resized_image_wrist[..., ::-1]

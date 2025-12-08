@@ -19,8 +19,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 
 # def _stdin_key_pressed(target_char="1"):
@@ -62,7 +63,7 @@ class KeyReader(threading.Thread):
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=False, save_video=False, classifier=True)
+    env = config.get_environment(fake_env=False, save_video=False, classifier=True, enable_tactile=FLAGS.enable_tactile)
     
     fd = sys.stdin.fileno()
     old_term_settings = termios.tcgetattr(fd)
@@ -85,17 +86,18 @@ def main(_):
             next_obs, rew, done, truncated, info = env.step(actions)
             # print("reward = ", rew)
             print(f"obs[state] =  {obs['state']}")
-            returns += rew
-            if "intervene_action" in info:
-                actions = info["intervene_action"]
-                
+            
             key = key_reader.get_key_nowait()
             while key is not None:
                 if key == '1':
                     done = True
                     info = dict(info)
+                    rew = 1.0
                     info['succeed'] = True
                 key = key_reader.get_key_nowait()
+            returns += rew
+            if "intervene_action" in info:
+                actions = info["intervene_action"]
                 
             # force_end = _stdin_key_pressed("1")
             # if force_end:

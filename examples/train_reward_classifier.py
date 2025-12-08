@@ -12,13 +12,17 @@ from absl import app, flags
 import gymnasium as gym
 from gymnasium.spaces import flatten_space, flatten
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+sys.path.insert(0, project_root)
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+sys.path.insert(0, project_root)
+
 from serl_launcher.data.data_store import ReplayBuffer
 from serl_launcher.utils.train_utils import concat_batches
 from serl_launcher.vision.data_augmentations import batched_random_crop
 from serl_launcher.networks.reward_classifier import create_classifier
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
-sys.path.insert(0, project_root)
 
 from experiments.mappings import NEW_MAPPING
 
@@ -31,7 +35,7 @@ flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_ball_pick", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def main(_):

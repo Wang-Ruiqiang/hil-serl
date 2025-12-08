@@ -17,6 +17,9 @@ from scipy.spatial.transform import Rotation as R
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
 sys.path.insert(0, project_root)
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+sys.path.insert(0, project_root)
+
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
@@ -29,7 +32,7 @@ flags.DEFINE_integer("is_bottle_twist", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_ball_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def save_batch_to_pickle(batch_data, file_path):
