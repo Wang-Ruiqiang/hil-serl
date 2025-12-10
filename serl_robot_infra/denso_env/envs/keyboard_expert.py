@@ -13,11 +13,20 @@ class KeyboardExpert:
         - Z/X: Gripper open/close (if 7-DoF control is used)
     """
 
-    def __init__(self):
+    def __init__(self, exp_name: str = "tennins_ball_pick"):
         # 创建共享字典用于跨进程通信
         self.manager = multiprocessing.Manager()
         self.latest_data = self.manager.dict()
         self.latest_data["action"] = [0.0] * 7
+        if exp_name == "tennis_ball_pick":
+            self.LARGE_STEP = 1
+            self.SMALL_STEP = 0.2
+        elif exp_name == "twist_bottle_cap":
+            self.LARGE_STEP = 0.5
+            self.SMALL_STEP = 0.2
+        elif exp_name == "tube_insertion":
+            self.LARGE_STEP = 0.2
+            self.SMALL_STEP = 0.1
 
         # self.process = multiprocessing.Process(target=self._read_keyboard)
         self._stop_event = multiprocessing.Event()
@@ -53,41 +62,41 @@ class KeyboardExpert:
             # 控制 xyz 方向移动
             if 'w' in current_keys:
                 # print("z+")
-                action[2] += 0.5
+                action[2] += self.LARGE_STEP
             if 's' in current_keys:
                 # print("z-")
-                action[2] -= 0.5
+                action[2] -= self.LARGE_STEP
             if 'a' in current_keys:
                 # print("x-")
-                action[0] -= 0.5
+                action[0] -= self.LARGE_STEP
             if 'd' in current_keys:
                 # print("x+")
-                action[0] += 0.5
+                action[0] += self.LARGE_STEP
             if 'q' in current_keys:
                 # print("y+")
-                action[1] += 0.5
+                action[1] += self.LARGE_STEP
             if 'e' in current_keys:
                 # print("y-")
-                action[1] -= 0.5
+                action[1] -= self.LARGE_STEP
 
             if 't' in current_keys:
                 # print("z+")
-                action[2] += 0.2
+                action[2] += self.SMALL_STEP
             if 'g' in current_keys:
                 # print("z-")
-                action[2] -= 0.2
+                action[2] -= self.SMALL_STEP
             if 'f' in current_keys:
                 # print("x-")
-                action[0] -= 0.2
+                action[0] -= self.SMALL_STEP
             if 'h' in current_keys:
                 # print("x+")
-                action[0] += 0.2
+                action[0] += self.SMALL_STEP
             if 'r' in current_keys:
                 # print("y+")
-                action[1] += 0.2
+                action[1] += self.SMALL_STEP
             if 'y' in current_keys:
                 # print("y-")
-                action[1] -= 0.2
+                action[1] -= self.SMALL_STEP
 
             # rotate toward z-axis
             # if 'k' in current_keys:

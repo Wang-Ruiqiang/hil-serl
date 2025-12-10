@@ -16,6 +16,13 @@ palm_lower2denso_end_tf = np.array([
     [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
 ])
 
+IMAGE_CROP = {
+    "front_camera": lambda img: img[210:360, 210:360],
+    "wrist_camera": lambda img: img[0:480, 120:600],
+}
+
+resize_dim = (128, 128)
+
 
 class ObsHistoryBuffer:
     # def __init__(self, obs_horizon=3, image_keys=("front_camera", "side_camera"), proprio_key="state"):
@@ -76,9 +83,9 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
     middle_heat_map_image = cv2.imread(middle_heat_map_path) if os.path.exists(middle_heat_map_path) else None
 
-    index_heat_map_image = cv2.resize(index_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
-    thumb_heat_map_image = cv2.resize(thumb_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
-    middle_heat_map_image = cv2.resize(middle_heat_map_image, (128, 128), interpolation=cv2.INTER_LINEAR)
+    index_heat_map_image = cv2.resize(index_heat_map_image, resize_dim, interpolation=cv2.INTER_LINEAR)
+    thumb_heat_map_image = cv2.resize(thumb_heat_map_image, resize_dim, interpolation=cv2.INTER_LINEAR)
+    middle_heat_map_image = cv2.resize(middle_heat_map_image, resize_dim, interpolation=cv2.INTER_LINEAR)
     heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
@@ -107,16 +114,18 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
         np.array(tcp_ori, dtype=np.float32).flatten(),
         np.array(hand_state, dtype=np.float32).flatten(),
     ])
+    cropped_front = IMAGE_CROP["front_camera"](color_image) if "front_camera" in IMAGE_CROP else color_image
+    cropped_wrist = IMAGE_CROP["wrist_camera"](color_image_wrist) if "wrist_camera" in IMAGE_CROP else color_image_wrist
 
-    resized_image = cv2.resize(color_image, (64, 64))
-    resized_image_wrist = cv2.resize(color_image_wrist, (64, 64))
+    resized_image = cv2.resize(cropped_front, resize_dim)
+    resized_image_wrist = cv2.resize(cropped_wrist, resize_dim)
     # resized_image2 = cv2.resize(color_image2, (320,240))
     front_camera_image = resized_image[..., ::-1]
     wrist_camera_image = resized_image_wrist[..., ::-1]
     # side_camera_image = resized_image2[..., ::-1]
     if not enable_tactile:
         obs = {
-            "front_camera": front_camera_image,
+            # "front_camera": front_camera_image,
             "wrist_camera": wrist_camera_image,
             "state": state_flattened
         }
@@ -132,7 +141,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     # input("enter")
     return obs, int(is_record_success)
 
-def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=False):
+def read_data(robot_urdf_path, enable_tactile=False):
     data = []
     clip_ranges = []
     global_idx = 0
@@ -145,10 +154,7 @@ def read_data(robot_urdf_path, is_evaluate_classifier=False, enable_tactile=Fals
     action_space = gym.spaces.Box(low, high, dtype=np.float32)
     
     actions = np.zeros(action_space.sample().shape)
-    if is_evaluate_classifier:
-        data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"
-    else:
-        data_dir = "/home/qiangqiang/workspaces/data/2025-4-3/demo_data"
+    data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):

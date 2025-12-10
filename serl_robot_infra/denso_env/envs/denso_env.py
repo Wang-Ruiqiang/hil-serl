@@ -450,7 +450,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-11-22-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-10-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -458,12 +458,12 @@ class DensoEnv(gym.Env):
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_oritation = np.zeros(4, dtype=np.float32)
 
-        if self.exp_name == "tennis_ball_pick" or self.exp_name == "tube_insertion":
+        if self.exp_name == "tennis_ball_pick":
         # grip with index
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
-        elif self.exp_name == "twist_bottle_cap":
+        elif self.exp_name == "twist_bottle_cap" or self.exp_name == "tube_insertion":
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_twist_joint = config.GRIPPER_TWIST_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
@@ -500,18 +500,24 @@ class DensoEnv(gym.Env):
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
-        cond_x = (0.5 <= self.nextpos[0] <= 0.8)
-        cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
-        cond_z = (0.14 <= self.nextpos[2] <= 0.24)
         
-        if cond_x and cond_y and cond_z:
-            # 限制三个方向的 action 范围
-            xyz_delta = np.clip(action[:3], -0.2, 0.2)
-        else:
-            # 原始范围（-1,1）
-            xyz_delta = action[:3]
+        xyz_delta = action[:3]
+        if self.exp_name == "twist_bottle_cap":
+            cond_x = (0.5 <= self.nextpos[0] <= 0.8)
+            cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
+            cond_z = (0.14 <= self.nextpos[2] <= 0.24)
+            if cond_x and cond_y and cond_z:
+                xyz_delta = np.clip(action[:3], -0.2, 0.2)
+        elif self.exp_name == "tube_insertion":
+            cond_z = (self.nextpos[2] <= 0.13)
+            if cond_z:
+                xyz_delta = np.clip(action[:3], -0.2, 0.2)
 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
+        if self.nextpos[2] < 0.05:
+            self.nextpos[2] = 0.05
+        if self.nextpos[1] < -0.145:
+            self.nextpos[1] = -0.145
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -529,9 +535,9 @@ class DensoEnv(gym.Env):
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
 
-        if self.exp_name == "twist_bottle_cap":
+        if self.exp_name == "twist_bottle_cap" or self.exp_name == "tube_insertion":
             target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
-        elif self.exp_name == "tennis_ball_pick" or self.exp_name == "tube_insertion":
+        elif self.exp_name == "tennis_ball_pick":
             target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
 
         # print("target_hand_pos = ", target_hand_pos)
@@ -617,6 +623,7 @@ class DensoEnv(gym.Env):
         # 仅 3 个点，形成闭环（0→1→2→0）
         self._waypoints = np.stack([self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint], axis=0)  # (3, D)
         self._num_wp = 3
+        max_step = 10
 
         # 上下界
         self._lower = np.minimum.reduce(self._waypoints)
@@ -631,15 +638,15 @@ class DensoEnv(gym.Env):
         seg_vecs = self._waypoints[(np.arange(self._num_wp) + 1) % self._num_wp] - self._waypoints
         seg_lens = np.linalg.norm(seg_vecs, axis=1)
         mean_len = float(np.mean(seg_lens))
-        self._per_step_path_len = max(1e-6, mean_len / 10.0)
-        self._max_joint_delta = float(np.max(np.abs(seg_vecs))) / 10.0
+        self._per_step_path_len = max(1e-6, mean_len / max_step)
+        self._max_joint_delta = float(np.max(np.abs(seg_vecs))) / max_step
         self._snap_eps = 1e-6
         self.is_segmented_init = True
 
         self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
         self._stop_on_waypoint = False
-        
-        
+    
+    
     def _project_to_current_segment(self, p: np.ndarray, start: np.ndarray, seg: np.ndarray) -> tuple:
         # p = np.asarray(p, dtype=np.float32)
         # end_idx = (start_idx + seg_dir) % self._num_wp
@@ -658,21 +665,21 @@ class DensoEnv(gym.Env):
     def calculate_hand_pos_segmented(self, grip_action: float, current_hand_pos: np.ndarray) -> np.ndarray:
         if not hasattr(self, "is_segmented_init") or not self.is_segmented_init:
             self._segmented_init(current_hand_pos)
-        a = float(np.clip(grip_action, -1.0, 1.0))
-        if abs(a) < 1e-6:
-            # 不推进，直接维持上次指令；也可改为返回当前反馈
+        action_scalar = float(np.clip(grip_action, -1.0, 1.0))
+        if abs(action_scalar) < 1e-6:
+            # 不推进，直接维持上次指令
             return np.asarray(self._cmd_pos, dtype=np.float32)
 
-        # 动作决定方向
-        self._seg_dir = (+1 if a > 0 else -1)
+        # 决定方向
+        self._seg_dir = (+1 if action_scalar > 0 else -1)
 
         # 用“指令位置”推进（不受真实到位与否的影响）
         pos = np.asarray(self._cmd_pos, dtype=np.float32)
-        remaining_path_len = abs(a) * self._per_step_path_len
+        remaining_path_len = abs(action_scalar) * self._per_step_path_len
 
         while remaining_path_len > 0:
             start_idx = self._seg_start_idx
-            end_idx   = (start_idx + self._seg_dir) % self._num_wp
+            end_idx   = (start_idx + 1) % self._num_wp
             start_wp = self._waypoints[start_idx]
             end_wp   = self._waypoints[end_idx]
             seg_vec  = end_wp - start_wp
@@ -685,7 +692,6 @@ class DensoEnv(gym.Env):
                 else:
                     continue
 
-            # 注意：这里把“投影”的参考改成 pos（指令位置），而不是 current_hand_pos（真实反馈）
             segment_progress, proj = self._project_to_current_segment(pos, start_wp, seg_vec)
 
             # 吸附端点，避免在端点附近数值抖动
@@ -740,7 +746,7 @@ class DensoEnv(gym.Env):
             # （可选）如果仍需要单步限幅，就把上面这段放到 pos 更新之后再裁剪
             delta = pos - self._cmd_pos
             norm = float(np.linalg.norm(delta))
-            max_move = max(1e-9, abs(a) * self._max_joint_delta)
+            max_move = max(1e-9, abs(action_scalar) * self._max_joint_delta)
             if norm > max_move:
                 pos = self._cmd_pos + delta * (max_move / norm)
                 break
@@ -849,15 +855,9 @@ class DensoEnv(gym.Env):
                     rgb = frame
                     depth = None
                 cropped_rgb = rgb #当前不需要裁剪
-                if key in self.observation_space["images"]:
-                    resized = cv2.resize(
-                        cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
-                    )
-                else:
-                    resized = cv2.resize(
-                        cropped_rgb, (640, 480)
-                    )
-                    
+                resized = cv2.resize(
+                    cropped_rgb, (640, 480)
+                )
                 images[key] = resized[..., ::-1]
                 depth_images[key] = depth
                 display_images[key] = resized
@@ -870,7 +870,7 @@ class DensoEnv(gym.Env):
                 cap.close()
                 self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_rgb_and_dpth_im()
-
+            
         return images, depth_images
 
 

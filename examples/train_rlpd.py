@@ -284,14 +284,17 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             actions = np.asarray(jax.device_get(actions_sample)).copy()
             # actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
-            low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-            high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+            if FLAGS.exp_name == "twist_bottle_cap":
+                low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+                high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+            elif FLAGS.exp_name == "tube_insertion":
+                low  = np.array([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -1], dtype=np.float32)
+                high = np.array([0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 1.0], dtype=np.float32)
             # actions[..., 6] = np.clip(actions[..., 6], low, high)
             actions = np.clip(actions, low, high)
             
         # Step environment
         with timer.context("step_env"):
-            # TODO: judge if the network need to be intervened
             print("actions before intervene= ", actions)
             # if actions[6] < 0.8:
             #     actions[6] = 1.0
@@ -315,14 +318,19 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             #     is_pick = info["is_pick"]
             # else:
             #     is_pick = True
-            cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
-            cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
-            cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
-            
-            if cond_x and cond_y and cond_z:
-                # 限制三个方向的 action 范围
-                actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
-                
+            if FLAGS.exp_name == "twist_bottle_cap":
+                cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
+                cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
+                cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
+                if cond_x and cond_y and cond_z:
+                    # 限制三个方向的 action 范围
+                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+                    
+            elif FLAGS.exp_name == "tube_insertion":
+                cond_z = (obs["state"][0][2] <= 0.13)
+                if cond_z:
+                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+
             print("actions = ", actions)
                 
             running_return += reward
@@ -583,7 +591,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="bottle-twist-ablation-12-03",
+            project="tube-insertion-12-09",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

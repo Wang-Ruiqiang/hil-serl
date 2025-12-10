@@ -6,6 +6,10 @@ import cv2
 import numpy as np
 from jax import numpy as jnp
 import gymnasium as gym
+
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+sys.path.insert(0, project_root)
 from serl_launcher.networks.reward_classifier import load_classifier_func
 from examples.utils import read_utils
 
@@ -17,12 +21,12 @@ from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 150, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 
-classifier_keys = ["front_camera", "tactile_data"]
-classifier_key_weights = {"front_camera": 1.0, "tactile_data": 2.0}
+classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
+classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
 # classifier_keys = ["front_camera", "side_camera"]
 robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
 
@@ -35,7 +39,7 @@ robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/
 
 
 def main(_):
-    data, _ = read_utils.read_data(robot_urdf_path, True, enable_tactile=True, task_type="twist_bottle_cap")
+    data, _ = read_utils.read_data(robot_urdf_path, enable_tactile=True)
     success_count = 0
     record_success_count = 0
     success_as_fail = 0
@@ -43,7 +47,7 @@ def main(_):
 
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=True, save_video=False, classifier=False)
+    env = config.get_environment(fake_env=True, save_video=False, classifier=False, enable_tactile=True)
     terminate = False
     
     classifier = load_classifier_func(
@@ -51,7 +55,7 @@ def main(_):
         sample=env.observation_space.sample(),
         image_keys=classifier_keys,
         image_key_weights=classifier_key_weights,
-        checkpoint_path=os.path.abspath("classifier_ckpt_bottle_twist/"),
+        checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion/"),
     )
 
     def reward_func(obs):

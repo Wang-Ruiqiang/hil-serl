@@ -33,13 +33,15 @@ class RAMEnv(DensoEnv):
 
         # init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
         # init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
-        init_pos = np.array([0.5580441126924457, -2.3018392461026157e-05, 0.25153528])
+        init_pos = np.array([0.7, -0.1358, 0.109])
         # init_pos = np.array([0.5580441126924457, -2.3018392461026157e-05, 0.45153528])
         init_ori = np.array([0, 1, 0, 0])
         # init_ori = np.array([0, 0.7071, -0.7071, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
+        print("init_arm_action = ", init_arm_action)
         self.ros_interface.publish_arm_action(init_arm_action)
-        self._close_open_pose_init(self.curr_leap_hand_pos)
+        # self._close_open_pose_init(self.curr_leap_hand_pos)
+        self._segmented_init(self.curr_leap_hand_pos)
 
         time.sleep(5)
 

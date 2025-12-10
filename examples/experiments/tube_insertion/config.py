@@ -41,7 +41,7 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     IMAGE_CROP = {
-        "front_camera": lambda img: img[90:350, 180:420],
+        "front_camera": lambda img: img[210:360, 210:360],
         "wrist_camera": lambda img: img[0:480, 120:600],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
@@ -69,6 +69,13 @@ class EnvConfig(DefaultEnvConfig):
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
         4.644893646240234375, 3.060291767120361328, 2.528000354766845703, 3.739845275878906250,
+    ], dtype=np.float32)
+    
+    GRIPPER_TWIST_JOINT = np.array([
+        2.659922599792480469, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
+        3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+        3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        4.082136650085449219, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492
     ], dtype=np.float32)
     
     ENABLE_TACTILE = True
@@ -101,10 +108,13 @@ class TrainConfig(DefaultTrainingConfig):
         if enable_tactile:
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             # self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
-            # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 0.5}
+            # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
+            # self.classifier_keys = ["front_camera","tactile_data"]
+            # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.classifier_keys = ["front_camera","tactile_data"]
-            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
+            self.classifier_keys = ["wrist_camera","tactile_data"]
+            self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
             self.classifier_keys = ["front_camera", "wrist_camera"]
@@ -123,26 +133,12 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
-            # classifier_pick = load_classifier_func(
-            #     key=jax.random.PRNGKey(0),
-            #     sample=env.observation_space.sample(),
-            #     image_keys=self.classifier_keys,
-            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
-            # )
-
-            # classifier_place = load_classifier_func(
-            #     key=jax.random.PRNGKey(0),
-            #     sample=env.observation_space.sample(),
-            #     image_keys=self.classifier_keys,
-            #     checkpoint_path=os.path.abspath("../../classifier_ckpt/"),
-            # )
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist/"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
             )
             # input("debug")
             def reward_func(obs, is_pick=True):

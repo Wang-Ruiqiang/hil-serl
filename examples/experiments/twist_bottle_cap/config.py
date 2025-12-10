@@ -128,34 +128,6 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
-            # classifier_pick = load_classifier_func(
-            #     key=jax.random.PRNGKey(0),
-            #     sample=env.observation_space.sample(),
-            #     image_keys=self.classifier_keys,
-            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
-            # )
-
-            # classifier_place = load_classifier_func(
-            #     key=jax.random.PRNGKey(0),
-            #     sample=env.observation_space.sample(),
-            #     image_keys=self.classifier_keys,
-            #     checkpoint_path=os.path.abspath("../../classifier_ckpt/"),
-            # )
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_pick/"),
-            )
-            
-            classifier_normal = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
-            )
             classifier_bottle_twist = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),

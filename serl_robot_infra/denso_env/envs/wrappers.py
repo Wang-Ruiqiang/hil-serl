@@ -195,9 +195,9 @@ class KeyboardIntervention(gym.ActionWrapper):
     def __init__(self, env, action_indices=None):
         super().__init__(env)
 
-        self.expert = KeyboardExpert()
-        self.action_indices = action_indices
         self.exp_name = env.config.EXP_NAME
+        self.expert = KeyboardExpert(self.exp_name)
+        self.action_indices = action_indices
 
     def action(self, action: np.ndarray) -> np.ndarray:
         """

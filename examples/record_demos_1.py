@@ -91,7 +91,7 @@ def main(_):
     actions = np.zeros(action_space.sample().shape) 
     data_dir = FLAGS.data_dir
     # print("env.observation_space.sample().shape = ", env.observation_space.sample()["front_camera"].shape)
-    if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "tube_insertion":
+    if FLAGS.exp_name == "twist_bottle_cap":
         classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
@@ -99,7 +99,14 @@ def main(_):
                 image_key_weights=config.classifier_key_weights,
                 checkpoint_path=os.path.abspath("classifier_ckpt_pick_bottle_twist/"),
             )
-
+    elif FLAGS.exp_name == "tube_insertion":
+        classifier = load_classifier_func(
+                key=jax.random.PRNGKey(0),
+                sample=env.observation_space.sample(),
+                image_keys=config.classifier_keys,
+                image_key_weights=config.classifier_key_weights,
+                checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion/"),
+            )
     elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place:
             classifier = load_classifier_func(

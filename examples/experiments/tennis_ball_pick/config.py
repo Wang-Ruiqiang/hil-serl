@@ -91,9 +91,10 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False):
+    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True):
         env_config = EnvConfig()
-
+        env_config.ENABLE_TACTILE = enable_tactile
+        
         env = RAMEnv(
             fake_env=fake_env,
             save_video=save_video,

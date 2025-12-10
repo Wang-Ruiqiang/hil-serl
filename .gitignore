@@ -8,6 +8,7 @@ examples/demo_data copy/*
 examples/test_data/*
 examples/experiments/tennis_ball_pick/2025*
 examples/experiments/twist_bottle_cap/2025*
+examples/experiments/tube_insertion/2025*
 examples/experiments/twist_bottle_cap/videos/*
 examples/experiments/tennis_ball_pick/__pycache__/*
 examples/experiments/twist_bottle_cap/__pycache__/*
