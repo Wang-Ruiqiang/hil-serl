@@ -41,7 +41,7 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     IMAGE_CROP = {
-        "front_camera": lambda img: img[210:360, 210:360],
+        "front_camera": lambda img: img[242:370, 232:360],
         "wrist_camera": lambda img: img[0:480, 120:600],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
@@ -72,10 +72,10 @@ class EnvConfig(DefaultEnvConfig):
     ], dtype=np.float32)
     
     GRIPPER_TWIST_JOINT = np.array([
-        2.659922599792480469, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
+        2.359922599792480469, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.082136650085449219, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492
+        3.982136650085449219, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492
     ], dtype=np.float32)
     
     ENABLE_TACTILE = True
@@ -106,15 +106,16 @@ class TrainConfig(DefaultTrainingConfig):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
         if enable_tactile:
-            # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            # self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
-            # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
+            self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
+            self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             # self.classifier_keys = ["front_camera","tactile_data"]
             # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
-            self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.classifier_keys = ["wrist_camera","tactile_data"]
-            self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
+            # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            # self.classifier_keys = ["wrist_camera", "tactile_data"]
+            # self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
             self.classifier_keys = ["front_camera", "wrist_camera"]

@@ -29,7 +29,7 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
+flags.DEFINE_integer("num_epochs", 150, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")

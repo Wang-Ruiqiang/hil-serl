@@ -52,20 +52,16 @@ def save_batch_to_pickle(batch_data, file_path):
         pkl.dump(batch_data, f)
         print(f"Saved batch of {len(batch_data)} transitions to {file_path}")
 
-def comupute_reward(obs, classifier):
+def compute_reward(obs, classifier):
 
     sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-    classifier_output = sigmoid(classifier(obs))
-
-    # 使用索引提取标量值
-    classifier_score = classifier_output[0]
     prob = sigmoid(classifier(obs)).item()
-    success = prob > 0.95
+    success = prob > 0.8
     reward = 1 if success else 0
-    state = obs["state"]
-    ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-    if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-        reward -= 0.05
+    # state = obs["state"]
+    # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
+    # if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
+    #     reward -= 0.05
     return reward
 
 def main(_):
@@ -91,6 +87,8 @@ def main(_):
     actions = np.zeros(action_space.sample().shape) 
     data_dir = FLAGS.data_dir
     # print("env.observation_space.sample().shape = ", env.observation_space.sample()["front_camera"].shape)
+    
+    print("config.classifier_keys = ", config.classifier_keys)
     if FLAGS.exp_name == "twist_bottle_cap":
         classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
@@ -177,7 +175,6 @@ def main(_):
             for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
-                next_next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 2]) if i < end_frame - 1 else next_frame_path
 
                 obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
                 if i == end_frame:
@@ -202,9 +199,9 @@ def main(_):
                 # print("stacked_next_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 # print("obs keys:", obs.keys())
                 # if is_pick:
-                #     reward = comupute_reward(obs, classifier_pick)
+                #     reward = compute_reward(obs, classifier_pick)
                 # else:
-                reward = comupute_reward(obs, classifier)
+                reward = compute_reward(obs, classifier)
 
 
                 done = reward or terminate
@@ -244,7 +241,7 @@ def main(_):
                         transitions.append(copy.deepcopy(transition))
                     pbar.update(1)
                     trajectory = []
-                    returns = 0
+                    # returns = 0
                     terminate = False
                     # if len(transitions) >= batch_size:
                     #     save_batch_to_pickle(transitions, file_name)

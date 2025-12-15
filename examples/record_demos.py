@@ -138,6 +138,9 @@ def main(_):
                     pbar.update(1)
                 trajectory = []
                 returns = 0
+                if FLAGS.exp_name == "tube_insertion":
+                    env.unwrapped.open_hand(steps=20, step_time=0.05)
+                    time.sleep(1.5)
                 input("reset env")
                 obs, info = env.reset()
     finally:

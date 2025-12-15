@@ -51,7 +51,6 @@ class EncodingWrapper(nn.Module):
 
             if self.image_weights is not None:
                 image = image * self.image_weights.get(image_key, 1.0)
-
             encoded.append(image)
 
         encoded = jnp.concatenate(encoded, axis=-1)

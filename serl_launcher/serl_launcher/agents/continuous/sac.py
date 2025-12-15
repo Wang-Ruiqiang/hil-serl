@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Iterable, Optional, Tuple, FrozenSet
+from typing import Dict, Iterable, Optional, Tuple, FrozenSet
 
 import chex
 import distrax
@@ -498,6 +498,7 @@ class SACAgent(flax.struct.PyTreeNode):
         encoder_type: str = "resnet-pretrained",
         use_proprio: bool = False,
         state_weights: Optional[Iterable[float]] = None,
+        image_weights: Dict[str, float] | None = None,
         critic_network_kwargs: dict = {
             "hidden_dims": [256, 256],
         },
@@ -562,6 +563,7 @@ class SACAgent(flax.struct.PyTreeNode):
             use_proprio=use_proprio,
             enable_stacking=True,
             image_keys=image_keys,
+            image_weights=image_weights,
             state_weights=state_weights,
         )
 

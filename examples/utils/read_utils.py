@@ -17,7 +17,7 @@ palm_lower2denso_end_tf = np.array([
 ])
 
 IMAGE_CROP = {
-    "front_camera": lambda img: img[210:360, 210:360],
+    "front_camera": lambda img: img[242:370, 232:360],
     "wrist_camera": lambda img: img[0:480, 120:600],
 }
 
@@ -125,7 +125,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     # side_camera_image = resized_image2[..., ::-1]
     if not enable_tactile:
         obs = {
-            # "front_camera": front_camera_image,
+            "front_camera": front_camera_image,
             "wrist_camera": wrist_camera_image,
             "state": state_flattened
         }

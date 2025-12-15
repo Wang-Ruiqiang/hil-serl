@@ -17,6 +17,11 @@ class RAMEnv(DensoEnv):
         self.exp_name = self.config.EXP_NAME
 
 
+    def open_hand(self, steps=20, step_time=0.05):
+        self._send_leap_hand_command(self.gripper_open_joint, steps=steps, step_time=step_time)
+        time.sleep(steps * step_time + 0.5)
+        self.get_im()
+
     def reset(self, joint_reset=False, **kwargs):
         print("RAMEnv reset")
         self.last_gripper_act = time.time()
@@ -25,33 +30,20 @@ class RAMEnv(DensoEnv):
             
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-        # print("self.curr_leap_hand_pos reset before= ", self.curr_leap_hand_pos)
         self._send_leap_hand_command(self.gripper_open_joint, steps=20, step_time=0.05)
         time.sleep(1)
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
-        # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
-
-        # init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
-        # init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
-        init_pos = np.array([0.7, -0.1358, 0.109])
-        # init_pos = np.array([0.5580441126924457, -2.3018392461026157e-05, 0.45153528])
+        init_pos = np.array([0.7, -0.1558, 0.109])
         init_ori = np.array([0, 1, 0, 0])
-        # init_ori = np.array([0, 0.7071, -0.7071, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
-        print("init_arm_action = ", init_arm_action)
         self.ros_interface.publish_arm_action(init_arm_action)
-        # self._close_open_pose_init(self.curr_leap_hand_pos)
         self._segmented_init(self.curr_leap_hand_pos)
 
         time.sleep(5)
 
         self.curr_path_length = 0
-        # self.ros_interface.reset_cur_pose()
         self._update_cur_position(init_arm_action)
         self.gripper_open_joint_np = self.curr_leap_hand_pos.copy()
-        # print("self.cur_position = ", self.cur_position)
-        # self.save_training_frame()
         obs = self._get_obs()
-        # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         self.terminate = False
         return obs, {}

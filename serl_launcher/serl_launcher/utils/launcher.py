@@ -3,6 +3,7 @@
 import jax
 from jax import nn
 import jax.numpy as jnp
+from typing import Dict
 
 from agentlace.trainer import TrainerConfig
 
@@ -57,6 +58,7 @@ def make_sac_pixel_agent(
     target_entropy=None,
     discount=0.97,
     state_weights=None,
+    image_weights: Dict[str, float] | None = None,
 ):
     agent = SACAgent.create_pixels(
         jax.random.PRNGKey(seed),
@@ -65,6 +67,7 @@ def make_sac_pixel_agent(
         encoder_type=encoder_type,
         use_proprio=True,
         state_weights=state_weights,
+        image_weights=image_weights,
         image_keys=image_keys,
         policy_kwargs={
             "tanh_squash_distribution": True,

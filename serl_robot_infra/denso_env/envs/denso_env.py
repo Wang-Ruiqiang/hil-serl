@@ -244,11 +244,6 @@ class ROSNodeInterface(Node):
         else:
             self.get_logger().info("Failed to get current position, using zeros")
             return [0.0] * 16
-        
-
-    def reset_cur_pose(self):
-        self.cur_position = np.array([0.55513753, 0.04267503, 0.18153528])
-        self.cur_oritation = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
 
 ##############################################################################
 
@@ -450,7 +445,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-10-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-15-3"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -623,7 +618,7 @@ class DensoEnv(gym.Env):
         # 仅 3 个点，形成闭环（0→1→2→0）
         self._waypoints = np.stack([self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint], axis=0)  # (3, D)
         self._num_wp = 3
-        max_step = 10
+        max_step = 15
 
         # 上下界
         self._lower = np.minimum.reduce(self._waypoints)
