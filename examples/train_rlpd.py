@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 190000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 100, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
@@ -107,100 +107,110 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     """
     This is the actor loop, which runs when "--actor" is set to True.
     """
-    if FLAGS.eval_checkpoint_step:
-        print("in eval mode")
-        success_counter = 0
-        intervention_label = 0
-        time_list = []
-        # print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
-        # ckpt = checkpoints.restore_checkpoint(
-        #     os.path.abspath(FLAGS.checkpoint_path),
-        #     agent.state,
-        #     step=FLAGS.eval_checkpoint_step,
-        # )
-        # agent = agent.replace(state=ckpt)
-        
-        obs, _ = env.reset()
-        key_reader = KeyReader()
-        key_reader.start()
-        ckpt_step = FLAGS.eval_checkpoint_step
-        done_by_manual = False
-        for episode in range(FLAGS.eval_n_trajs):
-            done = False
-            start_time = time.time()
-
-            print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
-            ckpt = checkpoints.restore_checkpoint(
-                os.path.abspath(FLAGS.checkpoint_path),
-                agent.state,
-                step=ckpt_step,
-            )
-            agent = agent.replace(state=ckpt)
-            
-            while not done:
-
-                sampling_rng, key = jax.random.split(sampling_rng)
-
-                # print_green(f"obs[state] =  {obs['state']}")
-                actions = agent.sample_actions(
-                    observations=jax.device_put(obs),
-                    argmax=False,
-                    seed=key
-                )
-                actions = np.asarray(jax.device_get(actions))
-                
-                if FLAGS.exp_name == "twist_bottle_cap":
-                    low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-                    high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
-                elif FLAGS.exp_name == "tube_insertion":
-                    low  = np.array([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -1], dtype=np.float32)
-                    high = np.array([0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 1.0], dtype=np.float32)
-                # actions[..., 6] = np.clip(actions[..., 6], low, high)
-                actions = np.clip(actions, low, high)
-                
-                print("actions = ", actions)
-
-                next_obs, reward, done, truncated, info = env.step(actions)
-                obs = next_obs
-                key = key_reader.get_key_nowait()
-                while key is not None:
-                    if key == '1':
-                        done = True
-                        info = dict(info)
-                        done_by_manual = True
-                        info['succeed'] = True
-                    key = key_reader.get_key_nowait()
-                    
-                if "intervene_action" in info:
-                    intervention_label = 1
-                # if "is_pick" in info:
-                #     is_pick = info["is_pick"]
-                # else:
-                #     is_pick = True
-                
-                # if done and is_pick:
-                #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-                if done:
-                # if done and not is_pick:
-                    if reward:
-                        dt = time.time() - start_time
-                        time_list.append(dt)
-                        print(dt)
-                    if not intervention_label or not done_by_manual:
-                        success_counter += 1
-                    if FLAGS.save_video:
-                        env.unwrapped.save_video_recording(episode)
-                    print(f"{success_counter}/{episode + 1}")
-                    intervention_label = 0
-                    ckpt_step += 2000
-                    done_by_manual = False
-                    input("reset env")
-                    obs, _ = env.reset()
-
-        print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
-        print(f"average time: {np.mean(time_list)}")
-        return  # after done eval, return and exit
     
+    if FLAGS.eval_checkpoint_step:
+        try:
+            print("in eval mode")
+            success_counter = 0
+            intervention_label = 0
+            time_list = []
+            # print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
+            # ckpt = checkpoints.restore_checkpoint(
+            #     os.path.abspath(FLAGS.checkpoint_path),
+            #     agent.state,
+            #     step=FLAGS.eval_checkpoint_step,
+            # )
+            # agent = agent.replace(state=ckpt)
+            
+            obs, _ = env.reset()
+            key_reader = KeyReader()
+            key_reader.start()
+            ckpt_step = FLAGS.eval_checkpoint_step
+            done_by_manual = False
+            for episode in range(FLAGS.eval_n_trajs):
+                done = False
+                start_time = time.time()
+
+                print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
+                ckpt = checkpoints.restore_checkpoint(
+                    os.path.abspath(FLAGS.checkpoint_path),
+                    agent.state,
+                    step=ckpt_step,
+                )
+                agent = agent.replace(state=ckpt)
+                
+                while not done:
+
+                    sampling_rng, key = jax.random.split(sampling_rng)
+
+                    # print_green(f"obs[state] =  {obs['state']}")
+                    actions = agent.sample_actions(
+                        observations=jax.device_put(obs),
+                        argmax=False,
+                        seed=key
+                    )
+                    actions = np.asarray(jax.device_get(actions))
+                    
+                    if FLAGS.exp_name == "twist_bottle_cap":
+                        low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+                        high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+                    elif FLAGS.exp_name == "tube_insertion":
+                        low  = np.array([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -1], dtype=np.float32)
+                        high = np.array([0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 1.0], dtype=np.float32)
+                    # actions[..., 6] = np.clip(actions[..., 6], low, high)
+                    actions = np.clip(actions, low, high)
+                    
+                    print("actions = ", actions)
+
+                    next_obs, reward, done, truncated, info = env.step(actions)
+                    obs = next_obs
+                    key = key_reader.get_key_nowait()
+                    while key is not None:
+                        if key == '1':
+                            done = True
+                            info = dict(info)
+                            done_by_manual = True
+                            info['succeed'] = True
+                        key = key_reader.get_key_nowait()
+                        
+                    if "intervene_action" in info:
+                        intervention_label = 1
+                    # if "is_pick" in info:
+                    #     is_pick = info["is_pick"]
+                    # else:
+                    #     is_pick = True
+                    
+                    # if done and is_pick:
+                    #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                    if done:
+                    # if done and not is_pick:
+                        if reward:
+                            dt = time.time() - start_time
+                            time_list.append(dt)
+                            print(dt)
+                        if not intervention_label or not done_by_manual:
+                            success_counter += 1
+                        if FLAGS.save_video:
+                            env.unwrapped.save_video_recording(episode)
+                        print(f"{success_counter}/{episode + 1}")
+                        intervention_label = 0
+                        ckpt_step += 5000
+                        done_by_manual = False
+                        input("reset env")
+                        obs, _ = env.reset()
+
+            print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
+            print(f"average time: {np.mean(time_list)}")
+            return  # after done eval, return and exit
+        
+        except KeyboardInterrupt:
+            pass
+        finally:
+            # env.save_all_data_on_exit()
+            return
+        
+        
+        
     start_step = (
         int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
         if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
@@ -398,7 +408,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 obs, _ = env.reset()
                 
         timer.tock("total")
-
         if step % config.log_period == 0:
             stats = {"timer": timer.get_average_times()}
             client.request("send-stats", stats)

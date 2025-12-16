@@ -33,7 +33,7 @@ class RAMEnv(DensoEnv):
         self._send_leap_hand_command(self.gripper_open_joint, steps=20, step_time=0.05)
         time.sleep(1)
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
-        init_pos = np.array([0.7, -0.1558, 0.109])
+        init_pos = np.array([0.7, -0.1558, 0.089])
         init_ori = np.array([0, 1, 0, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.publish_arm_action(init_arm_action)
@@ -42,7 +42,7 @@ class RAMEnv(DensoEnv):
         time.sleep(5)
 
         self.curr_path_length = 0
-        self._update_cur_position(init_arm_action)
+        self._update_cur_position(init_arm_action, wait_threshold=0.005)
         self.gripper_open_joint_np = self.curr_leap_hand_pos.copy()
         obs = self._get_obs()
         self.terminate = False
