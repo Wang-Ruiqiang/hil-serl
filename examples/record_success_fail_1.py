@@ -124,14 +124,14 @@ def main(_):
                 
                 if not os.path.isdir(current_frame_path):
                     continue
-                obs, is_record_success= read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                obs, is_record_success, grip_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
                 if i == end_frame:
                     next_obs = obs
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                     if not os.path.isdir(next_frame_path):
                         continue
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                    next_obs, _, _= read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
 
                 # if i == start_frame:
                 #     history_obs.reset(obs)
@@ -153,7 +153,7 @@ def main(_):
 
                 delta_euler = next_euler - current_euler
                 actions[3:6] = delta_euler
-                actions[6] = next_obs["state"][7]
+                actions[6] = grip_action
 
                 transition = copy.deepcopy(
                     dict(

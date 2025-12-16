@@ -108,12 +108,12 @@ class TrainConfig(DefaultTrainingConfig):
         if enable_tactile:
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
-            self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 2.0, "tactile_data": 2.0}
+            self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             # self.classifier_keys = ["front_camera","tactile_data"]
             # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.image_weights = {"front_camera": 1.0, "wrist_camera": 2.0, "tactile_data": 2.0}
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             # self.classifier_keys = ["wrist_camera", "tactile_data"]
             # self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
         else:
@@ -156,7 +156,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.95
+                success = prob > 1
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:

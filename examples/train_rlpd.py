@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 190000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 100, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
@@ -317,7 +317,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             actions = np.asarray(jax.device_get(actions_sample)).copy()
             # actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
-            
+            actions[..., 3:6] = 0.0
             print("actions before clipped= ", actions)
             if FLAGS.exp_name == "twist_bottle_cap":
                 low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
@@ -332,6 +332,20 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
         with timer.context("step_env"):
             # if actions[6] < 0.8:
             #     actions[6] = 1.0
+            
+            if FLAGS.exp_name == "twist_bottle_cap":
+                cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
+                cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
+                cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
+                if cond_x and cond_y and cond_z:
+                    # 限制三个方向的 action 范围
+                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+                    
+            elif FLAGS.exp_name == "tube_insertion":
+                cond_z = (obs["state"][0][2] <= 0.13)
+                if cond_z:
+                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+            
             next_obs, reward, done, truncated, info = env.step(actions)
             # print("reward = ", reward)
 
@@ -352,18 +366,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             #     is_pick = info["is_pick"]
             # else:
             #     is_pick = True
-            if FLAGS.exp_name == "twist_bottle_cap":
-                cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
-                cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
-                cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
-                if cond_x and cond_y and cond_z:
-                    # 限制三个方向的 action 范围
-                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
-                    
-            elif FLAGS.exp_name == "tube_insertion":
-                cond_z = (obs["state"][0][2] <= 0.13)
-                if cond_z:
-                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
 
             print("actions = ", actions)
                 

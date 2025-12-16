@@ -93,6 +93,8 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
+    grip_action = np.loadtxt(os.path.join(frame_path, "grip_action.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "grip_action.txt")) else 0.0
+    
     hand_state = np.loadtxt(os.path.join(frame_path, "hand_state.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "hand_state.txt")) else 0.0
 
     if os.path.exists(joint_file_path):
@@ -139,7 +141,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)
     # input("enter")
-    return obs, int(is_record_success)
+    return obs, int(is_record_success), grip_action
 
 def read_data(robot_urdf_path, enable_tactile=False):
     data = []

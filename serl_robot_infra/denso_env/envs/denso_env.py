@@ -354,6 +354,7 @@ class DensoEnv(gym.Env):
         self.wrist_depth_buffer = []           #  D405 depth
         self.joint_buffer = []
         self.hand_state_buffer = []
+        self.grip_action_buffer = []
         
         if fake_env:
             return
@@ -465,7 +466,7 @@ class DensoEnv(gym.Env):
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
 
-        self.hand_state = 0.0
+        self.grip_action = 0.0
         self._grip_inited = False
 
         print("Initialized Denso")
@@ -497,16 +498,16 @@ class DensoEnv(gym.Env):
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
         
         xyz_delta = action[:3]
-        if self.exp_name == "twist_bottle_cap":
-            cond_x = (0.5 <= self.nextpos[0] <= 0.8)
-            cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
-            cond_z = (0.14 <= self.nextpos[2] <= 0.24)
-            if cond_x and cond_y and cond_z:
-                xyz_delta = np.clip(action[:3], -0.2, 0.2)
-        elif self.exp_name == "tube_insertion":
-            cond_z = (self.nextpos[2] <= 0.13)
-            if cond_z:
-                xyz_delta = np.clip(action[:3], -0.2, 0.2)
+        # if self.exp_name == "twist_bottle_cap":
+        #     cond_x = (0.5 <= self.nextpos[0] <= 0.8)
+        #     cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
+        #     cond_z = (0.14 <= self.nextpos[2] <= 0.24)
+        #     if cond_x and cond_y and cond_z:
+        #         xyz_delta = np.clip(action[:3], -0.2, 0.2)
+        # elif self.exp_name == "tube_insertion":
+        #     cond_z = (self.nextpos[2] <= 0.13)
+        #     if cond_z:
+        #         xyz_delta = np.clip(action[:3], -0.2, 0.2)
 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
         if self.nextpos[2] < 0.05:
@@ -550,16 +551,16 @@ class DensoEnv(gym.Env):
 
         self.curr_path_length += 1
         self._update_cur_position(self.nextpos)
-        self.hand_state = grip_action
+        self.grip_action = grip_action
 
         # t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
         self.frame_count += 1
-        # self.save_training_frame()
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
+        self.save_training_frame()
         # print(f"reward in denso_env = {reward}")
         # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
         done = reward or self.terminate
@@ -752,6 +753,78 @@ class DensoEnv(gym.Env):
 
         # 返回“指令目标”，不阻塞等待真实到位
         return pos
+    
+    
+    def _hand_progress_scalar(self, hand_joint_pos: np.ndarray) -> float:
+        """
+        Convert current hand joint vector (D,) into a scalar progress in [0, 1),
+        representing the position along the closed loop:
+            open -> close -> twist -> open
+
+        Implementation:
+        - Treat (open, close, twist) as 3 waypoints in joint space.
+        - Form 3 line segments into a closed polyline.
+        - Project the current joint vector onto each segment (clamped to the segment),
+        choose the closest projection point.
+        - Convert the arc-length position on the polyline to a normalized progress.
+        """
+        hand_joint_pos = np.asarray(hand_joint_pos, dtype=np.float32)
+
+        # Fallback: if loop waypoints are not prepared, use open<->close single segment
+        if not hasattr(self, "_waypoints"):
+            open_joint = np.asarray(self.gripper_open_joint, dtype=np.float32)
+            close_joint = np.asarray(self.gripper_close_joint, dtype=np.float32)
+
+            segment_vector = close_joint - open_joint
+            segment_len_sq = float(np.dot(segment_vector, segment_vector)) + 1e-12
+
+            projection_ratio = float(np.dot(hand_joint_pos - open_joint, segment_vector) / segment_len_sq)
+            projection_ratio = max(0.0, min(1.0, projection_ratio))
+            return float(projection_ratio)  # 0=open, 1=close
+
+        waypoints = np.asarray(self._waypoints, dtype=np.float32)  # (3, D)
+        num_waypoints = int(waypoints.shape[0])  # should be 3
+
+        # Build closed-loop segments: i -> (i+1) mod N
+        next_indices = (np.arange(num_waypoints) + 1) % num_waypoints
+        segment_vectors = waypoints[next_indices] - waypoints                      # (3, D)
+        segment_lengths = np.linalg.norm(segment_vectors, axis=1) + 1e-12          # (3,)
+
+        # Prefix arc-length at the start of each segment
+        prefix_lengths = np.concatenate([[0.0], np.cumsum(segment_lengths)])       # (4,)
+        total_length = float(prefix_lengths[-1]) + 1e-12
+
+        closest_segment_index = 0
+        closest_segment_ratio = 0.0
+        min_distance_sq = float("inf")
+
+        # Find closest projection on the polyline
+        for segment_index in range(num_waypoints):
+            segment_start = waypoints[segment_index]
+            segment_vector = segment_vectors[segment_index]
+
+            segment_len_sq = float(np.dot(segment_vector, segment_vector)) + 1e-12
+
+            # Projection ratio on the infinite line
+            projection_ratio = float(np.dot(hand_joint_pos - segment_start, segment_vector) / segment_len_sq)  # projection formation
+            # Clamp to the segment [0,1]
+            projection_ratio = max(0.0, min(1.0, projection_ratio))
+
+            projected_point = segment_start + projection_ratio * segment_vector
+            distance_sq = float(np.sum((hand_joint_pos - projected_point) ** 2))
+
+            if distance_sq < min_distance_sq:
+                min_distance_sq = distance_sq
+                closest_segment_index = segment_index
+                closest_segment_ratio = projection_ratio
+
+        # Arc-length progress along the loop
+        arc_length = float(prefix_lengths[closest_segment_index]) + \
+                    float(closest_segment_ratio) * float(segment_lengths[closest_segment_index])
+
+        progress = (arc_length / total_length) % 1.0
+        return float(progress)
+    
     
     def move_up(self):
         print("move up to avoid collision")
@@ -1074,6 +1147,7 @@ class DensoEnv(gym.Env):
             hand_joint_msg = self.ros_interface.get_current_leap_position()
             self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
             diff = np.linalg.norm(arm_action[:3] - self.cur_position)
+        self.hand_state = self._hand_progress_scalar(self.curr_leap_hand_pos)
 
 
     def _get_obs(self) -> dict:
@@ -1081,6 +1155,8 @@ class DensoEnv(gym.Env):
         front_camera_image = images["front_camera"]
         wrist_camera_image = images["wrist_camera"]
         # side_camera_image = images["side_camera"]
+        # print("grip_phase = ", self.grip_phase)
+
         state_flattened = np.concatenate([
             np.array(self.cur_position, dtype=np.float32).flatten(),
             np.array(self.cur_oritation, dtype=np.float32).flatten(),
@@ -1146,6 +1222,7 @@ class DensoEnv(gym.Env):
             self.joint_buffer.append(
                             copy.deepcopy(joint_pose))
             self.hand_state_buffer.append(copy.deepcopy(self.hand_state))
+            self.grip_action_buffer.append(copy.deepcopy(self.grip_action))
             # 保存图像
             images, depth_img = self.get_rgb_and_dpth_im()
             for cam_name, img in images.items():
@@ -1199,3 +1276,4 @@ class DensoEnv(gym.Env):
             # 保存 state（TCP + orientation + hand joints）
             np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
             np.savetxt(os.path.join(frame_dir, "hand_state.txt"), np.atleast_1d(self.hand_state_buffer[frame_id]), fmt="%.6f")
+            np.savetxt(os.path.join(frame_dir, "grip_action.txt"), np.atleast_1d(self.grip_action_buffer[frame_id]), fmt="%.6f")

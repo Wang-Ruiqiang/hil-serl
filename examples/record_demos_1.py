@@ -176,12 +176,12 @@ def main(_):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
                 next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
 
-                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                obs, is_record_success, grip_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
                 if i == end_frame:
                     next_obs = obs
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-                    next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                    next_obs, _, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
                 # print("obs state shape = ", obs["state"].shape)
                 # input("debug")
                 tcp_ori = obs["state"][3:7]  # 四元数部分
@@ -206,8 +206,9 @@ def main(_):
 
                 done = reward or terminate
 
+                ACTION_SCALE = (0.05, 0.05, 0.05)
                 delta_pos = next_obs["state"][:3] - obs["state"][:3]
-                actions[:3] = delta_pos
+                actions[:3] = delta_pos / ACTION_SCALE[0]
 
                 current_quat = obs["state"][3:7]  # wxyz
                 next_quat = next_obs["state"][3:7]
@@ -216,8 +217,9 @@ def main(_):
                 next_euler = R.from_quat([next_quat[1], next_quat[2], next_quat[3], next_quat[0]]).as_euler("xyz")
 
                 delta_euler = next_euler - current_euler
-                actions[3:6] = delta_euler
-                actions[6] = next_obs["state"][7]
+                # actions[3:6] = delta_euler
+                actions[3:6] = 0.0
+                actions[6] = grip_action
 
                 transition = copy.deepcopy(
                     dict(
