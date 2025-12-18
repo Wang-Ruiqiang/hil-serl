@@ -446,7 +446,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-16-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-17-3"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -560,7 +560,7 @@ class DensoEnv(gym.Env):
 
         ob = self._get_obs()
         reward = self.compute_reward(ob)
-        self.save_training_frame()
+        # self.save_training_frame()
         # print(f"reward in denso_env = {reward}")
         # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
         done = reward or self.terminate
@@ -1155,7 +1155,6 @@ class DensoEnv(gym.Env):
         front_camera_image = images["front_camera"]
         wrist_camera_image = images["wrist_camera"]
         # side_camera_image = images["side_camera"]
-        # print("grip_phase = ", self.grip_phase)
 
         state_flattened = np.concatenate([
             np.array(self.cur_position, dtype=np.float32).flatten(),

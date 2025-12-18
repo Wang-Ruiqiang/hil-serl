@@ -156,7 +156,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 1
+                success = prob > 0.95
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:

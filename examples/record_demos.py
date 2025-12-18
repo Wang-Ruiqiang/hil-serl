@@ -85,7 +85,7 @@ def main(_):
             # actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
             # print("reward = ", rew)
-            # print(f"obs[state] =  {obs['state']}")
+            print(f"obs[state] =  {obs['state']}")
             
             key = key_reader.get_key_nowait()
             while key is not None:

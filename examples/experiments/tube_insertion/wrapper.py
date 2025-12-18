@@ -40,9 +40,11 @@ class RAMEnv(DensoEnv):
         self._segmented_init(self.curr_leap_hand_pos)
 
         time.sleep(5)
-
+        
+        cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
+        curr_pose = np.concatenate((cur_position, cur_orientation), axis=0)
         self.curr_path_length = 0
-        self._update_cur_position(init_arm_action, wait_threshold=0.005)
+        self._update_cur_position(curr_pose, wait_threshold=0.005)
         self.gripper_open_joint_np = self.curr_leap_hand_pos.copy()
         obs = self._get_obs()
         self.terminate = False

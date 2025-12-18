@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 125000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 100, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
@@ -155,8 +155,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
                         high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
                     elif FLAGS.exp_name == "tube_insertion":
-                        low  = np.array([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -1], dtype=np.float32)
-                        high = np.array([0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 1.0], dtype=np.float32)
+                        low  = np.array([-0.1, -0.1, -0.1, -0.0, -0.0, -0.0, -1], dtype=np.float32)
+                        high = np.array([0.1, 0.1, 0.1, 0.0, 0.0, 0.0, 1.0], dtype=np.float32)
                     # actions[..., 6] = np.clip(actions[..., 6], low, high)
                     actions = np.clip(actions, low, high)
                     
@@ -196,6 +196,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         intervention_label = 0
                         ckpt_step += 5000
                         done_by_manual = False
+                        if FLAGS.exp_name == "tube_insertion":
+                            env.open_hand(steps=20, step_time=0.05)
+                            time.sleep(1.5)
                         input("reset env")
                         obs, _ = env.reset()
 
@@ -211,13 +214,21 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
         
         
         
-    start_step = (
-        int(os.path.basename(natsorted(glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")))[-1])[12:-4]) + 1
-        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-        else 0
-    )
+    start_step = 0
 
-    # start_step = 0
+    if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path):
+        buffer_dir = os.path.join(FLAGS.checkpoint_path, "buffer")
+        buffer_pkls = []
+
+        if os.path.exists(buffer_dir):
+            buffer_pkls = natsorted(glob.glob(os.path.join(buffer_dir, "transitions_*.pkl")))
+
+        if len(buffer_pkls) > 0:
+            last_pkl = os.path.basename(buffer_pkls[-1])
+            start_step = int(last_pkl.replace("transitions_", "").replace(".pkl", "")) + 1
+        else:
+            # 有 ckpt 但还没有 buffer
+            start_step = 0
 
     datastore_dict = {
         "actor_env": data_store,
@@ -323,8 +334,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
                 high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
             elif FLAGS.exp_name == "tube_insertion":
-                low  = np.array([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -1], dtype=np.float32)
-                high = np.array([0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 1.0], dtype=np.float32)
+                low  = np.array([-0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -1], dtype=np.float32)
+                high = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0], dtype=np.float32)
             # actions[..., 6] = np.clip(actions[..., 6], low, high)
             actions = np.clip(actions, low, high)
             
@@ -344,7 +355,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             elif FLAGS.exp_name == "tube_insertion":
                 cond_z = (obs["state"][0][2] <= 0.13)
                 if cond_z:
-                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+                    actions[..., :3] = np.clip(actions[..., :3], -0.1, 0.1)
             
             next_obs, reward, done, truncated, info = env.step(actions)
             # print("reward = ", reward)
@@ -634,7 +645,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tube-insertion-12-15",
+            project="tube-insertion-12-17",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
