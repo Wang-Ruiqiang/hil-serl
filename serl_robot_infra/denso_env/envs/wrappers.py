@@ -9,6 +9,7 @@ import requests
 from scipy.spatial.transform import Rotation as R
 from denso_env.envs.denso_env import DensoEnv
 from typing import List
+import jax.numpy as jnp
 
 sigmoid = lambda x: 1 / (1 + np.exp(-x))
 

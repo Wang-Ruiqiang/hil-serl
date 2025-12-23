@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 125000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 100, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
@@ -138,7 +138,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                     step=ckpt_step,
                 )
                 agent = agent.replace(state=ckpt)
-                
                 while not done:
 
                     sampling_rng, key = jax.random.split(sampling_rng)
@@ -149,17 +148,20 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         argmax=False,
                         seed=key
                     )
-                    actions = np.asarray(jax.device_get(actions))
                     
-                    if FLAGS.exp_name == "twist_bottle_cap":
-                        low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-                        high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
-                    elif FLAGS.exp_name == "tube_insertion":
-                        low  = np.array([-0.1, -0.1, -0.1, -0.0, -0.0, -0.0, -1], dtype=np.float32)
-                        high = np.array([0.1, 0.1, 0.1, 0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+                    # actions = np.asarray(jax.device_get(actions))
+                    actions = np.asarray(jax.device_get(actions)).copy()
+                    actions[..., 3:6] = 0.0
+                    
+                    # if FLAGS.exp_name == "twist_bottle_cap":
+                    #     low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+                    #     high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+                    # elif FLAGS.exp_name == "tube_insertion":
+                    #     low  = np.array([-0.1, -0.1, -0.1, -0.0, -0.0, -0.0, -1], dtype=np.float32)
+                    #     high = np.array([0.1, 0.1, 0.1, 0.0, 0.0, 0.0, 1.0], dtype=np.float32)
                     # actions[..., 6] = np.clip(actions[..., 6], low, high)
-                    actions = np.clip(actions, low, high)
-                    
+                        # actions = np.clip(actions, low, high)
+
                     print("actions = ", actions)
 
                     next_obs, reward, done, truncated, info = env.step(actions)
@@ -329,33 +331,33 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             actions = np.asarray(jax.device_get(actions_sample)).copy()
             # actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
             actions[..., 3:6] = 0.0
-            print("actions before clipped= ", actions)
-            if FLAGS.exp_name == "twist_bottle_cap":
-                low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-                high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
-            elif FLAGS.exp_name == "tube_insertion":
-                low  = np.array([-0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -1], dtype=np.float32)
-                high = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0], dtype=np.float32)
+            print("actions sampled= ", actions)
+            # if FLAGS.exp_name == "twist_bottle_cap":
+            #     low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
+            #     high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+            # elif FLAGS.exp_name == "tube_insertion":
+            #     low  = np.array([-0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -1], dtype=np.float32)
+            #     high = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0], dtype=np.float32)
             # actions[..., 6] = np.clip(actions[..., 6], low, high)
-            actions = np.clip(actions, low, high)
+                # actions = np.clip(actions, low, high)
             
         # Step environment
         with timer.context("step_env"):
             # if actions[6] < 0.8:
             #     actions[6] = 1.0
             
-            if FLAGS.exp_name == "twist_bottle_cap":
-                cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
-                cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
-                cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
-                if cond_x and cond_y and cond_z:
-                    # 限制三个方向的 action 范围
-                    actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
+            # if FLAGS.exp_name == "twist_bottle_cap":
+            #     cond_x = (0.5 <= obs["state"][0][0] <= 0.8)
+            #     cond_y = (-0.18 <= obs["state"][0][1] <= -0.08)
+            #     cond_z = (0.14 <= obs["state"][0][2] <= 0.24)
+            #     if cond_x and cond_y and cond_z:
+            #         # 限制三个方向的 action 范围
+            #         actions[..., :3] = np.clip(actions[..., :3], -0.2, 0.2)
                     
-            elif FLAGS.exp_name == "tube_insertion":
-                cond_z = (obs["state"][0][2] <= 0.13)
-                if cond_z:
-                    actions[..., :3] = np.clip(actions[..., :3], -0.1, 0.1)
+            # elif FLAGS.exp_name == "tube_insertion":
+            #     cond_z = (obs["state"][0][2] <= 0.13)
+            #     if cond_z:
+            #         actions[..., :3] = np.clip(actions[..., :3], -0.1, 0.1)
             
             next_obs, reward, done, truncated, info = env.step(actions)
             # print("reward = ", reward)
@@ -645,7 +647,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tube-insertion-12-17",
+            project="tube-insertion-12-23",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )

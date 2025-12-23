@@ -8,12 +8,14 @@ import cv2
 # -------------------------
 CAMERA_CONFIG = {
     "front_camera": {
-        "serial_number": "242422303461",
+        "serial_number": "218622273562",
+        "exposure": 13000,
         "dim": (640, 480),
     },
     "wrist_camera": {
         "serial_number": "218622271185",
         "dim": (640, 480),
+        "exposure": 10500,
     },
 }
 

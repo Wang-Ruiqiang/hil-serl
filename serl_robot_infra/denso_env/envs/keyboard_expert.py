@@ -25,8 +25,8 @@ class KeyboardExpert:
             self.LARGE_STEP = 0.5
             self.SMALL_STEP = 0.2
         elif exp_name == "tube_insertion":
-            self.LARGE_STEP = 0.1
-            self.SMALL_STEP = 0.1
+            self.LARGE_STEP = 1
+            self.SMALL_STEP = 0.5
 
         # self.process = multiprocessing.Process(target=self._read_keyboard)
         self._stop_event = multiprocessing.Event()

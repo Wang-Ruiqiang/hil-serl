@@ -286,8 +286,8 @@ class DensoEnv(gym.Env):
             self.recording_frames = []
 
         # Action/Observation Space
-        low  = np.array([-0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -1], dtype=np.float32)
-        high = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+        low  = np.array([-1, -1, -1, -1, -1, -1, -1], dtype=np.float32)
+        high = np.array([1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
         self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
         
         if not self.enable_tactile:
@@ -382,6 +382,7 @@ class DensoEnv(gym.Env):
             self.middle_tactile_sensor = Sensor(middle_cfg)
             # self.middle_tactile_vis  = Visualizer(self.middle_tactile_sensor.points)
 
+            self.tactile_size = (128, 128)
             self.thumb_raw_img = []
             self.index_raw_img = []
             self.middle_raw_img = []
@@ -446,7 +447,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-17-3"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-23-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -498,18 +499,9 @@ class DensoEnv(gym.Env):
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
         
         xyz_delta = action[:3]
-        # if self.exp_name == "twist_bottle_cap":
-        #     cond_x = (0.5 <= self.nextpos[0] <= 0.8)
-        #     cond_y = (-0.18 <= self.nextpos[1] <= -0.08)
-        #     cond_z = (0.14 <= self.nextpos[2] <= 0.24)
-        #     if cond_x and cond_y and cond_z:
-        #         xyz_delta = np.clip(action[:3], -0.2, 0.2)
-        # elif self.exp_name == "tube_insertion":
-        #     cond_z = (self.nextpos[2] <= 0.13)
-        #     if cond_z:
-        #         xyz_delta = np.clip(action[:3], -0.2, 0.2)
 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
+        print("action scaled = ", xyz_delta * self.action_scale[0])
         if self.nextpos[2] < 0.05:
             self.nextpos[2] = 0.05
         if self.nextpos[1] < -0.145:
@@ -617,30 +609,53 @@ class DensoEnv(gym.Env):
 
     def _segmented_init(self, current_hand_pos: np.ndarray):
         # 仅 3 个点，形成闭环（0→1→2→0）
-        self._waypoints = np.stack([self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint], axis=0)  # (3, D)
-        self._num_wp = 3
-        max_step = 15
+        self._waypoints = np.stack(
+            [self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint],
+            axis=0
+        ).astype(np.float32)  # (3, D)
+        self._num_wp = int(self._waypoints.shape[0])  # 3
+        self._num_seg = self._num_wp - 1              # 2 segments: 0->1, 1->2
 
-        # 上下界
+        # segment vectors/lengths for open polyline
+        seg_vecs = self._waypoints[1:] - self._waypoints[:-1]          # (2, D)
+        seg_lens = np.linalg.norm(seg_vecs, axis=1) + 1e-12            # (2,)
+
+        # joint bounds
         self._lower = np.minimum.reduce(self._waypoints)
         self._upper = np.maximum.reduce(self._waypoints)
 
-        # 选择最近的路标作为当前段起点
+        # choose nearest waypoint to initialize which segment we are on
         diffs_wp = self._waypoints - np.asarray(current_hand_pos, dtype=np.float32)
-        self._seg_start_idx = int(np.argmin(np.linalg.norm(diffs_wp, axis=1)))
+        nearest_wp = int(np.argmin(np.linalg.norm(diffs_wp, axis=1)))
 
-        # 方向与步幅
+        # segment start index must be 0 or 1
+        if nearest_wp <= 0:
+            self._seg_start_idx = 0
+        elif nearest_wp >= self._num_wp - 1:
+            self._seg_start_idx = self._num_wp - 2  # 1
+        else:
+            # nearest is waypoint 1, decide segment by which side is closer
+            # compare distance to segment 0 vs segment 1 by projecting
+            self._seg_start_idx = 0  # default; will be refined by projection in calculate if needed
+            # optional: choose based on which segment projection is closer
+            # keep simple: start from segment 0
+
+        # direction (+1 forward open->...->twist, -1 backward)
         self._seg_dir = +1
-        seg_vecs = self._waypoints[(np.arange(self._num_wp) + 1) % self._num_wp] - self._waypoints
-        seg_lens = np.linalg.norm(seg_vecs, axis=1)
+
+        # step size parameters
+        max_step = 15
         mean_len = float(np.mean(seg_lens))
         self._per_step_path_len = max(1e-6, mean_len / max_step)
+
+        # joint delta limit (for safety)
         self._max_joint_delta = float(np.max(np.abs(seg_vecs))) / max_step
         self._snap_eps = 1e-6
+
         self.is_segmented_init = True
 
+        # command-side position state
         self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
-        self._stop_on_waypoint = False
     
     
     def _project_to_current_segment(self, p: np.ndarray, start: np.ndarray, seg: np.ndarray) -> tuple:
@@ -668,76 +683,95 @@ class DensoEnv(gym.Env):
 
         # 决定方向
         self._seg_dir = (+1 if action_scalar > 0 else -1)
-
+        waypoints = self._waypoints
+        num_wp = self._num_wp
+        num_seg = num_wp - 1
+               
         # 用“指令位置”推进（不受真实到位与否的影响）
         pos = np.asarray(self._cmd_pos, dtype=np.float32)
         remaining_path_len = abs(action_scalar) * self._per_step_path_len
 
         while remaining_path_len > 0:
-            start_idx = self._seg_start_idx
-            end_idx   = (start_idx + 1) % self._num_wp
-            start_wp = self._waypoints[start_idx]
-            end_wp   = self._waypoints[end_idx]
-            seg_vec  = end_wp - start_wp
-            seg_len  = float(np.linalg.norm(seg_vec))
-            if seg_len < 1e-9:
-                # 极端退化：直接切到下一段并继续消耗
-                self._seg_start_idx = end_idx
-                if self._stop_on_waypoint:
-                    break
-                else:
-                    continue
+            start_idx = int(self._seg_start_idx)
 
-            segment_progress, proj = self._project_to_current_segment(pos, start_wp, seg_vec)
+            # clamp segment index into valid range [0, num_seg-1]
+            start_idx = max(0, min(num_seg - 1, start_idx))
+            self._seg_start_idx = start_idx
+
+            seg_start_wp = waypoints[start_idx]
+            seg_end_wp   = waypoints[start_idx + 1]
+            seg_vec = seg_end_wp - seg_start_wp
+            seg_len = float(np.linalg.norm(seg_vec)) + 1e-12
+            unit = seg_vec / seg_len
+
+            segment_progress, proj = self._project_to_current_segment(pos, seg_start_wp, seg_vec)
 
             # 吸附端点，避免在端点附近数值抖动
-            if segment_progress <= self._snap_eps and np.linalg.norm(pos - start_wp) <= self._snap_eps:
-                pos = start_wp.copy(); segment_progress = 0.0
-            if (1.0 - segment_progress) <= self._snap_eps and np.linalg.norm(pos - end_wp) <= self._snap_eps:
-                pos = end_wp.copy();   segment_progress = 1.0
-     
+            if segment_progress <= self._snap_eps and np.linalg.norm(pos - seg_start_wp) <= self._snap_eps:
+                pos = seg_start_wp.copy()
+                segment_progress = 0.0
+            if (1.0 - segment_progress) <= self._snap_eps and np.linalg.norm(pos - seg_end_wp) <= self._snap_eps:
+                pos = seg_end_wp.copy()
+                segment_progress = 1.0
+
             unit = seg_vec / seg_len
 
             if self._seg_dir > 0:
-                # 正向：从 segment_progress → 1.0（start_wp → end_wp）
                 path_left = (1.0 - segment_progress) * seg_len
-                if path_left < self._snap_eps:
-                    # 这一段已经走完，切下一段
-                    self._seg_start_idx = end_idx
-                    continue
+                if path_left <= self._snap_eps:
+                    # already at end of this segment -> move to next segment
+                    if start_idx < num_seg - 1:
+                        self._seg_start_idx = start_idx + 1
+                        pos = seg_end_wp.copy()
+                        continue
+                    else:
+                        # at final segment end (twist) -> saturate
+                        pos = waypoints[-1].copy()
+                        remaining_path_len = 0.0
+                        break
 
                 step_here = min(remaining_path_len, path_left)
                 pos = pos + unit * step_here
                 remaining_path_len -= step_here
 
+                # if reached end of segment
                 if abs(step_here - path_left) <= self._snap_eps:
-                    pos = end_wp.copy()
-                    self._seg_start_idx = end_idx
-                    if self._stop_on_waypoint:
-                        break
-                    else:
+                    pos = seg_end_wp.copy()
+                    if start_idx < num_seg - 1:
+                        self._seg_start_idx = start_idx + 1
                         continue
+                    else:
+                        # reached twist
+                        remaining_path_len = 0.0
+                        break
 
             else:
-                # 反向：从 segment_progress → 0.0（往段起点退）
-                path_left = segment_progress * seg_len  # 距离 start_wp 的弧长
-                if path_left < self._snap_eps:
-                    # 这一段往回已经没有路了，直接切到“上一段”
-                    self._seg_start_idx = (start_idx - 1) % self._num_wp
-                    continue
+                path_left = segment_progress * seg_len
+                if path_left <= self._snap_eps:
+                    # already at start of this segment -> move to previous segment
+                    if start_idx > 0:
+                        self._seg_start_idx = start_idx - 1
+                        pos = seg_start_wp.copy()
+                        continue
+                    else:
+                        # at first segment start (open) -> saturate
+                        pos = waypoints[0].copy()
+                        remaining_path_len = 0.0
+                        break
 
                 step_here = min(remaining_path_len, path_left)
-                pos = pos - unit * step_here  # 注意方向：减 unit 是往 start_wp 退
+                pos = pos - unit * step_here
                 remaining_path_len -= step_here
 
+                # if reached start of segment
                 if abs(step_here - path_left) <= self._snap_eps:
-                    # 正好退回到 start_wp：下一步应走上一段
-                    pos = start_wp.copy()
-                    self._seg_start_idx = (start_idx - 1) % self._num_wp
-                    if self._stop_on_waypoint:
-                        break
-                    else:
+                    pos = seg_start_wp.copy()
+                    if start_idx > 0:
+                        self._seg_start_idx = start_idx - 1
                         continue
+                    else:
+                        remaining_path_len = 0.0
+                        break
 
             # （可选）如果仍需要单步限幅，就把上面这段放到 pos 更新之后再裁剪
             delta = pos - self._cmd_pos
@@ -751,79 +785,59 @@ class DensoEnv(gym.Env):
         pos = np.clip(pos, self._lower, self._upper)
         self._cmd_pos = pos.copy()
 
-        # 返回“指令目标”，不阻塞等待真实到位
         return pos
     
     
     def _hand_progress_scalar(self, hand_joint_pos: np.ndarray) -> float:
         """
-        Convert current hand joint vector (D,) into a scalar progress in [0, 1),
-        representing the position along the closed loop:
-            open -> close -> twist -> open
-
-        Implementation:
-        - Treat (open, close, twist) as 3 waypoints in joint space.
-        - Form 3 line segments into a closed polyline.
-        - Project the current joint vector onto each segment (clamped to the segment),
-        choose the closest projection point.
-        - Convert the arc-length position on the polyline to a normalized progress.
+        Open polyline progress in [0,1]:
+            open -> close -> twist
         """
         hand_joint_pos = np.asarray(hand_joint_pos, dtype=np.float32)
 
-        # Fallback: if loop waypoints are not prepared, use open<->close single segment
+        # If waypoints not prepared, fallback to open<->close
         if not hasattr(self, "_waypoints"):
             open_joint = np.asarray(self.gripper_open_joint, dtype=np.float32)
             close_joint = np.asarray(self.gripper_close_joint, dtype=np.float32)
-
-            segment_vector = close_joint - open_joint
-            segment_len_sq = float(np.dot(segment_vector, segment_vector)) + 1e-12
-
-            projection_ratio = float(np.dot(hand_joint_pos - open_joint, segment_vector) / segment_len_sq)
-            projection_ratio = max(0.0, min(1.0, projection_ratio))
-            return float(projection_ratio)  # 0=open, 1=close
+            seg_vec = close_joint - open_joint
+            seg_len_sq = float(np.dot(seg_vec, seg_vec)) + 1e-12
+            ratio = float(np.dot(hand_joint_pos - open_joint, seg_vec) / seg_len_sq)
+            return float(np.clip(ratio, 0.0, 1.0))
 
         waypoints = np.asarray(self._waypoints, dtype=np.float32)  # (3, D)
-        num_waypoints = int(waypoints.shape[0])  # should be 3
+        num_wp = int(waypoints.shape[0])                           # 3
+        num_seg = num_wp - 1                                       # 2
 
-        # Build closed-loop segments: i -> (i+1) mod N
-        next_indices = (np.arange(num_waypoints) + 1) % num_waypoints
-        segment_vectors = waypoints[next_indices] - waypoints                      # (3, D)
-        segment_lengths = np.linalg.norm(segment_vectors, axis=1) + 1e-12          # (3,)
+        # segments: 0->1, 1->2
+        segment_vectors = waypoints[1:] - waypoints[:-1]           # (2, D)
+        segment_lengths = np.linalg.norm(segment_vectors, axis=1) + 1e-12  # (2,)
 
-        # Prefix arc-length at the start of each segment
-        prefix_lengths = np.concatenate([[0.0], np.cumsum(segment_lengths)])       # (4,)
+        prefix_lengths = np.concatenate([[0.0], np.cumsum(segment_lengths)])  # (3,)
         total_length = float(prefix_lengths[-1]) + 1e-12
 
-        closest_segment_index = 0
-        closest_segment_ratio = 0.0
-        min_distance_sq = float("inf")
+        closest_seg = 0
+        closest_ratio = 0.0
+        min_dist_sq = float("inf")
 
-        # Find closest projection on the polyline
-        for segment_index in range(num_waypoints):
-            segment_start = waypoints[segment_index]
-            segment_vector = segment_vectors[segment_index]
+        for seg_idx in range(num_seg):
+            seg_start = waypoints[seg_idx]
+            seg_vec = segment_vectors[seg_idx]
+            seg_len_sq = float(np.dot(seg_vec, seg_vec)) + 1e-12
 
-            segment_len_sq = float(np.dot(segment_vector, segment_vector)) + 1e-12
+            ratio = float(np.dot(hand_joint_pos - seg_start, seg_vec) / seg_len_sq)
+            ratio = float(np.clip(ratio, 0.0, 1.0))
 
-            # Projection ratio on the infinite line
-            projection_ratio = float(np.dot(hand_joint_pos - segment_start, segment_vector) / segment_len_sq)  # projection formation
-            # Clamp to the segment [0,1]
-            projection_ratio = max(0.0, min(1.0, projection_ratio))
+            proj = seg_start + ratio * seg_vec
+            dist_sq = float(np.sum((hand_joint_pos - proj) ** 2))
 
-            projected_point = segment_start + projection_ratio * segment_vector
-            distance_sq = float(np.sum((hand_joint_pos - projected_point) ** 2))
+            if dist_sq < min_dist_sq:
+                min_dist_sq = dist_sq
+                closest_seg = seg_idx
+                closest_ratio = ratio
 
-            if distance_sq < min_distance_sq:
-                min_distance_sq = distance_sq
-                closest_segment_index = segment_index
-                closest_segment_ratio = projection_ratio
-
-        # Arc-length progress along the loop
-        arc_length = float(prefix_lengths[closest_segment_index]) + \
-                    float(closest_segment_ratio) * float(segment_lengths[closest_segment_index])
-
-        progress = (arc_length / total_length) % 1.0
-        return float(progress)
+        arc_length = float(prefix_lengths[closest_seg]) + float(closest_ratio) * float(segment_lengths[closest_seg])
+        progress = float(np.clip(arc_length / total_length, 0.0, 1.0))
+        return progress
     
     
     def move_up(self):
@@ -837,14 +851,16 @@ class DensoEnv(gym.Env):
     
 
     def compute_reward(self, obs) -> bool:
-        current_pose = obs["state"]
+        state = obs["state"]
+        pos = np.asarray(state["tcp_pos"], dtype=np.float32).reshape(-1)   # (3,)
+        ori = np.asarray(state["tcp_ori"], dtype=np.float32).reshape(-1)
         # convert from quat to euler first
-        current_rot = Rotation.from_quat(current_pose[3:7]).as_matrix()
+        current_rot = Rotation.from_quat(ori).as_matrix()
         target_rot = Rotation.from_quat(self._TARGET_POSE[3:7]).as_matrix()
         # target_rot = Rotation.from_euler("xyz", self._TARGET_POSE[3:]).as_matrix()
         diff_rot = current_rot.T  @ target_rot
         diff_euler = Rotation.from_matrix(diff_rot).as_euler("xyz")
-        delta = np.abs(np.hstack([current_pose[:3] - self._TARGET_POSE[:3], [0, 0, 0]]))
+        delta = np.abs(np.hstack([pos - self._TARGET_POSE[:3], [0, 0, 0]]))
         if np.all(delta < self._REWARD_THRESHOLD):
             return True
         else:
@@ -964,7 +980,7 @@ class DensoEnv(gym.Env):
     def process_thumb_tactile(self):
         while True:
             # thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (320, 240))
-            thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (128, 128))
+            thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, self.tactile_size)
 
             with self.tac_thumb_lock:
                 self.thumb_raw_img = thumb_raw_img
@@ -976,7 +992,7 @@ class DensoEnv(gym.Env):
     def process_index_tactile(self):
         # Process index tactile data
         while True:
-            index_raw_img, index_points, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, (128, 128))
+            index_raw_img, index_points, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, self.tactile_size)
 
             with self.tac_index_lock:
                 self.index_raw_img = index_raw_img
@@ -988,7 +1004,7 @@ class DensoEnv(gym.Env):
     def process_middle_tactile(self):
         # Process middle tactile data
         while True:
-            middle_raw_img, middle_points, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, (128, 128))
+            middle_raw_img, middle_points, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, self.tactile_size)
 
             with self.tac_middle_lock:
                 self.middle_raw_img = middle_raw_img
@@ -1152,30 +1168,47 @@ class DensoEnv(gym.Env):
 
     def _get_obs(self) -> dict:
         images = self.get_im()
-        front_camera_image = images["front_camera"]
-        wrist_camera_image = images["wrist_camera"]
+        # front_camera_image = images["front_camera"]
+        # wrist_camera_image = images["wrist_camera"]
         # side_camera_image = images["side_camera"]
+        # print("self.hand_state", self.hand_state)
 
-        state_flattened = np.concatenate([
-            np.array(self.cur_position, dtype=np.float32).flatten(),
-            np.array(self.cur_oritation, dtype=np.float32).flatten(),
-            np.array(self.hand_state, dtype=np.float32).flatten(), 
-        ])
+        # state_flattened = np.concatenate([
+        #     np.array(self.cur_position, dtype=np.float32).flatten(),
+        #     np.array(self.cur_oritation, dtype=np.float32).flatten(),
+        #     np.array(self.hand_state, dtype=np.float32).flatten(), 
+        # ])
+        state_observation = {
+            "tcp_pos": self.cur_position,
+            "tcp_ori": self.cur_oritation,
+            "gripper_pose": self.hand_state,
+        }
         
-        if not self.enable_tactile:
-            obs = copy.deepcopy({
-                "front_camera": front_camera_image,
-                "wrist_camera": wrist_camera_image,
-                "state": state_flattened
-            })
-        else:
+        obs = {
+            "images": {},
+            "state": state_observation,
+        }
+        for cam_key, img in images.items():
+            obs["images"][cam_key] = img
+            
+        # if not self.enable_tactile:
+            # obs = copy.deepcopy({
+            #     "front_camera": front_camera_image,
+            #     "wrist_camera": wrist_camera_image,
+            #     "state": state_flattened
+            # })
+        # else:
+        #     heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+            # obs = copy.deepcopy({
+            #     "front_camera": front_camera_image,
+            #     "wrist_camera": wrist_camera_image,
+            #     "tactile_data":heatmap_canvas,
+            #     "state": state_flattened
+            # })
+            
+        if self.enable_tactile:
             heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-            obs = copy.deepcopy({
-                "front_camera": front_camera_image,
-                "wrist_camera": wrist_camera_image,
-                "tactile_data":heatmap_canvas,
-                "state": state_flattened
-            })
+            obs["images"]["tactile_data"] = heatmap_canvas
                 
         return copy.deepcopy(obs)
 

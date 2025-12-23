@@ -19,10 +19,16 @@ from experiments.tube_insertion.wrapper import RAMEnv
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
+        # "front_camera": {
+        #     "serial_number": "242422303461",
+        #     "dim": (640, 480),
+        #     "exposure": 13000,
+        #     "depth": True,
+        # },
         "front_camera": {
-            "serial_number": "242422303461",
+            "serial_number": "218622273562",
             "dim": (640, 480),
-            "exposure": 40000,
+            "exposure": 30000,
             "depth": True,
         },
         "wrist_camera": {
@@ -31,18 +37,43 @@ class EnvConfig(DefaultEnvConfig):
             "exposure": 40000,
             "depth": True,
         },
+        "front_classifier": {
+            "serial_number": "218622273562",
+            "dim": (640, 480),
+            "exposure": 30000,
+        },
+        # "wrist_classifier": {
+        #     "serial_number": "218622271185",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        #     "depth": True,
+        # },
+        
     }
     EXTRA_REALSENSE_CAMERAS = {
+        # "side_camera": {
+        #     "serial_number": "234222300515",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        #     "depth": True,
+        # },
         "side_camera": {
-            "serial_number": "234222300515",
+            "serial_number": "242422303461",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
     }
+    # IMAGE_CROP = {
+    #     "front_camera": lambda img: img[242:370, 232:360],
+    #     "wrist_camera": lambda img: img[0:480, 120:600],
+    # }
+    
+    # "wrist_classifier": lambda img: img[50:280, 270:500],
     IMAGE_CROP = {
-        "front_camera": lambda img: img[242:370, 232:360],
+        "front_camera": lambda img: img[60:340, 140:420],
         "wrist_camera": lambda img: img[0:480, 120:600],
+        "front_classifier": lambda img: img[240:340, 310:410],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
@@ -50,7 +81,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.05, 0.05, 0.05)
+    ACTION_SCALE = (0.005, 0.005, 0.05)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
@@ -107,13 +138,13 @@ class TrainConfig(DefaultTrainingConfig):
         env_config.ENABLE_TACTILE = enable_tactile
         if enable_tactile:
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
-            self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            self.classifier_keys = ["front_classifier", "wrist_camera", "tactile_data"]
+            self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             # self.classifier_keys = ["front_camera","tactile_data"]
             # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 2.0, "tactile_data": 2.0}
             # self.classifier_keys = ["wrist_camera", "tactile_data"]
             # self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
         else:
@@ -156,7 +187,10 @@ class TrainConfig(DefaultTrainingConfig):
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.95
+                if prob > 0.8 and obs["state"][0][0] < 0.71:
+                    success = 1
+                else:
+                    success = 0
                 # if classifier == classifier_pick:
                 #     reward = 0.3 if success else 0
                 # else:

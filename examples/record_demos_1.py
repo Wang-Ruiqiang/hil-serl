@@ -206,10 +206,13 @@ def main(_):
 
                 done = reward or terminate
 
-                ACTION_SCALE = (0.05, 0.05, 0.05)
+                ACTION_SCALE = (0.005, 0.005, 0.05)
                 delta_pos = next_obs["state"][:3] - obs["state"][:3]
                 actions[:3] = delta_pos / ACTION_SCALE[0]
-
+                low  = np.array([-1, -1, -1, -1, -1, -1, -1], dtype=np.float32)
+                high = np.array([1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
+                actions = np.clip(actions, low, high)
+                
                 current_quat = obs["state"][3:7]  # wxyz
                 next_quat = next_obs["state"][3:7]
 
