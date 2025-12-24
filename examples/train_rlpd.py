@@ -376,8 +376,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 demo_transitions.append(copy.deepcopy(transition))
 
             obs = next_obs
-            if done and is_pick:
-                print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+            # if done and is_pick:
+            #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
             if done and not is_pick:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count

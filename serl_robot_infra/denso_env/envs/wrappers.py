@@ -45,6 +45,8 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
         self.is_pick = True  # whether the task is pick or place, used for classifier
+        self.pick_done = 0
+        self.config = env.config
 
     def compute_reward(self, obs):
         if self.reward_classifier_func is not None:
@@ -55,21 +57,24 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         start_time = time.time()
         obs, rew, done, truncated, info = self.env.step(action)
         rew = self.compute_reward(obs)
-        if rew <= 0:
-            done = 0
+        if self.config.EXP_NAME == "tube_insertion":
+            done = 0 or (rew == 1)
+            if rew == 0.2:
+                self.pick_done = 1
         else:
-            done = 1
+            done = done or (rew > 0)
 
-        info['succeed'] = bool(rew)
-        print("is_pick = ", self.is_pick)
+        info['succeed'] = bool(rew == 1)
         info['is_pick'] = self.is_pick
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        if done and self.is_pick:
-            self.is_pick = False  # switch to place task after pick is done
-        elif done and not self.is_pick:
-            self.is_pick = True
+        if self.config.EXP_NAME == "tube_insertion":
+            if self.pick_done and self.is_pick:
+                self.is_pick = False  # switch to place task after pick is done
+            elif done and not self.is_pick:
+                self.is_pick = True
+                self.pick_done = 0
         # if done:
         #     self.env.move_up()
         # print("reward = ", rew)

@@ -27,7 +27,7 @@ IMAGE_CROP = {
 }
 
 CLASSIFIER_IMAGE_CROP = {
-    "front_classifier": lambda img: img[240:340, 310:410],
+    "front_classifier": lambda img: img[240:360, 230:350],
     "wrist_classifier": lambda img: img[50:280, 270:500],
 }
 
@@ -78,7 +78,7 @@ class ObsHistoryBuffer:
     
 
 def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
-    color_image_path = os.path.join(frame_path, "color_image2.jpg")
+    color_image_path = os.path.join(frame_path, "color_image.jpg")
     color_image_path_wrist = os.path.join(frame_path, "color_image3.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")

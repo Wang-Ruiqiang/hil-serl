@@ -7,13 +7,10 @@ import cv2
 # 裁剪区域（你提供的参数）
 # -------------------------
 CROP_CONFIG = {
-    # "front_camera": [40, 390, 190, 390],   # y1, y2, x1, x2
-    # "front_camera": [90, 380, 200, 375],   # y1, y2, x1, x2
-    # "front_camera": [90, 340, 150, 400],   # y1, y2, x1, x2
-    "front_camera": [240, 340, 310, 410],   # y1, y2, x1, x2
-    "wrist_camera": [50, 280, 270, 500],  # y1, y2, x1, x2
-    # "front_camera": [60, 340, 140, 420],   # y1, y2, x1, x2
+    # "front_camera": [242, 370, 232, 360],   # y1, y2, x1, x2
     # "wrist_camera": [0, 480, 120, 600],  # y1, y2, x1, x2
+    "front_camera": [240, 360, 230, 350],   # y1, y2, x1, x2
+    "wrist_camera": [50, 280, 270, 500],  # y1, y2, x1, x2
 }
 
 # -------------------------
@@ -22,68 +19,24 @@ CROP_CONFIG = {
 CAMERA_CONFIG = {
     "front_camera": {
         "serial_number": "218622273562",
-        "exposure": 13000,
         "dim": (640, 480),
     },
     "wrist_camera": {
         "serial_number": "218622271185",
-        "exposure": 10500,
         "dim": (640, 480),
     },
 }
 
 
-import pyrealsense2 as rs
-import numpy as np
-
-def start_camera(serial_number, width=640, height=480,
-                 exposure=None, white_balance=None,
-                 disable_auto=True, verbose=True):
+def start_camera(serial_number, width=640, height=480):
+    """启动指定序列号的 RealSense 相机"""
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_device(serial_number)
     config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, 30)
 
-    profile = pipeline.start(config)
-
-    dev = profile.get_device()
-    sensors = dev.query_sensors()
-
-    if verbose:
-        print(f"\n[Device] {dev.get_info(rs.camera_info.name)}  S/N={dev.get_info(rs.camera_info.serial_number)}")
-        for i, s in enumerate(sensors):
-            try:
-                print(f"  Sensor #{i}: {s.get_info(rs.camera_info.name)}")
-            except Exception:
-                print(f"  Sensor #{i}: (unknown name)")
-
-    # 找一个“能调曝光/自动曝光”的 sensor（通常就是你需要的那个）
-    cam_sensor = None
-    for s in sensors:
-        if s.supports(rs.option.exposure) or s.supports(rs.option.enable_auto_exposure):
-            cam_sensor = s
-            break
-
-    if cam_sensor is None:
-        print("[WARN] No sensor supports exposure/auto exposure; skip setting options.")
-        return pipeline
-
-    # 关自动
-    if disable_auto:
-        if cam_sensor.supports(rs.option.enable_auto_exposure):
-            cam_sensor.set_option(rs.option.enable_auto_exposure, 0)
-        if cam_sensor.supports(rs.option.enable_auto_white_balance):
-            cam_sensor.set_option(rs.option.enable_auto_white_balance, 0)
-
-    # 手动曝光 / WB
-    if exposure is not None and cam_sensor.supports(rs.option.exposure):
-        cam_sensor.set_option(rs.option.exposure, float(exposure))
-    if white_balance is not None and cam_sensor.supports(rs.option.white_balance):
-        cam_sensor.set_option(rs.option.white_balance, float(white_balance))
-
+    pipeline.start(config)
     return pipeline
-
-
 
 
 def get_rgb_frame(pipeline):
@@ -106,15 +59,11 @@ def main():
 
     front_pipe = start_camera(
         CAMERA_CONFIG["front_camera"]["serial_number"],
-        *CAMERA_CONFIG["front_camera"]["dim"],
-        exposure=30000, white_balance=4600,
-        disable_auto=True
+        *CAMERA_CONFIG["front_camera"]["dim"]
     )
     wrist_pipe = start_camera(
         CAMERA_CONFIG["wrist_camera"]["serial_number"],
-        *CAMERA_CONFIG["wrist_camera"]["dim"],
-        exposure=40000, white_balance=4600,
-        disable_auto=True
+        *CAMERA_CONFIG["wrist_camera"]["dim"]
     )
 
     print("相机启动成功，正在获取图像...")

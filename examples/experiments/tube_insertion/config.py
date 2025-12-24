@@ -70,10 +70,11 @@ class EnvConfig(DefaultEnvConfig):
     # }
     
     # "wrist_classifier": lambda img: img[50:280, 270:500],
+    # "front_classifier": lambda img: img[240:340, 310:410],
     IMAGE_CROP = {
         "front_camera": lambda img: img[60:340, 140:420],
         "wrist_camera": lambda img: img[0:480, 120:600],
-        "front_classifier": lambda img: img[240:340, 310:410],
+        "front_classifier": lambda img: img[240:360, 230:350],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
@@ -81,6 +82,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
+    # ACTION_SCALE = (0.01, 0.01, 0.05)
     ACTION_SCALE = (0.005, 0.005, 0.05)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
@@ -144,7 +146,7 @@ class TrainConfig(DefaultTrainingConfig):
             # self.classifier_keys = ["front_camera","tactile_data"]
             # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.image_weights = {"front_camera": 1.0, "wrist_camera": 2.0, "tactile_data": 2.0}
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             # self.classifier_keys = ["wrist_camera", "tactile_data"]
             # self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
         else:
@@ -194,13 +196,18 @@ class TrainConfig(DefaultTrainingConfig):
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                if prob > 0.8 and obs["state"][0][0] < 0.71:
-                    success = 1
-                else:
-                    success = 0
+                
                 if is_pick:
-                    reward = 0.3 if success else 0
+                    if prob > 0.5:
+                        success = 1
+                    else:
+                        success = 0
+                    reward = 0.2 if success else 0
                 else:
+                    if prob > 0.9:
+                        success = 1
+                    else:
+                        success = 0
                     reward = 1 if success else 0
                 # state = obs["state"]
                 # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
