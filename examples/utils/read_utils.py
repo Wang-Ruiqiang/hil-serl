@@ -32,7 +32,7 @@ CLASSIFIER_IMAGE_CROP = {
 }
 
 resize_dim = (128, 128)
-tactile_resize_dim = (128,128)
+tactile_resize_dim = (64, 64)
 
 
 
@@ -155,6 +155,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
         obs = {
             "front_camera": front_camera_image,
             "wrist_camera": wrist_camera_image,
+            "front_classifier": front_classifier_image,
             "tactile_data": heatmap_canvas,
             "state": state_flattened
         }

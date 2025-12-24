@@ -165,23 +165,30 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            classifier = load_classifier_func(
+            classifier_insert = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 image_key_weights=self.classifier_key_weights,
                 checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
             )
+            classifier_pick = load_classifier_func(
+                key=jax.random.PRNGKey(0),
+                sample=env.observation_space.sample(),
+                image_keys=self.classifier_keys,
+                image_key_weights=self.classifier_key_weights,
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
+            )
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                # if is_pick:
-                #     print("classifier = classifier_pick")
-                #     classifier = classifier_pick
-                # else:
-                #     print("classifier = classifier_place")
-                #     classifier = classifier_normal
+                if is_pick:
+                    print("classifier = classifier_pick")
+                    classifier = classifier_pick
+                else:
+                    print("classifier = classifier_place")
+                    classifier = classifier_insert
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
@@ -191,10 +198,10 @@ class TrainConfig(DefaultTrainingConfig):
                     success = 1
                 else:
                     success = 0
-                # if classifier == classifier_pick:
-                #     reward = 0.3 if success else 0
-                # else:
-                reward = 1 if success else 0
+                if is_pick:
+                    reward = 0.3 if success else 0
+                else:
+                    reward = 1 if success else 0
                 # state = obs["state"]
                 # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
                 # if ee_pos[2] < 0.16:

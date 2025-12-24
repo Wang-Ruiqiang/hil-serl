@@ -339,7 +339,7 @@ class DensoEnv(gym.Env):
                         {
                             **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS},
-                            "tactile_data": gym.spaces.Box(0, 255, shape=(128, 256, 3), dtype=np.uint8),
+                            "tactile_data": gym.spaces.Box(0, 255, shape=(64, 128, 3), dtype=np.uint8),
                         }
                     ),
                 }
@@ -382,7 +382,7 @@ class DensoEnv(gym.Env):
             self.middle_tactile_sensor = Sensor(middle_cfg)
             # self.middle_tactile_vis  = Visualizer(self.middle_tactile_sensor.points)
 
-            self.tactile_size = (128, 128)
+            self.tactile_size = (64, 64)
             self.thumb_raw_img = []
             self.index_raw_img = []
             self.middle_raw_img = []
@@ -501,7 +501,7 @@ class DensoEnv(gym.Env):
         xyz_delta = action[:3]
 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
-        print("action scaled = ", xyz_delta * self.action_scale[0])
+        # print("action scaled = ", xyz_delta * self.action_scale[0])
         if self.nextpos[2] < 0.05:
             self.nextpos[2] = 0.05
         if self.nextpos[1] < -0.145:
