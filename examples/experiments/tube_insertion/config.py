@@ -198,13 +198,13 @@ class TrainConfig(DefaultTrainingConfig):
                 prob = sigmoid(classifier(obs)).item()
                 
                 if is_pick:
-                    if prob > 0.5:
+                    if prob > 0.8:
                         success = 1
                     else:
                         success = 0
                     reward = 0.2 if success else 0
                 else:
-                    if prob > 0.9:
+                    if prob > 0.8:
                         success = 1
                     else:
                         success = 0

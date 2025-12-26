@@ -51,9 +51,9 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 96000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 100, "Number of trajectories to evaluate.")
-flags.DEFINE_boolean("save_video", False, "Save video.")
+flags.DEFINE_boolean("save_video", True, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
 flags.DEFINE_boolean("is_pick", True, "read exist data or not.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
@@ -114,13 +114,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             success_counter = 0
             intervention_label = 0
             time_list = []
-            # print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
-            # ckpt = checkpoints.restore_checkpoint(
-            #     os.path.abspath(FLAGS.checkpoint_path),
-            #     agent.state,
-            #     step=FLAGS.eval_checkpoint_step,
-            # )
-            # agent = agent.replace(state=ckpt)
+            print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
+            ckpt = checkpoints.restore_checkpoint(
+                os.path.abspath(FLAGS.checkpoint_path),
+                agent.state,
+                step=FLAGS.eval_checkpoint_step,
+            )
+            agent = agent.replace(state=ckpt)
             
             obs, _ = env.reset()
             key_reader = KeyReader()
@@ -131,13 +131,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 done = False
                 start_time = time.time()
 
-                print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
-                ckpt = checkpoints.restore_checkpoint(
-                    os.path.abspath(FLAGS.checkpoint_path),
-                    agent.state,
-                    step=ckpt_step,
-                )
-                agent = agent.replace(state=ckpt)
+                # print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
+                # ckpt = checkpoints.restore_checkpoint(
+                #     os.path.abspath(FLAGS.checkpoint_path),
+                #     agent.state,
+                #     step=ckpt_step,
+                # )
+                # agent = agent.replace(state=ckpt)
                 while not done:
 
                     sampling_rng, key = jax.random.split(sampling_rng)
@@ -196,7 +196,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                             env.unwrapped.save_video_recording(episode)
                         print(f"{success_counter}/{episode + 1}")
                         intervention_label = 0
-                        ckpt_step += 5000
+                        ckpt_step += 1000
                         done_by_manual = False
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)

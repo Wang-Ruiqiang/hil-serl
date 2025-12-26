@@ -872,7 +872,8 @@ class DensoEnv(gym.Env):
         """Get images from the realsense cameras."""
         images = {}
         display_images = {}
-        full_res_images = {}  # New dictionary to store full resolution cropped images
+        full_res_images = {}
+        video_images = {}
         for key, cap in self.cap.items():
             if key == "side_camera":
                 continue
@@ -883,6 +884,7 @@ class DensoEnv(gym.Env):
                 else:
                     rgb = frame
                 rgb = rgb.astype(np.uint8)
+                video_images[key] = rgb
                 cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
                 # cropped_rgb = rgb #当前不需要裁剪
                 resized = cv2.resize(
@@ -909,6 +911,7 @@ class DensoEnv(gym.Env):
         else:
             heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
             full_res_images["tactile_data"] = heat_map
+            video_images["tactile_data"] = heat_map
             if self.display_image:
                 with self.tac_index_lock:
                     display_image = {
@@ -919,7 +922,7 @@ class DensoEnv(gym.Env):
         
         self.img_queue.put(display_image)
         if self.save_video:
-            self.recording_frames.append(full_res_images)
+            self.recording_frames.append(video_images)
         return images
 
 
