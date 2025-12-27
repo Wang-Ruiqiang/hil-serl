@@ -59,6 +59,9 @@ class RAMEnv(DensoEnv):
         self._send_leap_hand_command(self.gripper_open_joint, steps=20, step_time=0.05)
         time.sleep(1)
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
+        
+        # z_init = np.random.uniform(0.08, 0.14)
+        # init_pos = np.array([0.7, -0.1458, z_init])
         init_pos = np.array([0.7, -0.1458, 0.0809])
         init_ori = np.array([0, 1, 0, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])

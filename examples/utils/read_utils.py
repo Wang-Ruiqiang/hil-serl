@@ -148,6 +148,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     if not enable_tactile:
         obs = {
             "front_camera": front_camera_image,
+            "front_classifier": front_classifier_image,
             "wrist_camera": wrist_camera_image,
             "state": state_flattened
         }

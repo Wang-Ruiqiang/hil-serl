@@ -309,7 +309,7 @@ class DensoEnv(gym.Env):
                         }
                     ),
                     "images": gym.spaces.Dict(
-                        {key: gym.spaces.Box(0, 255, shape=(64, 64, 3), dtype=np.uint8) 
+                        {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS}
                     ),
                 }
@@ -1171,16 +1171,6 @@ class DensoEnv(gym.Env):
 
     def _get_obs(self) -> dict:
         images = self.get_im()
-        # front_camera_image = images["front_camera"]
-        # wrist_camera_image = images["wrist_camera"]
-        # side_camera_image = images["side_camera"]
-        # print("self.hand_state", self.hand_state)
-
-        # state_flattened = np.concatenate([
-        #     np.array(self.cur_position, dtype=np.float32).flatten(),
-        #     np.array(self.cur_oritation, dtype=np.float32).flatten(),
-        #     np.array(self.hand_state, dtype=np.float32).flatten(), 
-        # ])
         state_observation = {
             "tcp_pos": self.cur_position,
             "tcp_ori": self.cur_oritation,
@@ -1193,21 +1183,6 @@ class DensoEnv(gym.Env):
         }
         for cam_key, img in images.items():
             obs["images"][cam_key] = img
-            
-        # if not self.enable_tactile:
-            # obs = copy.deepcopy({
-            #     "front_camera": front_camera_image,
-            #     "wrist_camera": wrist_camera_image,
-            #     "state": state_flattened
-            # })
-        # else:
-        #     heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-            # obs = copy.deepcopy({
-            #     "front_camera": front_camera_image,
-            #     "wrist_camera": wrist_camera_image,
-            #     "tactile_data":heatmap_canvas,
-            #     "state": state_flattened
-            # })
             
         if self.enable_tactile:
             heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])

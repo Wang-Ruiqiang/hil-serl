@@ -26,7 +26,7 @@ class EnvConfig(DefaultEnvConfig):
         #     "depth": True,
         # },
         "front_camera": {
-            "serial_number": "218622273562",
+            "serial_number": "318122301393",
             "dim": (640, 480),
             "exposure": 30000,
             "depth": True,
@@ -38,7 +38,7 @@ class EnvConfig(DefaultEnvConfig):
             "depth": True,
         },
         "front_classifier": {
-            "serial_number": "218622273562",
+            "serial_number": "318122301393",
             "dim": (640, 480),
             "exposure": 30000,
         },
@@ -70,11 +70,12 @@ class EnvConfig(DefaultEnvConfig):
     # }
     
     # "wrist_classifier": lambda img: img[50:280, 270:500],
-    # "front_classifier": lambda img: img[240:340, 310:410],
+    # "front_classifier": lambda img: img[240:360, 230:350],   D405 ROI
+    # "front_camera": lambda img: img[60:340, 140:420],  D405 ROI
     IMAGE_CROP = {
-        "front_camera": lambda img: img[60:340, 140:420],
+        "front_camera": lambda img: img[57:337, 115:395],
         "wrist_camera": lambda img: img[0:480, 120:600],
-        "front_classifier": lambda img: img[240:360, 230:350],
+        "front_classifier": lambda img: img[240:360, 210:330],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
@@ -142,17 +143,12 @@ class TrainConfig(DefaultTrainingConfig):
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.classifier_keys = ["front_classifier", "wrist_camera", "tactile_data"]
             self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
-            # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            # self.classifier_keys = ["front_camera","tactile_data"]
-            # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
-            # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
-            # self.classifier_keys = ["wrist_camera", "tactile_data"]
-            # self.classifier_key_weights = {"wrist_camera": 1.0, "tactile_data": 1.0}
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
-            self.classifier_keys = ["front_camera", "wrist_camera"]
-            self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
+            self.classifier_keys = ["front_classifier", "wrist_camera"]
+            self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0}
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             
         env = RAMEnv(
             fake_env=fake_env,
@@ -167,20 +163,36 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            classifier_insert = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
-            )
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
-            )
+            if enable_tactile:
+                classifier_insert = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
+                )
+                classifier_pick = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
+                )
+            else:
+                classifier_insert = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion_no_tactile/"),
+                )
+                classifier_pick = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick_no_tactile/"),
+                )
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))

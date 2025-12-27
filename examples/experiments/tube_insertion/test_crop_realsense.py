@@ -9,7 +9,8 @@ import cv2
 CROP_CONFIG = {
     # "front_camera": [242, 370, 232, 360],   # y1, y2, x1, x2
     # "wrist_camera": [0, 480, 120, 600],  # y1, y2, x1, x2
-    "front_camera": [240, 360, 230, 350],   # y1, y2, x1, x2
+    # "front_camera": [240, 360, 210, 330],   # y1, y2, x1, x2
+    "front_camera": [60, 340, 110, 390],   # y1, y2, x1, x2
     "wrist_camera": [50, 280, 270, 500],  # y1, y2, x1, x2
 }
 
@@ -18,7 +19,7 @@ CROP_CONFIG = {
 # -------------------------
 CAMERA_CONFIG = {
     "front_camera": {
-        "serial_number": "218622273562",
+        "serial_number": "318122301393",
         "dim": (640, 480),
     },
     "wrist_camera": {

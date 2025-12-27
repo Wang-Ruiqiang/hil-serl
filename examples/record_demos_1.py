@@ -37,7 +37,7 @@ flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/record
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
 flags.DEFINE_boolean("is_pick_and_place", False, "read exist data or not.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -68,7 +68,7 @@ def main(_):
 
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=True, save_video=False, classifier=True)
+    env = config.get_environment(fake_env=True, save_video=False, classifier=True, enable_tactile=FLAGS.enable_tactile)
     terminate = False
     transitions = []
     success_needed = FLAGS.successes_needed
@@ -98,13 +98,22 @@ def main(_):
                 checkpoint_path=os.path.abspath("classifier_ckpt_pick_bottle_twist/"),
             )
     elif FLAGS.exp_name == "tube_insertion":
-        classifier = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=config.classifier_keys,
-                image_key_weights=config.classifier_key_weights,
-                checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion/"),
-            )
+        if FLAGS.enable_tactile:
+            classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion/"),
+                )
+        else:
+            classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion_no_tactile/"),
+                )
     elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place:
             classifier = load_classifier_func(

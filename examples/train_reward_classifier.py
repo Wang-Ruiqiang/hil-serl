@@ -32,9 +32,9 @@ flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment correspond
 flags.DEFINE_integer("num_epochs", 100, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("is_tube_pick", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def main(_):
@@ -60,10 +60,16 @@ def main(_):
     if FLAGS.exp_name == "twist_bottle_cap":
         success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*success*.pkl"))
     if FLAGS.exp_name == "tube_insertion":
-        if FLAGS.is_tube_pick:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick", "*success*.pkl"))
+        if FLAGS.enable_tactile:
+            if FLAGS.is_tube_pick:
+                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick", "*success*.pkl"))
+            else:
+                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion", "*success*.pkl"))
         else:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion", "*success*.pkl"))
+            if FLAGS.is_tube_pick:
+                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick_no_tactile", "*success*.pkl"))
+            else:
+                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion_no_tactile", "*success*.pkl"))
     elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place_task:
             success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
@@ -105,10 +111,16 @@ def main(_):
     if FLAGS.exp_name == "twist_bottle_cap":
         failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*failure*.pkl"))
     elif FLAGS.exp_name == "tube_insertion":
-        if FLAGS.is_tube_pick:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick", "*failure*.pkl"))
+        if FLAGS.enable_tactile:
+            if FLAGS.is_tube_pick:
+                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick", "*failure*.pkl"))
+            else:
+                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion", "*failure*.pkl"))
         else:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion", "*failure*.pkl"))
+            if FLAGS.is_tube_pick:
+                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick_no_tactile", "*failure*.pkl"))
+            else:
+                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion_no_tactile", "*failure*.pkl"))
     elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place_task:
             failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
@@ -213,20 +225,36 @@ def main(_):
             overwrite=True,
         )
     elif FLAGS.exp_name == "tube_insertion":
-        if FLAGS.is_tube_pick:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_tube_pick/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
+        if FLAGS.enable_tactile:
+            if FLAGS.is_tube_pick:
+                checkpoints.save_checkpoint(
+                    os.path.join(os.getcwd(), "classifier_ckpt_tube_pick/"),
+                    classifier,
+                    step=FLAGS.num_epochs,
+                    overwrite=True,
+                )
+            else:
+                checkpoints.save_checkpoint(
+                    os.path.join(os.getcwd(), "classifier_ckpt_tube_insertion/"),
+                    classifier,
+                    step=FLAGS.num_epochs,
+                    overwrite=True,
+                )
         else:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_tube_insertion/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
+            if FLAGS.is_tube_pick:
+                checkpoints.save_checkpoint(
+                    os.path.join(os.getcwd(), "classifier_ckpt_tube_pick_no_tactile/"),
+                    classifier,
+                    step=FLAGS.num_epochs,
+                    overwrite=True,
+                )
+            else:
+                checkpoints.save_checkpoint(
+                    os.path.join(os.getcwd(), "classifier_ckpt_tube_insertion_no_tactile/"),
+                    classifier,
+                    step=FLAGS.num_epochs,
+                    overwrite=True,
+                )
     elif FLAGS.exp_name == "tennis_ball_pick":
         if FLAGS.is_pick_and_place_task:
             checkpoints.save_checkpoint(
