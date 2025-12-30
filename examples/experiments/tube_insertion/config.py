@@ -19,16 +19,10 @@ from experiments.tube_insertion.wrapper import RAMEnv
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
-        # "front_camera": {
-        #     "serial_number": "242422303461",
-        #     "dim": (640, 480),
-        #     "exposure": 13000,
-        #     "depth": True,
-        # },
         "front_camera": {
             "serial_number": "318122301393",
             "dim": (640, 480),
-            "exposure": 30000,
+            "exposure": 40000,
             "depth": True,
         },
         "wrist_camera": {
@@ -40,23 +34,11 @@ class EnvConfig(DefaultEnvConfig):
         "front_classifier": {
             "serial_number": "318122301393",
             "dim": (640, 480),
-            "exposure": 30000,
+            "exposure": 40000,
         },
-        # "wrist_classifier": {
-        #     "serial_number": "218622271185",
-        #     "dim": (640, 480),
-        #     "exposure": 40000,
-        #     "depth": True,
-        # },
         
     }
     EXTRA_REALSENSE_CAMERAS = {
-        # "side_camera": {
-        #     "serial_number": "234222300515",
-        #     "dim": (640, 480),
-        #     "exposure": 40000,
-        #     "depth": True,
-        # },
         "side_camera": {
             "serial_number": "242422303461",
             "dim": (640, 480),
@@ -118,9 +100,6 @@ class EnvConfig(DefaultEnvConfig):
 
 
 class TrainConfig(DefaultTrainingConfig):
-    # image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-    # classifier_keys = ["front_camera", "wrist_camera"]
-    # classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
     state_weights = np.concatenate(
         [
             np.full(6, 1.0, dtype=np.float32),  # arm joints
@@ -128,8 +107,6 @@ class TrainConfig(DefaultTrainingConfig):
         ]
     )
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
-    # proprio_keys = ["tcp_pos", "tcp_ori"]
-    # classifier_keys = ["front_camera", "side_camera"]
     buffer_period = 1000
     checkpoint_period = 1000
     steps_per_update = 100
@@ -210,13 +187,13 @@ class TrainConfig(DefaultTrainingConfig):
                 prob = sigmoid(classifier(obs)).item()
                 
                 if is_pick:
-                    if prob > 0.8:
+                    if prob > 0.4:
                         success = 1
                     else:
                         success = 0
                     reward = 0.2 if success else 0
                 else:
-                    if prob > 0.8:
+                    if prob > 0.70:
                         success = 1
                     else:
                         success = 0

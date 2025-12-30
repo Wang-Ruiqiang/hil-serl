@@ -28,13 +28,13 @@ from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 100, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("is_place_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 
 def main(_):
@@ -71,12 +71,10 @@ def main(_):
             else:
                 success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion_no_tactile", "*success*.pkl"))
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_pick_and_place_task:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*success*.pkl"))
+        if FLAGS.is_place_task:
+            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*success*.pkl"))
         elif FLAGS.is_pick_task:
             success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*success*.pkl"))
-        else:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*success*.pkl"))
 
     for path in success_paths:
         success_data = []
@@ -122,12 +120,10 @@ def main(_):
             else:
                 failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion_no_tactile", "*failure*.pkl"))
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_pick_and_place_task:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data", "*failure*.pkl"))
+        if FLAGS.is_place_task:
+            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*failure*.pkl"))
         elif FLAGS.is_pick_task:
             failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*failure*.pkl"))
-        else:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*failure*.pkl"))
 
     for path in failure_paths:
          failure_data = []
@@ -256,23 +252,16 @@ def main(_):
                     overwrite=True,
                 )
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_pick_and_place_task:
+        if FLAGS.is_place_task:
             checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_ball_pick/"),
+                os.path.join(os.getcwd(), "classifier_ckpt_ball_place/"),
                 classifier,
                 step=FLAGS.num_epochs,
                 overwrite=True,
             )
         elif FLAGS.is_pick_task:
             checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_pick/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
-        else:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_place/"),
+                os.path.join(os.getcwd(), "classifier_ckpt_ball_pick/"),
                 classifier,
                 step=FLAGS.num_epochs,
                 overwrite=True,

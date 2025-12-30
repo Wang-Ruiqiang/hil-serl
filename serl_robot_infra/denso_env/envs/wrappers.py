@@ -61,6 +61,10 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
             done = 0 or (rew == 1)
             if rew == 0.2:
                 self.pick_done = 1
+        elif self.config.EXP_NAME == "tennis_ball_pick":
+            done = 0 or (rew == 1)
+            if rew == 0.1:
+                self.pick_done = 1
         else:
             done = done or (rew > 0)
 
@@ -69,7 +73,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        if self.config.EXP_NAME == "tube_insertion":
+        if self.config.EXP_NAME == "tube_insertion" or self.config.EXP_NAME == "tennis_ball_pick":
             if self.pick_done and self.is_pick:
                 self.is_pick = False  # switch to place task after pick is done
             elif done and not self.is_pick:

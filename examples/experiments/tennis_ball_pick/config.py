@@ -25,57 +25,59 @@ class EnvConfig(DefaultEnvConfig):
             "exposure": 40000,
             "depth": True,
         },
-        # "side_camera": {
-        #     "serial_number": "234222300515",
+        # "wrist_camera": {
+        #     "serial_number": "218622271185",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        #     "depth": True,
+        # },
+        # "front_classifier": {
+        #     "serial_number": "318122301393",
         #     "dim": (640, 480),
         #     "exposure": 40000,
         # },
     }
     EXTRA_REALSENSE_CAMERAS = {
-        "side_camera": {
-            "serial_number": "234222300515",
+        "front_camera_2": {
+            "serial_number": "318122301393",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
     }
     IMAGE_CROP = {
-        "front_camera": lambda img: img[150:450, 350:1100],
-        "side_camera": lambda img: img[100:500, 400:900],
+        "front_camera": lambda img: img[0:460, 60:520],
+        # "front_classifier": lambda img: img[240:360, 210:330],
     }
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.05, 0.05, 0.05)
+    ACTION_SCALE = (0.02, 0.02, 0.02)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
     GRIPPER_CLOSE_JOINT = np.array([
-        3.546563625335693359, 4.127942085266113281, 3.413689804077148438, 3.641670465469360352,
-        3.626330614089965820, 3.529689788818359375, 2.931437253952026367, 3.782796621322631836,
-        3.838019847869873047, 3.532757759094238281, 3.535825729370117188, 3.413107156753540039,
-        4.661767482757568359, 3.366175127029418945, 3.260291767120361328, 3.566796636581420898
+        3.1584663, 4.4301367, 3.3057287, 3.3241363,
+        3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+        3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        4.6126804, 3.118583, 3.028078, 3.4085052,
+    ], dtype=np.float32)
+    GRIPPER_OPEN_JOINT = np.array([
+        3.209087848663330078, 4.022466754913330078, 3.210621833801269531, 3.652039194107055664,
+        3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+        3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+        4.644893646240234375, 3.060291767120361328, 2.528000354766845703, 3.739845275878906250,
     ], dtype=np.float32)
     
-    GRIPPER_OPEN_JOINT = np.array([
-        2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,    #index
-        2.904854822158813477, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,   #middle
-        3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.512019824981689453, 3.3605515193939208984, 3.374757766723632812, 3.397184896469116211    #thumb
-    ], dtype=np.float32)
-    IS_ARM_ONLY = True
+    
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     EXP_NAME = "tennis_ball_pick"
 
 
 class TrainConfig(DefaultTrainingConfig):
-    image_keys = ["front_camera", "tactile_data"]
-    # image_keys = ["front_camera", "side_camera"]
-    classifier_keys = ["front_camera", "tactile_data"]
-    classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
     state_weights = np.concatenate(
         [
             np.full(6, 1.0, dtype=np.float32),  # arm joints
@@ -83,10 +85,9 @@ class TrainConfig(DefaultTrainingConfig):
         ]
     )
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
-    # proprio_keys = ["tcp_pos", "tcp_ori"]
-    # classifier_keys = ["front_camera", "side_camera"]
+    batch_size = 128
     buffer_period = 1000
-    checkpoint_period = 1000 
+    checkpoint_period = 1000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
@@ -94,6 +95,18 @@ class TrainConfig(DefaultTrainingConfig):
     def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
+        
+        if enable_tactile:
+            self.image_keys = ["front_camera", "tactile_data"]
+            self.classifier_keys = ["front_camera", "tactile_data"]
+            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
+            self.image_weights = {"front_camera": 1.0, "tactile_data": 1.0}
+        else:
+            self.image_keys = ["front_camera"]
+            self.classifier_keys = ["front_camera"]
+            self.classifier_key_weights = {"front_camera": 1.0}
+            self.image_weights = {"front_camera": 1.0}
+            
         
         env = RAMEnv(
             fake_env=fake_env,
@@ -109,61 +122,61 @@ class TrainConfig(DefaultTrainingConfig):
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
-            )
-
-            # classifier_place = load_classifier_func(
+            # classifier_pick = load_classifier_func(
             #     key=jax.random.PRNGKey(0),
             #     sample=env.observation_space.sample(),
             #     image_keys=self.classifier_keys,
-            #     checkpoint_path=os.path.abspath("../../classifier_ckpt/"),
+            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
             # )
+            
             classifier_pick = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_pick/"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
             )
             
-            classifier_normal = load_classifier_func(
+            classifier_place = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt"),
+                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_place/"),
             )
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                # if is_pick:
-                #     print("classifier = classifier_pick")
-                #     classifier = classifier_pick
-                # else:
-                #     print("classifier = classifier_place")
-                #     classifier = classifier_normal
-                classifier = classifier_pick
+                if is_pick:
+                    print("classifier = classifier_pick")
+                    classifier = classifier_pick
+                else:
+                    print("classifier = classifier_place")
+                    classifier = classifier_place
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.3
-                # if classifier == classifier_pick:
-                #     reward = 0.3 if success else 0
-                # else:
-                reward = 1 if success else 0
-                state = obs["state"]
-                ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-                gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]
-                if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-                    reward -= 0.01
-                if ee_pos[2] < 0.02:
-                    reward -= 0.05
+                if is_pick:
+                    if prob > 0.7:
+                        success = 1
+                    else:
+                        success = 0
+                    reward = 0.1 if success else 0
+                else:
+                    if prob > 0.5:
+                        success = 1
+                    else:
+                        success = 0
+                    reward = 1 if success else 0
+                # state = obs["state"]
+                # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
+                # gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]
+                # if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
+                #     reward -= 0.01
+                # if ee_pos[2] < 0.02:
+                #     reward -= 0.05
                 # if not is_pick and -0.30 < ee_pos[1] < -0.04 and gripper_pose < 0.8:
                 #     reward -= 0.05
                 return reward

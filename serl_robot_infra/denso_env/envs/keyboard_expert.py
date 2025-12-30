@@ -20,7 +20,7 @@ class KeyboardExpert:
         self.latest_data["action"] = [0.0] * 7
         if exp_name == "tennis_ball_pick":
             self.LARGE_STEP = 1
-            self.SMALL_STEP = 0.2
+            self.SMALL_STEP = 0.5
         elif exp_name == "twist_bottle_cap":
             self.LARGE_STEP = 0.5
             self.SMALL_STEP = 0.2

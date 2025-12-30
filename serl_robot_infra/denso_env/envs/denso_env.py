@@ -423,23 +423,16 @@ class DensoEnv(gym.Env):
         self.oritation_data = []
         self.next_hand_pos = np.zeros(16)
 
+        # Spin ROS callbacks in a background thread and keep references so we can
+        # shut everything down cleanly when the environment closes.
         rclpy.init(args=None)
 
         self.ros_interface = ROSNodeInterface()
 
-        # executor = rclpy.executors.MultiThreadedExecutor()
-        # executor.add_node(self.ros_interface)
-        # executor_thread = threading.Thread(target=executor.spin, daemon=True)
-        # executor_thread.start()
-
-        # Spin ROS callbacks in a background thread and keep references so we can
-        # shut everything down cleanly when the environment closes.
-        self.executor = rclpy.executors.MultiThreadedExecutor()
-        self.executor.add_node(self.ros_interface)
-        self.executor_thread = threading.Thread(
-            target=self.executor.spin, daemon=True
-        )
-        self.executor_thread.start()
+        executor = rclpy.executors.MultiThreadedExecutor()
+        executor.add_node(self.ros_interface)
+        executor_thread = threading.Thread(target=executor.spin, daemon=True)
+        executor_thread.start()
 
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
@@ -447,7 +440,7 @@ class DensoEnv(gym.Env):
         self.print_action = True
         self._last_step_time = None
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-25-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-29-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -502,10 +495,14 @@ class DensoEnv(gym.Env):
 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
         # print("action scaled = ", xyz_delta * self.action_scale[0])
-        if self.nextpos[2] < 0.05:
-            self.nextpos[2] = 0.05
-        if self.nextpos[1] < -0.145:
-            self.nextpos[1] = -0.145
+        
+        if self.nextpos[2] < 0.03:
+            self.nextpos[2] = 0.03
+        if self.exp_name == "tube_insertion":
+            if self.nextpos[2] < 0.05:
+                self.nextpos[2] = 0.05
+            if self.nextpos[1] < -0.145:
+                self.nextpos[1] = -0.145
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -875,7 +872,7 @@ class DensoEnv(gym.Env):
         full_res_images = {}
         video_images = {}
         for key, cap in self.cap.items():
-            if key == "side_camera":
+            if key == "front_camera_2":
                 continue
             try:
                 frame = cap.read()
@@ -891,7 +888,7 @@ class DensoEnv(gym.Env):
                     cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
                 )
                 images[key] = resized[..., ::-1]
-                display_images[key] = resized
+                # display_images[key] = resized
                 display_images[key + "_full"] = cropped_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
             except queue.Empty:
@@ -901,26 +898,20 @@ class DensoEnv(gym.Env):
                 cap.close()
                 self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_im()
-
-        if not self.enable_tactile:
-            if self.display_image:
-                display_image = {
-                    "front_camera": display_images["front_camera_full"],
-                    "wrist_camera": display_images["wrist_camera_full"],
-                }
-        else:
+        # if not self.enable_tactile:
+        #     if self.display_image:
+        #         display_image = {
+        #             "front_camera": display_images["front_camera_full"],
+        #             "wrist_camera": display_images["wrist_camera_full"],
+        #         }
+        if self.enable_tactile:
             heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
             full_res_images["tactile_data"] = heat_map
             video_images["tactile_data"] = heat_map
-            if self.display_image:
-                with self.tac_index_lock:
-                    display_image = {
-                        "heat_map": heat_map,
-                        "front_camera": display_images["front_camera_full"],
-                        "wrist_camera": display_images["wrist_camera_full"],
-                    }
-        
-        self.img_queue.put(display_image)
+            with self.tac_index_lock:
+                display_images["heat_map"] = heat_map
+        if self.display_image:
+            self.img_queue.put(display_images)
         if self.save_video:
             self.recording_frames.append(video_images)
         return images
@@ -1201,22 +1192,23 @@ class DensoEnv(gym.Env):
             self.displayer.join()
 
         # Ensure ROS executor and node are cleaned up to avoid threading errors
+        if hasattr(self, "_ros_spin_stop"):
+            self._ros_spin_stop.set()
+
+        # 2) 等 spin thread 退出来（先 join）
+        if hasattr(self, "executor_thread") and self.executor_thread.is_alive():
+            self.executor_thread.join(timeout=2)
+            print("executor_thread alive?", self.executor_thread.is_alive(), flush=True)
+
+        # 3) 再 shutdown executor + node + rclpy
         if hasattr(self, "executor"):
-            if hasattr(self, "ros_interface"):
-                # Remove the node from the executor and destroy it before shutting down ROS
-                self.executor.remove_node(self.ros_interface)
-                self.ros_interface.destroy_node()
-            try:
-                if getattr(rclpy, "is_initialized", lambda: True)():
-                    # Signal the spinning thread to exit
-                    rclpy.shutdown()
-            except Exception:
-                pass
-            if hasattr(self, "executor_thread"):
-                # Wait for the executor thread to finish before closing it
-                self.executor_thread.join()
             self.executor.shutdown()
 
+        if hasattr(self, "ros_interface"):
+            self.ros_interface.destroy_node()
+
+        if rclpy.ok():
+            rclpy.shutdown()
 
     def pose_callback(self, msg):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
@@ -1240,7 +1232,7 @@ class DensoEnv(gym.Env):
                 if cam_name == "front_camera":
                     self.front_color_buffer.append(copy.deepcopy(img[..., ::-1]))
                     self.front_depth_buffer.append(copy.deepcopy(depth))
-                elif cam_name == "side_camera":
+                elif cam_name == "front_camera_2":
                     self.side_color_buffer.append(copy.deepcopy(img[..., ::-1]))
                     self.side_depth_buffer.append(copy.deepcopy(depth))
                 elif cam_name == "wrist_camera":
@@ -1267,12 +1259,15 @@ class DensoEnv(gym.Env):
             frame_dir = os.path.join(self.frame_save_path, f"frame_{frame_id}")
             os.makedirs(frame_dir, exist_ok=True)
 
-            cv2.imwrite(os.path.join(frame_dir, "color_image.jpg"), self.front_color_buffer[frame_id])
-            cv2.imwrite(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
-            cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), self.side_color_buffer[frame_id])
-            cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), self.side_depth_buffer[frame_id])
-            cv2.imwrite(os.path.join(frame_dir, "color_image3.jpg"), self.wrist_color_buffer[frame_id])
-            cv2.imwrite(os.path.join(frame_dir, "depth_image3.png"), self.wrist_depth_buffer[frame_id])
+            if len(self.front_color_buffer) > frame_id:
+                cv2.imwrite(os.path.join(frame_dir, "color_image.jpg"), self.front_color_buffer[frame_id])
+                cv2.imwrite(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
+            if len(self.side_color_buffer) > frame_id:
+                cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), self.side_color_buffer[frame_id])
+                cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), self.side_depth_buffer[frame_id])
+            if len(self.wrist_color_buffer) > frame_id:
+                cv2.imwrite(os.path.join(frame_dir, "color_image3.jpg"), self.wrist_color_buffer[frame_id])
+                cv2.imwrite(os.path.join(frame_dir, "depth_image3.png"), self.wrist_depth_buffer[frame_id])
 
             if self.enable_tactile:
                 cv2.imwrite(os.path.join(frame_dir, "thumb_raw_image.jpg"), self.rthumb_raw_buffer[frame_id])

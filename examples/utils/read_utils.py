@@ -21,12 +21,16 @@ palm_lower2denso_end_tf = np.array([
 #     "wrist_camera": lambda img: img[0:480, 120:600],
 # }
 
-IMAGE_CROP = {
+TENNIS_BALL_PICK_IMAGE_CROP = {
+    "front_camera": lambda img: img[0:460, 60:520],
+}
+
+TUBE_INSERTION_IMAGE_CROP = {
     "front_camera": lambda img: img[242:370, 232:360],
     "wrist_camera": lambda img: img[0:480, 120:600],
 }
 
-CLASSIFIER_IMAGE_CROP = {
+TUBE_INSERTION_CLASSIFIER_IMAGE_CROP = {
     "front_classifier": lambda img: img[240:360, 230:350],
     "wrist_classifier": lambda img: img[50:280, 270:500],
 }
@@ -77,9 +81,9 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
+def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="tennis_ball_pick"):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
-    color_image_path_wrist = os.path.join(frame_path, "color_image3.jpg")
+    color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
@@ -91,14 +95,15 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     # color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
-    index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
-    thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
-    middle_heat_map_image = cv2.imread(middle_heat_map_path) if os.path.exists(middle_heat_map_path) else None
+    if enable_tactile:
+        index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
+        thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
+        middle_heat_map_image = cv2.imread(middle_heat_map_path) if os.path.exists(middle_heat_map_path) else None
 
-    index_heat_map_image = cv2.resize(index_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-    thumb_heat_map_image = cv2.resize(thumb_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-    middle_heat_map_image = cv2.resize(middle_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-    heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
+        index_heat_map_image = cv2.resize(index_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
+        thumb_heat_map_image = cv2.resize(thumb_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
+        middle_heat_map_image = cv2.resize(middle_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
+        heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
         
@@ -128,6 +133,13 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
         np.array(tcp_ori, dtype=np.float32).flatten(),
         np.array(hand_state, dtype=np.float32).flatten(),
     ])
+    if exp_name == "tennis_ball_pick":
+        IMAGE_CROP = TENNIS_BALL_PICK_IMAGE_CROP
+        CLASSIFIER_IMAGE_CROP = {}
+    elif exp_name == "tube_insertion":
+        IMAGE_CROP = TUBE_INSERTION_IMAGE_CROP
+        CLASSIFIER_IMAGE_CROP = TUBE_INSERTION_CLASSIFIER_IMAGE_CROP
+        
     cropped_front = IMAGE_CROP["front_camera"](color_image) if "front_camera" in IMAGE_CROP else color_image
     cropped_wrist = IMAGE_CROP["wrist_camera"](color_image_wrist) if "wrist_camera" in IMAGE_CROP else color_image_wrist
 
@@ -146,20 +158,33 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False):
     wrist_classifier_image = resized_image_wrist_classifier[..., ::-1]
     
     if not enable_tactile:
-        obs = {
-            "front_camera": front_camera_image,
-            "front_classifier": front_classifier_image,
-            "wrist_camera": wrist_camera_image,
-            "state": state_flattened
-        }
+        if exp_name == "tennis_ball_pick":
+            obs = {
+                "front_camera": front_camera_image,
+                "state": state_flattened
+            }
+        elif exp_name == "tube_insertion":
+            obs = {
+                "front_camera": front_camera_image,
+                "wrist_camera": wrist_camera_image,
+                "front_classifier": front_classifier_image,
+                "state": state_flattened
+            }
     else:
-        obs = {
-            "front_camera": front_camera_image,
-            "wrist_camera": wrist_camera_image,
-            "front_classifier": front_classifier_image,
-            "tactile_data": heatmap_canvas,
-            "state": state_flattened
-        }
+        if exp_name == "tennis_ball_pick":
+            obs = {
+                "front_camera": front_camera_image,
+                "tactile_data": heatmap_canvas,
+                "state": state_flattened
+            }
+        elif exp_name == "tube_insertion":
+            obs = {
+                "front_camera": front_camera_image,
+                "wrist_camera": wrist_camera_image,
+                "front_classifier": front_classifier_image,
+                "tactile_data": heatmap_canvas,
+                "state": state_flattened
+            }
     # debug_imshow(obs)
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)

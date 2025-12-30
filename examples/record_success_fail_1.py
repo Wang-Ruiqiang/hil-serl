@@ -23,15 +23,15 @@ sys.path.insert(0, project_root)
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_tube_pick", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_ball_place", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("is_pick_and_place_task", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("is_place_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 
 def save_batch_to_pickle(batch_data, file_path):
@@ -78,18 +78,14 @@ def main(_):
                     os.makedirs("./classifier_data_tube_insertion_no_tactile")
                 file_dir_name = "./classifier_data_tube_insertion_no_tactile"
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_pick_and_place_task:
-            if not os.path.exists("./classifier_data"):
-                os.makedirs("./classifier_data")
-            file_dir_name = "./classifier_data"
+        if FLAGS.is_place_task:
+            if not os.path.exists("./classifier_data_place"):
+                os.makedirs("./classifier_data_place")
+            file_dir_name = "./classifier_data_place"
         elif FLAGS.is_pick_task:
             if not os.path.exists("./classifier_data_pick"):
                 os.makedirs("./classifier_data_pick")
             file_dir_name = "./classifier_data_pick"
-        else:
-            if not os.path.exists("./classifier_data_place"):
-                os.makedirs("./classifier_data_place")
-            file_dir_name = "./classifier_data_place"
 
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     success_file = os.path.join(file_dir_name, f"success_images_{uuid}.pkl")
@@ -114,12 +110,10 @@ def main(_):
         elif FLAGS.exp_name == "tube_insertion":
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         elif FLAGS.exp_name == "tennis_ball_pick":
-            if FLAGS.is_pick_and_place_task:
-                clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
+            if FLAGS.is_place_task:
+                clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
             elif FLAGS.is_pick_task:
                 clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
-            else:
-                clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
 
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
@@ -140,14 +134,16 @@ def main(_):
                 
                 if not os.path.isdir(current_frame_path):
                     continue
-                obs, is_record_success, grip_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                obs, is_record_success, grip_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path,
+                                                                                FLAGS.enable_tactile, FLAGS.exp_name)
                 if i == end_frame:
                     next_obs = obs
                 else:
                     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
                     if not os.path.isdir(next_frame_path):
                         continue
-                    next_obs, _, _= read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                    next_obs, _, _= read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path,
+                                                              FLAGS.enable_tactile, FLAGS.exp_name)
 
                 # if i == start_frame:
                 #     history_obs.reset(obs)

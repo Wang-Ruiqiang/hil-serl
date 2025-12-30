@@ -30,14 +30,13 @@ from examples.utils import read_utils
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 25, "Number of successful demos to collect.")
 flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/demo_data", "demo data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
-flags.DEFINE_boolean("is_pick_and_place", False, "read exist data or not.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -115,21 +114,21 @@ def main(_):
                     checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion_no_tactile/"),
                 )
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_pick_and_place:
+        if FLAGS.is_pick_task:
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=config.classifier_keys,
                 image_key_weights=config.classifier_key_weights,
-                checkpoint_path=os.path.abspath("classifier_ckpt/"),
+                checkpoint_path=os.path.abspath("classifier_ckpt_ball_pick/"),
             )
-        elif FLAGS.is_pick_task:
+        else:
             classifier = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=config.classifier_keys,
                 image_key_weights=config.classifier_key_weights,
-                checkpoint_path=os.path.abspath("classifier_ckpt_pick/"),
+                checkpoint_path=os.path.abspath("classifier_ckpt_ball_place/"),
             )
 
     
@@ -153,11 +152,7 @@ def main(_):
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
 
         elif FLAGS.exp_name == "tennis_ball_pick":
-            if FLAGS.is_pick_and_place:
-                print("clip_marks")
-                is_pick = False
-                clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
-            elif FLAGS.is_pick_task:
+            if FLAGS.is_pick_task:
                 print("clip_marks_pick")
                 is_pick = True
                 clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
@@ -272,12 +267,10 @@ def main(_):
     if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "tube_insertion":
         file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_pick_and_place:
-            file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
-        elif FLAGS.is_pick_task:
+        if FLAGS.is_pick_task:
             file_name = f"./demo_data/{FLAGS.exp_name}_pick_{success_needed}_demos_{uuid}.pkl"
         else:
-            file_name = f"./demo_data/{FLAGS.exp_name}_place_{success_needed}_demos_{uuid}.pkl"
+            file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
             
     with open(file_name, "wb") as f:
         pkl.dump(transitions, f)

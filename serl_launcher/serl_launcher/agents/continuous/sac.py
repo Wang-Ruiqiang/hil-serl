@@ -470,6 +470,7 @@ class SACAgent(flax.struct.PyTreeNode):
         # Config
         assert not entropy_per_dim, "Not implemented"
         if target_entropy is None:
+            # target_entropy = -actions.shape[-1]
             target_entropy = -actions.shape[-1] / 2
 
         return cls(

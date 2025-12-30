@@ -9,8 +9,6 @@ from denso_env.envs.denso_env import DensoEnv
 from denso_env.camera.rs_capture import RSCapture
 from denso_env.camera.video_capture import VideoCapture
 
-from examples.utils import kinematics_utils
-
 robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
 
 class RAMEnv(DensoEnv):
@@ -28,8 +26,6 @@ class RAMEnv(DensoEnv):
         for cam_name, kwargs in name_serial_dict.items():
             if cam_name == "front_classifier":
                 self.cap["front_classifier"] = self.cap["front_camera"]
-            elif cam_name == "wrist_classifier":
-                self.cap["wrist_classifier"] = self.cap["wrist_camera"]
             else:
                 cap = VideoCapture(
                     RSCapture(name=cam_name, **kwargs)
@@ -62,6 +58,7 @@ class RAMEnv(DensoEnv):
         
         # z_init = np.random.uniform(0.08, 0.14)
         # init_pos = np.array([0.7, -0.1458, z_init])
+        # init_pos = np.array([0.7, -0.1458, 0.0809])
         init_pos = np.array([0.7, -0.1458, 0.0809])
         init_ori = np.array([0, 1, 0, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
@@ -70,10 +67,10 @@ class RAMEnv(DensoEnv):
 
         time.sleep(5)
         
-        cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
-        curr_pose = np.concatenate((cur_position, cur_orientation), axis=0)
+        # cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
+        # curr_pose = np.concatenate((cur_position, cur_orientation), axis=0)
         self.curr_path_length = 0
-        self._update_cur_position(curr_pose, wait_threshold=0.05)
+        self._update_cur_position(init_arm_action, wait_threshold=0.05)
         obs = self._get_obs()
         self.terminate = False
         return obs, {}

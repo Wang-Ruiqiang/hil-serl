@@ -75,6 +75,7 @@ def make_sac_pixel_agent(
             "std_parameterization": "exp",
             "std_min": 1e-5,
             "std_max": 5,
+            # "std_max": 1,
         },
         critic_network_kwargs={
             "activations": nn.tanh,
