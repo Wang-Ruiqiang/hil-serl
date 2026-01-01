@@ -51,7 +51,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 45000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 20, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_boolean("test", True, "read exist data or not.")
@@ -192,6 +192,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)
                             time.sleep(1.5)
+                        
+                        elif FLAGS.exp_name == "tennis_ball_pick":
+                            env.move_up()
                         input("reset env")
                         obs, _ = env.reset()
 
@@ -343,10 +346,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             else:
                 already_intervened = False
             
-            if "is_pick" in info:
-                is_pick = info["is_pick"]
-            else:
-                is_pick = True
+            # if "is_pick" in info:
+            #     is_pick = info["is_pick"]
+            # else:
+            #     is_pick = True
 
             print("actions = ", actions)
                 
@@ -370,7 +373,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             obs = next_obs
             # if done and is_pick:
             #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-            if done and not is_pick:
+            if done:
                 print_green(f" task done = {done}")
                 info["episode"]["intervention_count"] = intervention_count
                 info["episode"]["intervention_steps"] = intervention_steps
@@ -386,6 +389,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 if FLAGS.exp_name == "tube_insertion":
                     env.open_hand(steps=20, step_time=0.05)
                     time.sleep(1.5)
+                elif FLAGS.exp_name == "tennis_ball_pick":
+                    env.move_up()
                 input("reset env")
                 obs, _ = env.reset()
                 
@@ -614,7 +619,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-12-29",
+            project="tennis_ball_pick-1-1",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

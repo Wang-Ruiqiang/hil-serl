@@ -142,6 +142,8 @@ def main(_):
                 if FLAGS.exp_name == "tube_insertion":
                     env.unwrapped.open_hand(steps=20, step_time=0.05)
                     time.sleep(1.5)
+                elif FLAGS.exp_name == "tennis_ball_pick":
+                    env.move_up()
                 input("reset env")
                 obs, info = env.reset()
     finally:

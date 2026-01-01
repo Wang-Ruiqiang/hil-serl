@@ -54,7 +54,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.02, 0.02, 0.02)
+    ACTION_SCALE = (0.03, 0.03, 0.03)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
@@ -150,26 +150,31 @@ class TrainConfig(DefaultTrainingConfig):
                 if is_pick:
                     print("classifier = classifier_pick")
                     classifier = classifier_pick
-                else:
-                    print("classifier = classifier_place")
-                    classifier = classifier_place
+                # else:
+                #     print("classifier = classifier_place")
+                #     classifier = classifier_place
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                if is_pick:
-                    if prob > 0.7:
-                        success = 1
-                    else:
-                        success = 0
-                    reward = 0.1 if success else 0
+                # if is_pick:
+                #     if prob > 0.7:
+                #         success = 1
+                #     else:
+                #         success = 0
+                #     reward = 0.1 if success else 0
+                # else:
+                #     if prob > 0.5:
+                #         success = 1
+                #     else:
+                #         success = 0
+                    # reward = 1 if success else 0
+                if prob > 0.5:
+                    success = 1
                 else:
-                    if prob > 0.5:
-                        success = 1
-                    else:
-                        success = 0
-                    reward = 1 if success else 0
+                    success = 0
+                reward = 1 if success else 0
                 # state = obs["state"]
                 # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
                 # gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]

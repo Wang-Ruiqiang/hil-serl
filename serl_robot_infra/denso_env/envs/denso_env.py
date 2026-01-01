@@ -566,7 +566,8 @@ class DensoEnv(gym.Env):
         self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
 
         diff = self.gripper_close_joint - self.gripper_open_joint
-        self.max_joint_delta = float(np.max(np.abs(diff))) / 10.0
+        max_step = 10
+        self.max_joint_delta = float(np.max(np.abs(diff))) / max_step
 
         self.is_close_open_pose_init = True
         
@@ -835,16 +836,6 @@ class DensoEnv(gym.Env):
         arc_length = float(prefix_lengths[closest_seg]) + float(closest_ratio) * float(segment_lengths[closest_seg])
         progress = float(np.clip(arc_length / total_length, 0.0, 1.0))
         return progress
-    
-    
-    def move_up(self):
-        print("move up to avoid collision")
-        pos = self.cur_position.copy()
-        pos[2] += 0.1
-        ori = self.cur_oritation.copy()
-        nextpos = np.concatenate((pos, ori), axis=0)
-        self.ros_interface.publish_arm_action(nextpos)
-        time.sleep(2.0)
     
 
     def compute_reward(self, obs) -> bool:

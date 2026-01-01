@@ -36,6 +36,16 @@ class RAMEnv(DensoEnv):
                 RSCapture(name=cam_name, **kwargs)
             )
             self.cap[cam_name] = cap
+            
+
+    def move_up(self):
+        print("move up to avoid collision")
+        pos = self.cur_position.copy()
+        pos[2] += 0.02
+        ori = self.cur_oritation.copy()
+        nextpos = np.concatenate((pos, ori), axis=0)
+        self.ros_interface.publish_arm_action(nextpos)
+        time.sleep(2.0)
 
     def reset(self, joint_reset=False, **kwargs):
         print("RAMEnv reset")
@@ -60,8 +70,12 @@ class RAMEnv(DensoEnv):
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
         # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
 
-        # init_pos = np.array([0.60513753, -0.1567503, 0.18153528])
-        init_pos = np.array([0.70513753, -0.3067503, 0.15153528])
+        # x_init = np.random.uniform(0.55, 0.65)
+        # y_init = np.random.uniform(-0.08, -0.18)
+        # z_init = np.random.uniform(0.16, 0.20)
+        # init_pos = np.array([x_init, y_init, z_init])
+        init_pos = np.array([0.60513753, -0.1567503, 0.18153528])
+        # init_pos = np.array([0.70513753, -0.3067503, 0.15153528])
         init_ori = np.array([0, 1, 0, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.publish_arm_action(init_arm_action)

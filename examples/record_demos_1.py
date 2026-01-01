@@ -32,10 +32,10 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 25, "Number of successful demos to collect.")
-flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/demo_data", "demo data dir")
+flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/pick_demo_data", "demo data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
-flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
+flags.DEFINE_boolean("is_pick_task", True, "read exist data or not.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 # camera_keys = ["front_camera", "side_camera"]
@@ -207,10 +207,12 @@ def main(_):
                 # else:
                 reward = compute_reward(obs, classifier)
 
-
                 done = reward or terminate
 
-                ACTION_SCALE = (0.005, 0.005, 0.05)
+                if FLAGS.exp_name == "tennis_ball_pick":
+                    ACTION_SCALE = (0.02, 0.02, 0.02)
+                elif FLAGS.exp_name == "tube_insertion":
+                    ACTION_SCALE = (0.005, 0.005, 0.05)
                 delta_pos = next_obs["state"][:3] - obs["state"][:3]
                 actions[:3] = delta_pos / ACTION_SCALE[0]
                 low  = np.array([-1, -1, -1, -1, -1, -1, -1], dtype=np.float32)
