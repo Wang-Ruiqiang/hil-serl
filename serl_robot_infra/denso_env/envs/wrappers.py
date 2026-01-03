@@ -45,7 +45,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
         self.is_pick = True  # whether the task is pick or place, used for classifier
-        self.pick_done = 0
+        self.pick_done = False
         self.config = env.config
 
     def compute_reward(self, obs):
@@ -60,11 +60,10 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         if self.config.EXP_NAME == "tube_insertion":
             done = 0 or (rew == 1)
             if rew == 0.2:
-                self.pick_done = 1
-        # elif self.config.EXP_NAME == "tennis_ball_pick":
-        #     done = 0 or (rew == 1)
-        #     if rew == 0.1:
-        #         self.pick_done = 1
+                self.pick_done = True
+        elif self.config.EXP_NAME == "tennis_ball_pick":
+            done = (rew == 1) and (not self.is_pick)
+            self.is_pick = self.is_pick and not (rew == 1)
         else:
             done = done or (rew > 0)
 
@@ -76,16 +75,18 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         # if self.config.EXP_NAME == "tube_insertion" or self.config.EXP_NAME == "tennis_ball_pick":
         if self.config.EXP_NAME == "tube_insertion":
             if self.pick_done and self.is_pick:
-                self.is_pick = False  # switch to place task after pick is done
+                self.is_pick = False
             elif done and not self.is_pick:
                 self.is_pick = True
-                self.pick_done = 0
-        # if done:
-        #     self.env.move_up()
-        # print("reward = ", rew)
+                self.pick_done = False
+        # if self.config.EXP_NAME == "tennis_ball_pick":
+        #     if done and not self.is_pick:
+        #         self.is_pick = True
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
+        if self.config.EXP_NAME == "tennis_ball_pick":
+            self.is_pick = True
         obs, info = self.env.reset(**kwargs)
         info['succeed'] = False
         return obs, info

@@ -51,11 +51,10 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 45000, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 20, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
-flags.DEFINE_boolean("test", True, "read exist data or not.")
-flags.DEFINE_boolean("is_pick", True, "read exist data or not.")
+flags.DEFINE_boolean("is_pick_only", False, "read exist data or not.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
@@ -111,6 +110,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     if FLAGS.eval_checkpoint_step:
         try:
             print("in eval mode")
+            mode = "S1_INFERENCE"
             success_counter = 0
             intervention_label = 0
             time_list = []
@@ -122,6 +122,15 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             agent = agent.replace(state=ckpt)
             
+            if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick_only:
+                print_green("Loaded previous checkpoint at step 56000.")
+                ckpt_pick = checkpoints.restore_checkpoint(
+                    os.path.abspath(FLAGS.checkpoint_path_pick),
+                    agent.state,
+                    step=56000,
+                )
+                agent_pick = agent.replace(state=ckpt_pick)
+            
             obs, _ = env.reset()
             key_reader = KeyReader()
             key_reader.start()
@@ -130,7 +139,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             for episode in range(FLAGS.eval_n_trajs):
                 done = False
                 start_time = time.time()
-
+                
                 # print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
                 # ckpt = checkpoints.restore_checkpoint(
                 #     os.path.abspath(FLAGS.checkpoint_path),
@@ -138,9 +147,38 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 #     step=ckpt_step,
                 # )
                 # agent = agent.replace(state=ckpt)
+                
                 while not done:
 
                     sampling_rng, key = jax.random.split(sampling_rng)
+                    if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick_only and mode == "S1_INFERENCE":
+                        # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
+                        actions = agent_pick.sample_actions(
+                            observations=jax.device_put(obs),
+                            argmax=True,    
+                            seed=key
+                        )
+                        actions = np.asarray(jax.device_get(actions)).copy()
+
+                        next_obs, reward, done, truncated, info = env.step(actions)
+                        obs = next_obs
+                        if "is_pick" in info:
+                            is_pick_task = info["is_pick"]
+                        else:
+                            is_pick_task = True
+
+                        # ==== 判定任务1完成（你可替换为自己的条件）====
+                        if not is_pick_task:
+                            print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                            mode = "S2_TRAIN"
+                            # 可在此清零统计（可选）
+                            intervention_count = 0
+                            intervention_steps = 0
+                            already_intervened = False
+                            continue
+                        else:
+                            # 任务1未完成就继续 S1 推理
+                            continue
 
                     print_green(f"obs[state] =  {obs['state']}")
                     actions = agent.sample_actions(
@@ -168,15 +206,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         
                     if "intervene_action" in info:
                         intervention_label = 1
-                    # if "is_pick" in info:
-                    #     is_pick = info["is_pick"]
-                    # else:
-                    #     is_pick = True
-                    
-                    # if done and is_pick:
-                    #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
                     if done:
-                    # if done and not is_pick:
                         if reward:
                             dt = time.time() - start_time
                             time_list.append(dt)
@@ -187,14 +217,14 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                             env.unwrapped.save_video_recording(episode)
                         print(f"{success_counter}/{episode + 1}")
                         intervention_label = 0
-                        ckpt_step += 2000
+                        ckpt_step += 1000
                         done_by_manual = False
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)
                             time.sleep(1.5)
-                        
-                        elif FLAGS.exp_name == "tennis_ball_pick":
+                        elif FLAGS.exp_name == "tennis_ball_pick" and FLAGS.is_pick_only:
                             env.move_up()
+                        mode = "S1_INFERENCE"
                         input("reset env")
                         obs, _ = env.reset()
 
@@ -259,11 +289,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     already_intervened = False
     intervention_count = 0
     intervention_steps = 0
-    mode = "S1_INFER"
+    mode = "S1_INFERENCE"
+    pick_steps = 0
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
     for step in pbar:
-        
+        if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick_only:
+            step = step - pick_steps
         if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
             # dump to pickle file
             buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
@@ -282,32 +314,35 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 demo_transitions = []
         
         sampling_rng, key = jax.random.split(sampling_rng)
-        # if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick and mode == "S1_INFER":
-        #     # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
-        #     actions = agent_pick.sample_actions(
-        #         observations=jax.device_put(obs),
-        #         argmax=True,    
-        #         seed=key
-        #     )
-        #     actions = np.asarray(jax.device_get(actions)).copy()
-        #     if actions.shape[-1] >= 7:
-        #         actions[..., 6] = (actions[..., 6] + 1.0) / 2.0
-        #         actions[..., 6] = np.clip(actions[..., 6], 0.0, 1.0)
+        if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick_only and mode == "S1_INFERENCE":
+            # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
+            pick_steps += 1
+            actions = agent_pick.sample_actions(
+                observations=jax.device_put(obs),
+                argmax=True,    
+                seed=key
+            )
+            actions = np.asarray(jax.device_get(actions)).copy()
 
-        #     next_obs, reward, done, truncated, info = env.step(actions)
-        #     obs = next_obs
+            next_obs, reward, done, truncated, info = env.step(actions)
+            obs = next_obs
+            if "is_pick" in info:
+                is_pick_task = info["is_pick"]
+            else:
+                is_pick_task = True
 
-        #     # ==== 判定任务1完成（你可替换为自己的条件）====
-        #     if done:
-        #         print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-        #         mode = "S2_TRAIN"
-        #         # 可在此清零统计（可选）
-        #         intervention_count = 0
-        #         intervention_steps = 0
-        #         already_intervened = False
-        #     else:
-        #         # 任务1未完成就继续 S1 推理
-        #         continue
+            # ==== 判定任务1完成（你可替换为自己的条件）====
+            if not is_pick_task:
+                print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                mode = "S2_TRAIN"
+                # 可在此清零统计（可选）
+                intervention_count = 0
+                intervention_steps = 0
+                already_intervened = False
+                continue
+            else:
+                # 任务1未完成就继续 S1 推理
+                continue
 
         
         timer.tick("total")
@@ -326,6 +361,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             actions = np.asarray(jax.device_get(actions_sample)).copy()
             actions[..., 3:6] = 0.0
             print("actions sampled= ", actions)
+            # if actions[..., 6] < 0.0:
+            #     random_action = np.random.uniform(0.0, 0.30)
+            #     actions[..., 6] = random_action
             
         # Step environment
         with timer.context("step_env"):
@@ -352,7 +390,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             #     is_pick = True
 
             print("actions = ", actions)
-                
+            # print("reward = ", reward)
+            # print("done = ", done)
+            # input("step done, press to continue")
             running_return += reward
             transition = dict(
                 observations=obs,
@@ -385,11 +425,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 intervention_steps = 0
                 already_intervened = False
                 client.update()
-                mode = "S1_INFER"
+                mode = "S1_INFERENCE"
                 if FLAGS.exp_name == "tube_insertion":
                     env.open_hand(steps=20, step_time=0.05)
                     time.sleep(1.5)
-                elif FLAGS.exp_name == "tennis_ball_pick":
+                elif FLAGS.exp_name == "tennis_ball_pick" and FLAGS.is_pick_only:
                     env.move_up()
                 input("reset env")
                 obs, _ = env.reset()
@@ -577,35 +617,39 @@ def main(_):
         
     include_grasp_penalty = False
     agent_pick = None
-    # if FLAGS.exp_name == "tennis_ball_pick":
-    #     agent_pick: SACAgent = make_sac_pixel_agent(
-    #         seed=FLAGS.seed,
-    #         sample_obs=env.observation_space.sample(),
-    #         sample_action=env.action_space.sample(),
-    #         image_keys=config.image_keys,
-    #         encoder_type=config.encoder_type,
-    #         discount=config.discount,
-    #         state_weights=config.state_weights,
-    #     )
-    #     # replicate agent across devices
-    #     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
+    if FLAGS.exp_name == "tennis_ball_pick" and not FLAGS.is_pick_only:
+        agent_pick: SACAgent = make_sac_pixel_agent(
+            seed=FLAGS.seed,
+            sample_obs=env.observation_space.sample(),
+            sample_action=env.action_space.sample(),
+            image_keys=config.image_keys,
+            encoder_type=config.encoder_type,
+            discount=config.discount,
+            state_weights=config.state_weights,
+        )
+        # replicate agent across devices
+        # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     
-    #     agent_pick = jax.device_put(
-    #         jax.tree_map(jnp.array, agent_pick), sharding.replicate()
-    #     )
+        agent_pick = jax.device_put(
+            jax.tree_map(jnp.array, agent_pick), sharding.replicate()
+        )
         
-    #     if FLAGS.checkpoint_path_pick is not None and os.path.exists(FLAGS.checkpoint_path_pick):
-    #     # input("Checkpoint path already exists. Press Enter to resume training.")
-    #         ckpt = checkpoints.restore_checkpoint(
-    #             os.path.abspath(FLAGS.checkpoint_path_pick),
-    #             agent_pick.state,
-    #         )
-    #         agent_pick = agent_pick.replace(state=ckpt)
-    #         # print_green(f"Loaded previous checkpoint at step {step}.")
-    #         ckpt_number = os.path.basename(
-    #             checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path_pick))
-    #         )[11:]
-    #         print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
+        latest_ckpt = None
+        if FLAGS.checkpoint_path_pick is not None and os.path.exists(FLAGS.checkpoint_path_pick):
+            # input("Checkpoint path already exists. Press Enter to resume training.")
+            latest_ckpt = checkpoints.latest_checkpoint(FLAGS.checkpoint_path_pick)
+
+        if latest_ckpt is not None:
+            ckpt = checkpoints.restore_checkpoint(
+                os.path.abspath(FLAGS.checkpoint_path_pick),
+                agent_pick.state,
+            )
+            agent_pick = agent_pick.replace(state=ckpt)
+            # print_green(f"Loaded previous checkpoint at step {step}.")
+            ckpt_number = os.path.basename(
+                checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path_pick))
+            )[11:]
+            print_green(f"Loaded previous checkpoint_pick at step {ckpt_number}.")
         
     # if FLAGS.checkpoint_path is not None and os.path.exists(os.path.join(FLAGS.checkpoint_path, "checkpoint*")):
 
@@ -619,7 +663,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-1-1",
+            project="tennis_ball_place-1-2",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

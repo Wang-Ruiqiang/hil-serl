@@ -95,7 +95,7 @@ class TrainConfig(DefaultTrainingConfig):
     def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
-        
+
         if enable_tactile:
             self.image_keys = ["front_camera", "tactile_data"]
             self.classifier_keys = ["front_camera", "tactile_data"]
@@ -121,69 +121,41 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            # print("classifier path = ", os.path.abspath("../../classifier_ckpt/"))
-            # classifier_pick = load_classifier_func(
-            #     key=jax.random.PRNGKey(0),
-            #     sample=env.observation_space.sample(),
-            #     image_keys=self.classifier_keys,
-            #     checkpoint_path=os.path.abspath("../../classifier_ckpt_pick/"),
-            # )
-            
             classifier_pick = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
             )
-            
             classifier_place = load_classifier_func(
                 key=jax.random.PRNGKey(0),
                 sample=env.observation_space.sample(),
                 image_keys=self.classifier_keys,
                 image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_place/"),
+                checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place/"),
             )
+            
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
-                sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
                 if is_pick:
                     print("classifier = classifier_pick")
                     classifier = classifier_pick
-                # else:
-                #     print("classifier = classifier_place")
-                #     classifier = classifier_place
+                else:
+                    print("classifier = classifier_place")
+                    classifier = classifier_place
+                sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                # if is_pick:
-                #     if prob > 0.7:
-                #         success = 1
-                #     else:
-                #         success = 0
-                #     reward = 0.1 if success else 0
-                # else:
-                #     if prob > 0.5:
-                #         success = 1
-                #     else:
-                #         success = 0
-                    # reward = 1 if success else 0
-                if prob > 0.5:
-                    success = 1
+                if is_pick:
+                    success = prob > 0.5
+                    reward = 1 if success else 0
                 else:
-                    success = 0
-                reward = 1 if success else 0
-                # state = obs["state"]
-                # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-                # gripper_pose = state[0, -1] if state.ndim > 1 else state[-1]
-                # if ee_pos[1] > -0.13 and ee_pos[2] < 0.14:
-                #     reward -= 0.01
-                # if ee_pos[2] < 0.02:
-                #     reward -= 0.05
-                # if not is_pick and -0.30 < ee_pos[1] < -0.04 and gripper_pose < 0.8:
-                #     reward -= 0.05
+                    success = prob > 0.5
+                    reward = 1 if success else 0
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)

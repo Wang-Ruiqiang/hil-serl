@@ -16,6 +16,6 @@ from experiments.tube_insertion.config import TrainConfig as TubeInsertionTrainC
 
 NEW_MAPPING = {
     "tennis_ball_pick": TennisBallPickTrainConfig,
-    "twist_bottle_cap":TwistBottleCapTrainConfig,
-    "tube_insertion":TubeInsertionTrainConfig,
-            }
+    "twist_bottle_cap": TwistBottleCapTrainConfig,
+    "tube_insertion": TubeInsertionTrainConfig,
+}
