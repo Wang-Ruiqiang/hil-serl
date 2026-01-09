@@ -18,12 +18,12 @@ class KeyboardExpert:
         self.manager = multiprocessing.Manager()
         self.latest_data = self.manager.dict()
         self.latest_data["action"] = [0.0] * 7
-        if exp_name == "tennis_ball_pick":
+        if exp_name == "tennis_ball_pick" or exp_name == "tennis_ball_place":
             self.LARGE_STEP = 1
             self.SMALL_STEP = 0.5
         elif exp_name == "twist_bottle_cap":
-            self.LARGE_STEP = 0.5
-            self.SMALL_STEP = 0.2
+            self.LARGE_STEP = 1
+            self.SMALL_STEP = 0.4
         elif exp_name == "tube_insertion":
             self.LARGE_STEP = 1
             self.SMALL_STEP = 0.5

@@ -12,7 +12,7 @@ CAMERA_CONFIG = {
         "dim": (640, 480),
     },
     "wrist_camera": {
-        "serial_number": "218622271185",
+        "serial_number": "218622273562",
         "dim": (640, 480),
     },
 }

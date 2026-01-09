@@ -39,7 +39,7 @@ class EnvConfig(DefaultEnvConfig):
         
     }
     EXTRA_REALSENSE_CAMERAS = {
-        "side_camera": {
+        "front_camera_2": {
             "serial_number": "242422303461",
             "dim": (640, 480),
             "exposure": 40000,
@@ -187,13 +187,13 @@ class TrainConfig(DefaultTrainingConfig):
                 prob = sigmoid(classifier(obs)).item()
                 
                 if is_pick:
-                    if prob > 0.4:
+                    if prob > 1:
                         success = 1
                     else:
                         success = 0
                     reward = 0.2 if success else 0
                 else:
-                    if prob > 0.70:
+                    if prob > 1:
                         success = 1
                     else:
                         success = 0

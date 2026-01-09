@@ -49,8 +49,8 @@ class EncodingWrapper(nn.Module):
             if stop_gradient:
                 image = jax.lax.stop_gradient(image)
 
-            if self.image_weights is not None:
-                image = image * self.image_weights.get(image_key, 1.0)
+            # if self.image_weights is not None:
+            #     image = image * self.image_weights.get(image_key, 1.0)
             encoded.append(image)
 
         encoded = jnp.concatenate(encoded, axis=-1)

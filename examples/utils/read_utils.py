@@ -30,10 +30,17 @@ TUBE_INSERTION_IMAGE_CROP = {
     "wrist_camera": lambda img: img[0:480, 120:600],
 }
 
+BOTTLE_TWIST_IMAGE_CROP = {
+    "front_camera": lambda img: img[35:375, 160:500],
+    "wrist_camera": lambda img: img[0:480, 120:600],
+}
+
 TUBE_INSERTION_CLASSIFIER_IMAGE_CROP = {
     "front_classifier": lambda img: img[240:360, 230:350],
     "wrist_classifier": lambda img: img[50:280, 270:500],
 }
+
+
 
 resize_dim = (128, 128)
 tactile_resize_dim = (64, 64)
@@ -83,7 +90,7 @@ class ObsHistoryBuffer:
 
 def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="tennis_ball_pick"):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
-    color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
+    color_image_path_wrist = os.path.join(frame_path, "color_image3.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
@@ -106,16 +113,19 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
         heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
+    action_file_path = os.path.join(frame_path, "action.txt")
         
     record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
-    grip_action = np.loadtxt(os.path.join(frame_path, "grip_action.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "grip_action.txt")) else 0.0
     
     hand_state = np.loadtxt(os.path.join(frame_path, "hand_state.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "hand_state.txt")) else 0.0
 
+    if os.path.exists(action_file_path):
+        with open(action_file_path, "r") as f:
+            action = np.array([float(x.strip()) for x in f.readlines()])
+    
     if os.path.exists(joint_file_path):
-
         with open(joint_file_path, "r") as f:
             all_joint_values = np.array([float(x.strip()) for x in f.readlines()])
             hand_joint = all_joint_values[6:]
@@ -123,22 +133,26 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
     tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
 
-    # state_flattened = np.concatenate([
-    #     np.array(tcp_pos, dtype=np.float32).flatten(),
-    #     np.array(tcp_ori, dtype=np.float32).flatten(),
-    #     np.array(hand_joint, dtype=np.float32).flatten()
-    # ])
-    state_flattened = np.concatenate([
-        np.array(tcp_pos, dtype=np.float32).flatten(),
-        np.array(tcp_ori, dtype=np.float32).flatten(),
-        np.array(hand_state, dtype=np.float32).flatten(),
-    ])
+    if exp_name == "twist_bottle_cap":
+        state_flattened = np.concatenate([
+            np.array(tcp_pos, dtype=np.float32).flatten(),
+            np.array(tcp_ori, dtype=np.float32).flatten(),
+        ])
+    else:
+        state_flattened = np.concatenate([
+            np.array(tcp_pos, dtype=np.float32).flatten(),
+            np.array(tcp_ori, dtype=np.float32).flatten(),
+            np.array(hand_state, dtype=np.float32).flatten(),
+        ])
     if exp_name == "tennis_ball_pick":
         IMAGE_CROP = TENNIS_BALL_PICK_IMAGE_CROP
         CLASSIFIER_IMAGE_CROP = {}
     elif exp_name == "tube_insertion":
         IMAGE_CROP = TUBE_INSERTION_IMAGE_CROP
         CLASSIFIER_IMAGE_CROP = TUBE_INSERTION_CLASSIFIER_IMAGE_CROP
+    elif exp_name == "twist_bottle_cap":
+        IMAGE_CROP = BOTTLE_TWIST_IMAGE_CROP
+        CLASSIFIER_IMAGE_CROP = {}
         
     cropped_front = IMAGE_CROP["front_camera"](color_image) if "front_camera" in IMAGE_CROP else color_image
     cropped_wrist = IMAGE_CROP["wrist_camera"](color_image_wrist) if "wrist_camera" in IMAGE_CROP else color_image_wrist
@@ -170,6 +184,12 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
                 "front_classifier": front_classifier_image,
                 "state": state_flattened
             }
+        elif exp_name == "twist_bottle_cap":
+            obs = {
+                "front_camera": front_camera_image,
+                "wrist_camera": wrist_camera_image,
+                "state": state_flattened
+            }
     else:
         if exp_name == "tennis_ball_pick":
             obs = {
@@ -185,11 +205,18 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
                 "tactile_data": heatmap_canvas,
                 "state": state_flattened
             }
+        elif exp_name == "twist_bottle_cap":
+            obs = {
+                "front_camera": front_camera_image,
+                "wrist_camera": wrist_camera_image,
+                "tactile_data": heatmap_canvas,
+                "state": state_flattened
+            }
     # debug_imshow(obs)
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)
     # input("enter")
-    return obs, int(is_record_success), grip_action
+    return obs, int(is_record_success), action
 
 
 def debug_imshow(obs):

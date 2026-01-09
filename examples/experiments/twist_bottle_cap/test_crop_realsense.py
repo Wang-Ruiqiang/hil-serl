@@ -9,9 +9,10 @@ import cv2
 CROP_CONFIG = {
     # "front_camera": [242, 370, 232, 360],   # y1, y2, x1, x2
     # "wrist_camera": [0, 480, 120, 600],  # y1, y2, x1, x2
-    "front_camera": [240, 340, 310, 410],   # y1, y2, x1, x2
-    "wrist_camera": [50, 280, 270, 500],  # y1, y2, x1, x2
+    "front_camera": [35, 375, 160, 500],   # y1, y2, x1, x2
+    "wrist_camera": [0, 480, 120, 600],  # y1, y2, x1, x2
 }
+# [47, 378, 181, 466]
 
 # -------------------------
 # 相机配置（你提供的参数）
@@ -22,7 +23,7 @@ CAMERA_CONFIG = {
         "dim": (640, 480),
     },
     "wrist_camera": {
-        "serial_number": "218622271185",
+        "serial_number": "218622273562",
         "dim": (640, 480),
     },
 }

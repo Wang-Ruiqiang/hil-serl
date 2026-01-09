@@ -26,22 +26,22 @@ class EnvConfig(DefaultEnvConfig):
             "depth": True,
         },
         "wrist_camera": {
-            "serial_number": "218622271185",
+            "serial_number": "218622273562",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
     }
     EXTRA_REALSENSE_CAMERAS = {
-        "side_camera": {
-            "serial_number": "234222300515",
+        "front_camera_2": {
+            "serial_number": "318122301393",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
     }
     IMAGE_CROP = {
-        "front_camera": lambda img: img[90:340, 150:400],
+        "front_camera": lambda img: img[35:375, 160:500],
         "wrist_camera": lambda img: img[0:480, 120:600],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
@@ -50,7 +50,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.05, 0.05, 0.05)
+    ACTION_SCALE = (0.025, 0.025, 0.025)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
@@ -79,6 +79,7 @@ class EnvConfig(DefaultEnvConfig):
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     EXP_NAME = "twist_bottle_cap"
+    LOOP_CONTROL = True
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -91,10 +92,11 @@ class TrainConfig(DefaultTrainingConfig):
             np.full(1, 1.0, dtype=np.float32),  # leaphand joints
         ]
     )
-    proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
+    proprio_keys = ["tcp_pos", "tcp_ori"]
     # proprio_keys = ["tcp_pos", "tcp_ori"]
     # classifier_keys = ["front_camera", "side_camera"]
     buffer_period = 1000
+    batch_size = 64
     checkpoint_period = 1000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
@@ -109,11 +111,13 @@ class TrainConfig(DefaultTrainingConfig):
             # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 0.5}
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.classifier_keys = ["front_camera","tactile_data"]
-            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 0.5}
+            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
             self.classifier_keys = ["front_camera", "wrist_camera"]
             self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
+            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
             
         env = RAMEnv(
             fake_env=fake_env,
@@ -128,38 +132,30 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            classifier_bottle_twist = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
-            )
-            # input("debug")
+            if enable_tactile:
+                classifier_bottle_twist = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
+                )
+            else:
+                classifier_bottle_twist = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist_no_tactile"),
+                )
             def reward_func(obs, is_pick=True):
-                # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                # if is_pick:
-                #     print("classifier = classifier_pick")
-                #     classifier = classifier_pick
-                # else:
-                #     print("classifier = classifier_place")
-                #     classifier = classifier_normal
                 classifier = classifier_bottle_twist
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
-                # added check for z position to further robustify classifier, but should work without as well
-                # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
-                success = prob > 0.4
-                # if classifier == classifier_pick:
-                #     reward = 0.3 if success else 0
-                # else:
+                success = prob > 0.3
                 reward = 1 if success else 0
-                # state = obs["state"]
-                # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-                # if ee_pos[2] < 0.16:
-                #     reward -= 0.05
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)

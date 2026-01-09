@@ -30,13 +30,13 @@ from examples.utils import read_utils
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_place", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 25, "Number of successful demos to collect.")
 flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/demo_data", "demo data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "demo data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
-flags.DEFINE_boolean("is_pick_task", True, "read exist data or not.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_boolean("is_pick_task", False, "read exist data or not.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 # camera_keys = ["front_camera", "side_camera"]
 # classifier_keys = ["front_camera", "side_camera"]
@@ -89,13 +89,22 @@ def main(_):
     
     print("config.classifier_keys = ", config.classifier_keys)
     if FLAGS.exp_name == "twist_bottle_cap":
-        classifier = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=config.classifier_keys,
-                image_key_weights=config.classifier_key_weights,
-                checkpoint_path=os.path.abspath("classifier_ckpt_pick_bottle_twist/"),
-            )
+        if FLAGS.enable_tactile:
+            classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_bottle_twist/"),
+                )
+        else:
+            classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_bottle_twist_no_tactile/"),
+                )
     elif FLAGS.exp_name == "tube_insertion":
         if FLAGS.enable_tactile:
             classifier = load_classifier_func(
@@ -114,23 +123,40 @@ def main(_):
                     checkpoint_path=os.path.abspath("classifier_ckpt_tube_insertion_no_tactile/"),
                 )
     elif FLAGS.exp_name == "tennis_ball_pick":
-        classifier = load_classifier_func(
-            key=jax.random.PRNGKey(0),
-            sample=env.observation_space.sample(),
-            image_keys=config.classifier_keys,
-            image_key_weights=config.classifier_key_weights,
-            checkpoint_path=os.path.abspath("classifier_ckpt_ball_pick/"),
-        )
-    elif FLAGS.exp_name == "tennis_ball_place":
-        classifier = load_classifier_func(
-            key=jax.random.PRNGKey(0),
-            sample=env.observation_space.sample(),
-            image_keys=config.classifier_keys,
-            image_key_weights=config.classifier_key_weights,
-            checkpoint_path=os.path.abspath("classifier_ckpt_ball_place/"),
-        )
-
-    
+        if FLAGS.enable_tactile:
+            if FLAGS.is_pick_task:
+                classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_ball_pick/"),
+                )
+            else:
+                classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_ball_place/"),
+                )
+        else:
+            if FLAGS.is_pick_task:
+                classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_ball_pick_no_tactile/"),
+                )
+            else:
+                classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=config.classifier_keys,
+                    image_key_weights=config.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("classifier_ckpt_ball_place_no_tactile/"),
+                )
 
     tcp_ori_list = []
     is_pick = True
@@ -151,13 +177,14 @@ def main(_):
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
 
         elif FLAGS.exp_name == "tennis_ball_pick":
-            print("clip_marks_pick")
-            is_pick = True
-            clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
-        elif FLAGS.exp_name == "tennis_ball_place":
-            print("clip_marks_place")
-            is_pick = False
-            clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
+            if FLAGS.is_pick_task:
+                print("clip_marks_pick")
+                is_pick = True
+                clip_marks_json = os.path.join(collect_data_path, 'clip_marks_pick.json')
+            else:
+                print("clip_marks_place")
+                is_pick = False
+                clip_marks_json = os.path.join(collect_data_path, 'clip_marks_place.json')
             
         with open(clip_marks_json, 'r') as f:
             clip_marks = json.load(f)
@@ -174,29 +201,28 @@ def main(_):
 
             # for i in range(50):
             
-            for i in list(range(start_frame, end_frame+1)):
+            for i in list(range(start_frame, end_frame)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
-                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
-
-                obs, is_record_success, grip_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
-                if i == end_frame:
-                    next_obs = obs
-                else:
-                    next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-                    next_obs, _, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile)
+                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
+                if not (os.path.isdir(current_frame_path)):
+                    continue
+                assert i + 1 <= end_frame, f"cross-clip access: i={i}, end={end_frame}"
+                
+                obs, is_record_success, frame_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile, exp_name=FLAGS.exp_name)
+                next_obs, _, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path, FLAGS.enable_tactile, exp_name=FLAGS.exp_name)
                 # print("obs state shape = ", obs["state"].shape)
                 # input("debug")
                 tcp_ori = obs["state"][3:7]  # 四元数部分
                 tcp_ori_list.append(tcp_ori)
 
-                if i == start_frame:
-                    history_obs.reset(obs)
-                    history_next_obs.reset(next_obs)
-                else:
-                    history_obs.append(obs)
-                    history_next_obs.append(next_obs)
-                stacked_obs = history_obs.get_success_fail_obs()
-                stacked_next_obs = history_next_obs.get_success_fail_obs()
+                # if i == start_frame:
+                #     history_obs.reset(obs)
+                #     history_next_obs.reset(next_obs)
+                # else:
+                #     history_obs.append(obs)
+                #     history_next_obs.append(next_obs)
+                # stacked_obs = history_obs.get_success_fail_obs()
+                # stacked_next_obs = history_next_obs.get_success_fail_obs()
                 # print("stacked_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 # print("stacked_next_obs['front_camera'].shape = ", stacked_obs['front_camera'].shape)
                 # print("obs keys:", obs.keys())
@@ -204,29 +230,28 @@ def main(_):
                 #     reward = compute_reward(obs, classifier_pick)
                 # else:
                 reward = compute_reward(obs, classifier)
-
                 done = reward or terminate
-
-                if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place":
-                    ACTION_SCALE = (0.03, 0.03, 0.03)
-                elif FLAGS.exp_name == "tube_insertion":
-                    ACTION_SCALE = (0.005, 0.005, 0.05)
-                delta_pos = next_obs["state"][:3] - obs["state"][:3]
-                actions[:3] = delta_pos / ACTION_SCALE[0]
-                low  = np.array([-1, -1, -1, -1, -1, -1, -1], dtype=np.float32)
-                high = np.array([1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
-                actions = np.clip(actions, low, high)
+                actions = np.asarray(frame_action, dtype=np.float32).copy()
+                # if FLAGS.exp_name == "tennis_ball_pick":
+                #     ACTION_SCALE = (0.03, 0.03, 0.03)
+                # elif FLAGS.exp_name == "tube_insertion":
+                #     ACTION_SCALE = (0.005, 0.005, 0.05)
+                # delta_pos = next_obs["state"][:3] - obs["state"][:3]
+                # actions[:3] = delta_pos / ACTION_SCALE[0]
+                # low  = np.array([-1, -1, -1, -1, -1, -1, -1], dtype=np.float32)
+                # high = np.array([1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
+                # actions = np.clip(actions, low, high)
                 
-                current_quat = obs["state"][3:7]  # wxyz
-                next_quat = next_obs["state"][3:7]
+                # current_quat = obs["state"][3:7]  # wxyz
+                # next_quat = next_obs["state"][3:7]
 
-                current_euler = R.from_quat([current_quat[1], current_quat[2], current_quat[3], current_quat[0]]).as_euler("xyz")
-                next_euler = R.from_quat([next_quat[1], next_quat[2], next_quat[3], next_quat[0]]).as_euler("xyz")
+                # current_euler = R.from_quat([current_quat[1], current_quat[2], current_quat[3], current_quat[0]]).as_euler("xyz")
+                # next_euler = R.from_quat([next_quat[1], next_quat[2], next_quat[3], next_quat[0]]).as_euler("xyz")
 
-                delta_euler = next_euler - current_euler
-                # actions[3:6] = delta_euler
-                actions[3:6] = 0.0
-                actions[6] = grip_action
+                # delta_euler = next_euler - current_euler
+                # # actions[3:6] = delta_euler
+                # actions[3:6] = 0.0
+                # actions[6] = grip_action
 
                 transition = copy.deepcopy(
                     dict(
@@ -245,7 +270,7 @@ def main(_):
                 pbar.set_description(f"Return: {returns}")
 
                 obs = next_obs
-                if i == end_frame:
+                if i == end_frame - 1:
                     for transition in trajectory:
                         transitions.append(copy.deepcopy(transition))
                     pbar.update(1)
@@ -265,11 +290,15 @@ def main(_):
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "tube_insertion":
-        file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+        if FLAGS.enable_tactile:
+            file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+        else:
+            file_name = f"./demo_data/{FLAGS.exp_name}_ablation_{success_needed}_demos_{uuid}.pkl"
     elif FLAGS.exp_name == "tennis_ball_pick":
-        file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
-    elif FLAGS.exp_name == "tennis_ball_place":
-        file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+        if FLAGS.is_pick_task:
+            file_name = f"./demo_data/{FLAGS.exp_name}_{success_needed}_demos_{uuid}.pkl"
+        else:
+            file_name = f"./demo_data/tennis_ball_place_{success_needed}_demos_{uuid}.pkl"
 
     with open(file_name, "wb") as f:
         pkl.dump(transitions, f)

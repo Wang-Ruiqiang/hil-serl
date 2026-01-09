@@ -44,7 +44,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         super().__init__(env)
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
-        self.is_pick = True  # whether the task is pick or place, used for classifier
+        self.is_pick = True
         self.pick_done = False
         self.config = env.config
 
@@ -61,12 +61,12 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
             done = 0 or (rew == 1)
             if rew == 0.2:
                 self.pick_done = True
-        elif self.config.EXP_NAME == "tennis_ball_pick":
+        elif self.config.EXP_NAME == "tennis_ball_place":
             done = (rew == 1) and (not self.is_pick)
             self.is_pick = self.is_pick and not (rew == 1)
         else:
             done = done or (rew > 0)
-
+            
         info['succeed'] = bool(rew == 1)
         info['is_pick'] = self.is_pick
         if self.target_hz is not None:
@@ -85,7 +85,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
-        if self.config.EXP_NAME == "tennis_ball_pick":
+        if self.config.EXP_NAME == "tennis_ball_place":
             self.is_pick = True
         obs, info = self.env.reset(**kwargs)
         info['succeed'] = False

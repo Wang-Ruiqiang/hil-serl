@@ -203,35 +203,12 @@ class ROSNodeInterface(Node):
         stater.name = [f"joint_{i}" for i in range(len(hand_joints))]
         stater.position = hand_joints
         self.publisher_hand.publish(stater)
-        
-
-    # def get_current_robot_ee(self, timeout=5.0):
-    #     # success = self.joint_event.wait(timeout=timeout)
-    #     # if not success:
-    #     #     raise TimeoutError("等待机械臂数据超时，请检查ROS话题是否正常发布。")
-    #     self.robot_ee_event.wait()
-    #     self.robot_ee_event.clear()
-    #     return self.cur_position, self.cur_oritation
     
-
     def get_current_robot_ee(self, timeout=5.0):
-        # success = self.robot_ee_event.wait(timeout=timeout)
-        # if not success:
-        #     raise TimeoutError("等待get_current_robot_ee超时，请检查ROS话题是否正常发布。")
-        # self.robot_ee_event.wait()
-        # self.robot_ee_event.clear()
-        # self.get_logger().info(f"robot_ee_received:{self.cur_position}")
-        # print("get_current_robot_ee: cur_position = ", self.cur_position)
-        # print("get_current_robot_ee: cur_oritation = ", self.cur_oritation)
         return self.cur_position, self.cur_oritation
     
 
     def get_current_joint(self, timeout=5.0):
-        # success = self.joint_event.wait(timeout=timeout)
-        # if not success:
-        #     raise TimeoutError("等待get_current_joint超时，请检查ROS话题是否正常发布。")
-        # self.joint_event.wait()
-        # self.joint_event.clear()
         return self.joint_position
 
     def get_current_leap_position(self):
@@ -270,15 +247,11 @@ class DensoEnv(gym.Env):
         self.fake_env = fake_env
         self.exp_name = config.EXP_NAME
 
-
-
-        # convert last 3 elements from euler to quat, from size (6,) to (7,)
-        # self.resetpos = np.concatenate(
-        #     [config.RESET_POSE[:3], euler_2_quat(config.RESET_POSE[3:])]
-        # )
         self.last_gripper_act = time.time()
         self.lastsent = time.time()
         self.hz = hz
+        self.grip_loop = self.config.LOOP_CONTROL if hasattr(self.config, 'LOOP_CONTROL') else False
+        self.current_action = np.zeros(7, dtype=np.float32)
 
         self.save_video = save_video
         if self.save_video:
@@ -290,24 +263,22 @@ class DensoEnv(gym.Env):
         high = np.array([1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
         self.action_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
         
+        state_dict = {
+            "tcp_pos": gym.spaces.Box(-np.inf, np.inf, shape=(3,), dtype=np.float32),
+            "tcp_ori": gym.spaces.Box(-np.inf, np.inf, shape=(4,), dtype=np.float32),
+            "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float32),
+        }
+
+        # 只有非 twist 任务才带 hand_state
+        # if not self.grip_loop:
+        #     state_dict["gripper_pose"] = gym.spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float32)
+        
         if not self.enable_tactile:
             print("init arm without tactaile data")
 
             self.observation_space = gym.spaces.Dict(
                 {
-                    "state": gym.spaces.Dict(
-                        {
-                            "tcp_pos": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(3,)
-                            ),
-                            "tcp_ori": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(4,)
-                            ),
-                            "gripper_pose": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(1,), dtype=np.float32
-                            )
-                        }
-                    ),
+                    "state": gym.spaces.Dict(state_dict),
                     "images": gym.spaces.Dict(
                         {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS}
@@ -322,19 +293,7 @@ class DensoEnv(gym.Env):
 
             self.observation_space = gym.spaces.Dict(
                 {
-                    "state": gym.spaces.Dict(
-                        {
-                            "tcp_pos": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(3,)
-                            ),
-                            "tcp_ori": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(4,)
-                            ),
-                            "gripper_pose": gym.spaces.Box(
-                                -np.inf, np.inf, shape=(1,), dtype=np.float32
-                            )
-                        }
-                    ),
+                    "state": gym.spaces.Dict(state_dict),
                     "images": gym.spaces.Dict(
                         {
                             **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
@@ -354,7 +313,9 @@ class DensoEnv(gym.Env):
         self.wrist_depth_buffer = []           #  D405 depth
         self.joint_buffer = []
         self.hand_state_buffer = []
+        self.action_buffer = []
         self.grip_action_buffer = []
+        
         
         if fake_env:
             return
@@ -418,11 +379,6 @@ class DensoEnv(gym.Env):
             self.displayer = ImageDisplayer(self.img_queue, self.url)
             self.displayer.start()
 
-
-        self.position_data = []
-        self.oritation_data = []
-        self.next_hand_pos = np.zeros(16)
-
         # Spin ROS callbacks in a background thread and keep references so we can
         # shut everything down cleanly when the environment closes.
         rclpy.init(args=None)
@@ -437,10 +393,7 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
-        self.print_action = True
-        self._last_step_time = None
-
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-12-29-0"  # 可自行修改
+        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-1-7-2"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -448,7 +401,7 @@ class DensoEnv(gym.Env):
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_oritation = np.zeros(4, dtype=np.float32)
 
-        if self.exp_name == "tennis_ball_pick":
+        if self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
         # grip with index
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
@@ -459,9 +412,6 @@ class DensoEnv(gym.Env):
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
-
-        self.grip_action = 0.0
-        self._grip_inited = False
 
         print("Initialized Denso")
 
@@ -486,23 +436,27 @@ class DensoEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
-        
         action = np.clip(action, self.action_space.low, self.action_space.high)
+        self.current_action = action.copy()
 
         self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
         
         xyz_delta = action[:3]
 
-        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
         # print("action scaled = ", xyz_delta * self.action_scale[0])
-        
-        if self.nextpos[2] < 0.03:
-            self.nextpos[2] = 0.03
-        if self.exp_name == "tube_insertion":
+        if self.exp_name == "tennis_ball_pick":
+            if self.nextpos[2] < 0.03:
+                self.nextpos[2] = 0.03
+        elif self.exp_name == "tube_insertion":
             if self.nextpos[2] < 0.05:
                 self.nextpos[2] = 0.05
             if self.nextpos[1] < -0.145:
                 self.nextpos[1] = -0.145
+        elif self.exp_name == "twist_bottle_cap":
+            if self.nextpos[2] < 0.22 and (0.6 < self.nextpos[0] < 0.8) and (-0.13 < self.nextpos[1] < -0.05):
+                action[:3] = np.clip(xyz_delta, -0.4, 0.4)
+                
+        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -522,7 +476,7 @@ class DensoEnv(gym.Env):
 
         if self.exp_name == "twist_bottle_cap" or self.exp_name == "tube_insertion":
             target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
-        elif self.exp_name == "tennis_ball_pick":
+        elif self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
             target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
 
         # print("target_hand_pos = ", target_hand_pos)
@@ -540,7 +494,6 @@ class DensoEnv(gym.Env):
 
         self.curr_path_length += 1
         self._update_cur_position(self.nextpos)
-        self.grip_action = grip_action
 
         # t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
@@ -606,16 +559,25 @@ class DensoEnv(gym.Env):
     
 
     def _segmented_init(self, current_hand_pos: np.ndarray):
-        # 仅 3 个点，形成闭环（0→1→2→0）
         self._waypoints = np.stack(
             [self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint],
             axis=0
-        ).astype(np.float32)  # (3, D)
-        self._num_wp = int(self._waypoints.shape[0])  # 3
-        self._num_seg = self._num_wp - 1              # 2 segments: 0->1, 1->2
+        ).astype(np.float32)
+        self._num_wp = int(self._waypoints.shape[0]) 
+        self._loop = bool(self.grip_loop)
+        self._num_seg = self._num_wp if self._loop else (self._num_wp - 1)
+        # self._num_seg = self._num_wp - 1
+        
 
-        # segment vectors/lengths for open polyline
-        seg_vecs = self._waypoints[1:] - self._waypoints[:-1]          # (2, D)
+        def segment_vectors() -> np.ndarray:
+            wp = self._waypoints
+            if self._loop:
+                return wp[(np.arange(self._num_wp) + 1) % self._num_wp] - wp
+            else:
+                return wp[1:] - wp[:-1]
+            
+        seg_vecs = segment_vectors()  
+        # seg_vecs = self._waypoints[1:] - self._waypoints[:-1]          # (2, D)
         seg_lens = np.linalg.norm(seg_vecs, axis=1) + 1e-12            # (2,)
 
         # joint bounds
@@ -627,32 +589,25 @@ class DensoEnv(gym.Env):
         nearest_wp = int(np.argmin(np.linalg.norm(diffs_wp, axis=1)))
 
         # segment start index must be 0 or 1
-        if nearest_wp <= 0:
-            self._seg_start_idx = 0
-        elif nearest_wp >= self._num_wp - 1:
-            self._seg_start_idx = self._num_wp - 2  # 1
+        if self._loop:
+            self._seg_start_idx = nearest_wp
         else:
-            # nearest is waypoint 1, decide segment by which side is closer
-            # compare distance to segment 0 vs segment 1 by projecting
-            self._seg_start_idx = 0  # default; will be refined by projection in calculate if needed
-            # optional: choose based on which segment projection is closer
-            # keep simple: start from segment 0
+            self._seg_start_idx = max(0, min(self._num_wp - 2, nearest_wp))
+            
+            
+        # if nearest_wp <= 0:
+        #     self._seg_start_idx = 0
+        # elif nearest_wp >= self._num_wp - 1:
+        #     self._seg_start_idx = self._num_wp - 2
+        # else:
+        #     self._seg_start_idx = 0
 
-        # direction (+1 forward open->...->twist, -1 backward)
-        self._seg_dir = +1
-
-        # step size parameters
-        max_step = 15
+        max_step = 10
         mean_len = float(np.mean(seg_lens))
         self._per_step_path_len = max(1e-6, mean_len / max_step)
-
-        # joint delta limit (for safety)
         self._max_joint_delta = float(np.max(np.abs(seg_vecs))) / max_step
         self._snap_eps = 1e-6
-
         self.is_segmented_init = True
-
-        # command-side position state
         self._cmd_pos = np.asarray(current_hand_pos, dtype=np.float32)
     
     
@@ -680,7 +635,7 @@ class DensoEnv(gym.Env):
             return np.asarray(self._cmd_pos, dtype=np.float32)
 
         # 决定方向
-        self._seg_dir = (+1 if action_scalar > 0 else -1)
+        seg_dir = (+1 if action_scalar > 0 else -1)
         waypoints = self._waypoints
         num_wp = self._num_wp
         num_seg = num_wp - 1
@@ -688,16 +643,28 @@ class DensoEnv(gym.Env):
         # 用“指令位置”推进（不受真实到位与否的影响）
         pos = np.asarray(self._cmd_pos, dtype=np.float32)
         remaining_path_len = abs(action_scalar) * self._per_step_path_len
+        
+        def seg_end_idx(start_idx: int) -> int:
+            if self._loop:
+                return (start_idx + 1) % self._num_wp
+            else:
+                return start_idx + 1
 
         while remaining_path_len > 0:
             start_idx = int(self._seg_start_idx)
 
             # clamp segment index into valid range [0, num_seg-1]
-            start_idx = max(0, min(num_seg - 1, start_idx))
-            self._seg_start_idx = start_idx
+            if not self._loop:
+                start_idx = max(0, min(self._num_seg - 1, start_idx))
+                self._seg_start_idx = start_idx
+            else:
+                start_idx = start_idx % self._num_seg
+                self._seg_start_idx = start_idx
+
+            end_idx = seg_end_idx(start_idx)
 
             seg_start_wp = waypoints[start_idx]
-            seg_end_wp   = waypoints[start_idx + 1]
+            seg_end_wp   = waypoints[end_idx]
             seg_vec = seg_end_wp - seg_start_wp
             seg_len = float(np.linalg.norm(seg_vec)) + 1e-12
             unit = seg_vec / seg_len
@@ -714,19 +681,23 @@ class DensoEnv(gym.Env):
 
             unit = seg_vec / seg_len
 
-            if self._seg_dir > 0:
+            if seg_dir > 0:
                 path_left = (1.0 - segment_progress) * seg_len
                 if path_left <= self._snap_eps:
-                    # already at end of this segment -> move to next segment
-                    if start_idx < num_seg - 1:
-                        self._seg_start_idx = start_idx + 1
+                    if self._loop:
+                        self._seg_start_idx = (start_idx + 1) % self._num_seg
                         pos = seg_end_wp.copy()
                         continue
                     else:
-                        # at final segment end (twist) -> saturate
-                        pos = waypoints[-1].copy()
-                        remaining_path_len = 0.0
-                        break
+                        if start_idx < num_seg - 1:
+                            self._seg_start_idx = start_idx + 1
+                            pos = seg_end_wp.copy()
+                            continue
+                        else:
+                            # at final segment end (twist) -> saturate
+                            pos = waypoints[-1].copy()
+                            remaining_path_len = 0.0
+                            break
 
                 step_here = min(remaining_path_len, path_left)
                 pos = pos + unit * step_here
@@ -735,27 +706,35 @@ class DensoEnv(gym.Env):
                 # if reached end of segment
                 if abs(step_here - path_left) <= self._snap_eps:
                     pos = seg_end_wp.copy()
-                    if start_idx < num_seg - 1:
-                        self._seg_start_idx = start_idx + 1
+                    if self._loop:
+                        self._seg_start_idx = (start_idx + 1) % self._num_seg
                         continue
                     else:
-                        # reached twist
-                        remaining_path_len = 0.0
-                        break
+                        if start_idx < num_seg - 1:
+                            self._seg_start_idx = start_idx + 1
+                            continue
+                        else:
+                            # reached twist
+                            remaining_path_len = 0.0
+                            break
 
             else:
                 path_left = segment_progress * seg_len
                 if path_left <= self._snap_eps:
-                    # already at start of this segment -> move to previous segment
-                    if start_idx > 0:
-                        self._seg_start_idx = start_idx - 1
+                    if self._loop:
+                        self._seg_start_idx = (start_idx - 1) % self._num_seg
                         pos = seg_start_wp.copy()
                         continue
                     else:
-                        # at first segment start (open) -> saturate
-                        pos = waypoints[0].copy()
-                        remaining_path_len = 0.0
-                        break
+                        if start_idx > 0:
+                            self._seg_start_idx = start_idx - 1
+                            pos = seg_start_wp.copy()
+                            continue
+                        else:
+                            # at first segment start (open) -> saturate
+                            pos = waypoints[0].copy()
+                            remaining_path_len = 0.0
+                            break
 
                 step_here = min(remaining_path_len, path_left)
                 pos = pos - unit * step_here
@@ -764,12 +743,16 @@ class DensoEnv(gym.Env):
                 # if reached start of segment
                 if abs(step_here - path_left) <= self._snap_eps:
                     pos = seg_start_wp.copy()
-                    if start_idx > 0:
-                        self._seg_start_idx = start_idx - 1
+                    if self._loop:
+                        self._seg_start_idx = (start_idx - 1) % self._num_seg
                         continue
                     else:
-                        remaining_path_len = 0.0
-                        break
+                        if start_idx > 0:
+                            self._seg_start_idx = start_idx - 1
+                            continue
+                        else:
+                            remaining_path_len = 0.0
+                            break
 
             # （可选）如果仍需要单步限幅，就把上面这段放到 pos 更新之后再裁剪
             delta = pos - self._cmd_pos
@@ -1153,6 +1136,12 @@ class DensoEnv(gym.Env):
 
     def _get_obs(self) -> dict:
         images = self.get_im()
+        # if self.grip_loop:
+        #     state_observation = {
+        #         "tcp_pos": self.cur_position,
+        #         "tcp_ori": self.cur_oritation,
+        #     }
+        # else:
         state_observation = {
             "tcp_pos": self.cur_position,
             "tcp_ori": self.cur_oritation,
@@ -1215,7 +1204,7 @@ class DensoEnv(gym.Env):
             self.joint_buffer.append(
                             copy.deepcopy(joint_pose))
             self.hand_state_buffer.append(copy.deepcopy(self.hand_state))
-            self.grip_action_buffer.append(copy.deepcopy(self.grip_action))
+            self.action_buffer.append(copy.deepcopy(self.current_action))
             # 保存图像
             images, depth_img = self.get_rgb_and_dpth_im()
             for cam_name, img in images.items():
@@ -1272,4 +1261,4 @@ class DensoEnv(gym.Env):
             # 保存 state（TCP + orientation + hand joints）
             np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
             np.savetxt(os.path.join(frame_dir, "hand_state.txt"), np.atleast_1d(self.hand_state_buffer[frame_id]), fmt="%.6f")
-            np.savetxt(os.path.join(frame_dir, "grip_action.txt"), np.atleast_1d(self.grip_action_buffer[frame_id]), fmt="%.6f")
+            np.savetxt(os.path.join(frame_dir, "action.txt"), np.atleast_1d(self.action_buffer[frame_id]), fmt="%.6f")

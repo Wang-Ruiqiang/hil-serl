@@ -23,15 +23,15 @@ sys.path.insert(0, project_root)
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_ball_pick", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_bottle_twist", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def save_batch_to_pickle(batch_data, file_path):
@@ -55,9 +55,14 @@ def main(_):
     successes = []
     failures = []
     if FLAGS.exp_name == "twist_bottle_cap":
-        if not os.path.exists("./classifier_data_bottle_twist"):
-            os.makedirs("./classifier_data_bottle_twist")
-        file_dir_name = "./classifier_data_bottle_twist"
+        if FLAGS.enable_tactile:
+            if not os.path.exists("./classifier_data_bottle_twist"):
+                os.makedirs("./classifier_data_bottle_twist")
+            file_dir_name = "./classifier_data_bottle_twist"
+        else:
+            if not os.path.exists("./classifier_data_bottle_twist_no_tactile"):
+                os.makedirs("./classifier_data_bottle_twist_no_tactile")
+            file_dir_name = "./classifier_data_bottle_twist_no_tactile"
     elif FLAGS.exp_name == "tube_insertion":
         if FLAGS.enable_tactile:
             if FLAGS.is_tube_pick:
@@ -78,14 +83,24 @@ def main(_):
                     os.makedirs("./classifier_data_tube_insertion_no_tactile")
                 file_dir_name = "./classifier_data_tube_insertion_no_tactile"
     elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_place_task:
-            if not os.path.exists("./classifier_data_place"):
-                os.makedirs("./classifier_data_place")
-            file_dir_name = "./classifier_data_place"
-        elif FLAGS.is_pick_task:
-            if not os.path.exists("./classifier_data_pick"):
-                os.makedirs("./classifier_data_pick")
-            file_dir_name = "./classifier_data_pick"
+        if FLAGS.enable_tactile:
+            if FLAGS.is_place_task:
+                if not os.path.exists("./classifier_data_place"):
+                    os.makedirs("./classifier_data_place")
+                file_dir_name = "./classifier_data_place"
+            elif FLAGS.is_pick_task:
+                if not os.path.exists("./classifier_data_pick"):
+                    os.makedirs("./classifier_data_pick")
+                file_dir_name = "./classifier_data_pick"
+        else:
+            if FLAGS.is_place_task:
+                if not os.path.exists("./classifier_data_place_no_tactile"):
+                    os.makedirs("./classifier_data_place_no_tactile")
+                file_dir_name = "./classifier_data_place_no_tactile"
+            elif FLAGS.is_pick_task:
+                if not os.path.exists("./classifier_data_pick_no_tactile"):
+                    os.makedirs("./classifier_data_pick_no_tactile")
+                file_dir_name = "./classifier_data_pick_no_tactile"
 
     uuid = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     success_file = os.path.join(file_dir_name, f"success_images_{uuid}.pkl")
@@ -127,23 +142,24 @@ def main(_):
             history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
             history_next_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
             count = 0
-            for i in list(range(start_frame, end_frame+1)):
+            for i in list(range(start_frame, end_frame)):
             # for i in list(range(start_frame, end_frame+1)):
                 current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
-                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1]) if i < end_frame else current_frame_path
-                
-                if not os.path.isdir(current_frame_path):
+                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
+
+                if not (os.path.isdir(current_frame_path)):
                     continue
-                obs, is_record_success, grip_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path,
+                
+                obs, is_record_success, frame_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path,
                                                                                 FLAGS.enable_tactile, FLAGS.exp_name)
-                if i == end_frame:
-                    next_obs = obs
-                else:
-                    next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-                    if not os.path.isdir(next_frame_path):
-                        continue
-                    next_obs, _, _= read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path,
-                                                              FLAGS.enable_tactile, FLAGS.exp_name)
+                # if i == end_frame:
+                #     next_obs = obs
+                # else:
+                #     next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
+                #     if not os.path.isdir(next_frame_path):
+                #         continue
+                next_obs, _, _= read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path,
+                                                            FLAGS.enable_tactile, FLAGS.exp_name)
 
                 # if i == start_frame:
                 #     history_obs.reset(obs)
@@ -154,18 +170,18 @@ def main(_):
                 # stacked_obs = history_obs.get_success_fail_obs()
                 # stacked_next_obs = history_next_obs.get_success_fail_obs()
 
-                delta_pos = next_obs["state"][:3] - obs["state"][:3]
-                actions[:3] = delta_pos
+                # delta_pos = next_obs["state"][:3] - obs["state"][:3]
+                # actions[:3] = delta_pos
 
-                current_quat = obs["state"][3:7]  # wxyz
-                next_quat = next_obs["state"][3:7]
+                # current_quat = obs["state"][3:7]  # wxyz
+                # next_quat = next_obs["state"][3:7]
 
-                current_euler = R.from_quat([current_quat[1], current_quat[2], current_quat[3], current_quat[0]]).as_euler("xyz")
-                next_euler = R.from_quat([next_quat[1], next_quat[2], next_quat[3], next_quat[0]]).as_euler("xyz")
+                # current_euler = R.from_quat([current_quat[1], current_quat[2], current_quat[3], current_quat[0]]).as_euler("xyz")
+                # next_euler = R.from_quat([next_quat[1], next_quat[2], next_quat[3], next_quat[0]]).as_euler("xyz")
 
-                delta_euler = next_euler - current_euler
-                actions[3:6] = delta_euler
-                actions[6] = grip_action
+                # delta_euler = next_euler - current_euler
+                # actions[3:6] = delta_euler
+                actions = np.asarray(frame_action, dtype=np.float32).copy()
 
                 transition = copy.deepcopy(
                     dict(

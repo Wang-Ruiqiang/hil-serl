@@ -31,9 +31,9 @@ class RAMEnv(DensoEnv):
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
         # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
 
-        # init_pos = np.array([0.55513753, 0.04267503, 0.18153528])
+        # init_pos = np.array([0.5580441126924457, -2.3018392461026157e-05, 0.25153528])
         # init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
-        init_pos = np.array([0.5580441126924457, -2.3018392461026157e-05, 0.25153528])
+        init_pos = np.array([0.65, -0.05, 0.22153528])
         # init_pos = np.array([0.5580441126924457, -2.3018392461026157e-05, 0.45153528])
         init_ori = np.array([0, 1, 0, 0])
         # init_ori = np.array([0, 0.7071, -0.7071, 0])

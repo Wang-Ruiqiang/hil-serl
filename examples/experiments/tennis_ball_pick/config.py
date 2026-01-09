@@ -121,19 +121,34 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
-            classifier_pick = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
-            )
-            classifier_place = load_classifier_func(
-                key=jax.random.PRNGKey(0),
-                sample=env.observation_space.sample(),
-                image_keys=self.classifier_keys,
-                image_key_weights=self.classifier_key_weights,
-                checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place/"),
-            )
+            if enable_tactile:
+                classifier_pick = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
+                )
+                classifier_place = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place/"),
+                )
+            else:
+                classifier_pick = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick_no_tactile/"),
+                )
+                classifier_place = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    image_key_weights=self.classifier_key_weights,
+                    checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place_no_tactile/"),
+                )
             
             # input("debug")
             def reward_func(obs, is_pick=True):
@@ -151,7 +166,7 @@ class TrainConfig(DefaultTrainingConfig):
             
                 prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.5
+                    success = prob > 0.8
                     reward = 1 if success else 0
                 else:
                     success = prob > 0.5
