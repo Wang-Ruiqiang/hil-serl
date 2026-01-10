@@ -51,6 +51,12 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
            print(jax.devices())
            PY
         ```
+        and output like:
+        ```
+            0.8.2
+            [CudaDevice(id=0)]
+        ```
+
 
     - For TPU
         ```bash
