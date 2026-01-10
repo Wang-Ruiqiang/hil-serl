@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os, sys, threading, queue, termios, tty, select
 import glob
 import time
 import jax
@@ -8,15 +9,16 @@ import numpy as np
 import tqdm
 from absl import app, flags
 from flax.training import checkpoints
-import os
 import copy
-import sys, threading, queue, termios, tty, select
 import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
-sys.path.insert(0, project_root)
+# project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+# sys.path.insert(0, project_root)
+
+# project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
+# sys.path.insert(0, project_root)
 from serl_launcher.agents.continuous.sac import SACAgent
 from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSingleArm
 from serl_launcher.agents.continuous.sac_hybrid_dual import SACAgentHybridDualArm
@@ -32,13 +34,7 @@ from serl_launcher.utils.launcher import (
     make_wandb_logger,
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
-
-# 提前输入export PYTHONPATH=$(pwd)/../serl_robot_infra:$PYTHONPATH
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
-sys.path.insert(0, project_root)
-
 from experiments.mappings import NEW_MAPPING
-
 from examples.utils import read_utils
 
 FLAGS = flags.FLAGS
