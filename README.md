@@ -23,13 +23,17 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
   - [Citation](#citation)
 
 ## Installation
-1. **Setup Conda Environment:**
+1. **Setup venv Environment:**
+   ```sudo apt update
+      sudo apt install -y python3.11 python3.11-venv python3.11-distutils
+   ```
     create an environment with
-    ```bash
-    conda create -n hilserl python=3.10
+    ```python3.11 -m venv ~/workspaces/virtual_env/serl_env
+       source ~/workspaces/virtual_env/jax_cuda13_env/bin/activate
+       pip install -U pip
     ```
 
-2. **Install Jax as follows:**
+3. **Install Jax as follows:**
     - For CPU (not recommended):
         ```bash
         pip install --upgrade "jax[cpu]"
@@ -46,14 +50,14 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
         ```
     - See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
 
-3. **Install the serl_launcher**
+4. **Install the serl_launcher**
     ```bash
     cd serl_launcher
     pip install -e .
     pip install -r requirements.txt
     ```
 
-4. **Install for serl_robot_infra** Follow the [README](./serl_robot_infra/README.md) in `serl_robot_infra` for installation and basic robot operation instructions. This contains the instruction for installing the impendence-based [serl_franka_controllers](https://github.com/rail-berkeley/serl_franka_controllers). After the installation, you should be able to run the robot server, interact with the gym `franka_env` (hardware).
+5. **Install for serl_robot_infra** Follow the [README](./serl_robot_infra/README.md) in `serl_robot_infra` for installation and basic robot operation instructions. This contains the instruction for installing the impendence-based [serl_franka_controllers](https://github.com/rail-berkeley/serl_franka_controllers). After the installation, you should be able to run the robot server, interact with the gym `franka_env` (hardware).
 
 ## Overview and Code Structure
 
