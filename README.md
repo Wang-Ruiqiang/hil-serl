@@ -41,7 +41,8 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
         ```
 
     - For GPU:
-        ```pip install -U "jax[cuda13]"
+        ```
+        pip install -U "jax[cuda13]"
         ```
         To verify your installation:
         ```python - <<'PY'
