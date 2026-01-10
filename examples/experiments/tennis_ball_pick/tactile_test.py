@@ -20,7 +20,7 @@ def process_tactile_data(sensor, img_size=(320,240)):
 
 def main():
     # 配置路径（确保路径正确）
-    base_path = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    base_path = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     thumb_cfg_path = os.path.join(base_path, "shape_config_thumb.yaml")
     index_cfg_path = os.path.join(base_path, "shape_config_index.yaml")
     middle_cfg_path = os.path.join(base_path, "shape_config_middle.yaml")

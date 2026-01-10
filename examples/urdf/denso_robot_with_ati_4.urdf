@@ -1454,7 +1454,7 @@
   <gazebo>
     <!-- Joint state publisher -->
     <plugin filename="ign_ros2_control-system" name="ign_ros2_control::IgnitionROS2ControlPlugin">
-      <parameters>/home/ruiqiang/workspaces/denso_ws/install/denso_robot_bringup/share/denso_robot_bringup/config/denso_robot_gazebo_controllers.yaml</parameters>
+      <parameters>/home/wrq/workspaces/denso_ws/install/denso_robot_bringup/share/denso_robot_bringup/config/denso_robot_gazebo_controllers.yaml</parameters>
     </plugin>
   </gazebo>
 </robot>

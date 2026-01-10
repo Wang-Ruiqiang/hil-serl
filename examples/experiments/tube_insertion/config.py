@@ -95,7 +95,7 @@ class EnvConfig(DefaultEnvConfig):
     ], dtype=np.float32)
     
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     EXP_NAME = "tube_insertion"
 
 
@@ -146,14 +146,14 @@ class TrainConfig(DefaultTrainingConfig):
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
                     image_key_weights=self.classifier_key_weights,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
                 )
                 classifier_pick = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
                     image_key_weights=self.classifier_key_weights,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
                 )
             else:
                 classifier_insert = load_classifier_func(
@@ -161,14 +161,14 @@ class TrainConfig(DefaultTrainingConfig):
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
                     image_key_weights=self.classifier_key_weights,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion_no_tactile/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion_no_tactile/"),
                 )
                 classifier_pick = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
                     image_key_weights=self.classifier_key_weights,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick_no_tactile/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick_no_tactile/"),
                 )
             # input("debug")
             def reward_func(obs, is_pick=True):

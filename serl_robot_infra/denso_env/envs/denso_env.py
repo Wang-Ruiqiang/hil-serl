@@ -393,7 +393,7 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
-        self.frame_save_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-1-7-2"  # 可自行修改
+        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-1-7-2"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0

@@ -28,7 +28,7 @@ flags.DEFINE_integer("batch_size", 256, "Batch size.")
 classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
 classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
 # classifier_keys = ["front_camera", "side_camera"]
-robot_urdf_path = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
+robot_urdf_path = "/home/wrq/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
 
 # observation_space = gym.spaces.Dict({
 #     "front_camera": gym.spaces.Box(low=0, high=255, shape=(240, 320, 3), dtype=np.uint8),
@@ -68,8 +68,8 @@ def main(_):
     
     history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
     is_first_time = True
-    failure_as_success_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success"
-    success_as_failure_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/success_as_failure"
+    failure_as_success_dir = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/fail_as_success"
+    success_as_failure_dir = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/success_as_failure"
     try:
         for data_count in range(len(data)):
             obs = data[data_count]["observations"]

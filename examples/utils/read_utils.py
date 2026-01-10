@@ -269,7 +269,7 @@ def read_data(robot_urdf_path, enable_tactile=False):
     action_space = gym.spaces.Box(low, high, dtype=np.float32)
     
     actions = np.zeros(action_space.sample().shape)
-    data_dir = "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"
+    data_dir = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/test_data/"
     for collect_data_dir in sorted(os.listdir(data_dir)):
         collect_data_path = os.path.join(data_dir, collect_data_dir)
         if not os.path.isdir(collect_data_path):

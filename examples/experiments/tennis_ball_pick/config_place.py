@@ -73,7 +73,7 @@ class EnvConfig(DefaultEnvConfig):
     
     
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     EXP_NAME = "tennis_ball_place"
 
 
@@ -126,7 +126,7 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
                 )
                 classifier_place = load_classifier_func(
                     key=jax.random.PRNGKey(0),
@@ -140,7 +140,7 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick_no_tactile/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick_no_tactile/"),
                 )
                 classifier_place = load_classifier_func(
                     key=jax.random.PRNGKey(0),

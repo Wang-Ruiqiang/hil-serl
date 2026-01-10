@@ -8,7 +8,7 @@
       "program": "${file}",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "debugAdapterPath": "/home/ruiqiang/.local/lib/python3.10/site-packages"
+      "debugAdapterPath": "/home/wrq/.local/lib/python3.10/site-packages"
     }
   ]
 }

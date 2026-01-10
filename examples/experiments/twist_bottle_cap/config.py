@@ -77,7 +77,7 @@ class EnvConfig(DefaultEnvConfig):
         4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
     ], dtype=np.float32)
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/ruiqiang/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
     EXP_NAME = "twist_bottle_cap"
     LOOP_CONTROL = True
 
@@ -138,7 +138,7 @@ class TrainConfig(DefaultTrainingConfig):
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
                     image_key_weights=self.classifier_key_weights,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
                 )
             else:
                 classifier_bottle_twist = load_classifier_func(
@@ -146,7 +146,7 @@ class TrainConfig(DefaultTrainingConfig):
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
                     image_key_weights=self.classifier_key_weights,
-                    checkpoint_path=os.path.abspath("/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist_no_tactile"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist_no_tactile"),
                 )
             def reward_func(obs, is_pick=True):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))

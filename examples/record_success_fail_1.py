@@ -25,9 +25,9 @@ from experiments.mappings import NEW_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/recorded_data/classifier_bottle_twist", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/classifier_bottle_twist", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
-flags.DEFINE_string("robot_urdf_path", "/home/ruiqiang/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
+flags.DEFINE_string("robot_urdf_path", "/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
