@@ -45,7 +45,8 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
         pip install -U "jax[cuda13]"
         ```
         To verify your installation:
-        ```python - <<'PY'
+        ```
+           python - <<'PY'
            import jax
            print(jax.__version__)
            print(jax.devices())
