@@ -592,7 +592,7 @@ def main(_):
     # replicate agent across devices
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     agent = jax.device_put(
-        jax.tree_map(jnp.array, agent), sharding.replicate()
+        jax.tree_util.tree_map(jnp.array, agent), sharding.replicate()
     )
     
     latest_ckpt = None
@@ -628,7 +628,7 @@ def main(_):
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     
         agent_pick = jax.device_put(
-            jax.tree_map(jnp.array, agent_pick), sharding.replicate()
+            jax.tree_util.tree_map(jnp.array, agent_pick), sharding.replicate()
         )
         
         latest_ckpt = None

@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 import imageio
 import jax
+from jax.tree_util import tree_leaves
 import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
@@ -142,7 +143,7 @@ def load_resnet10_params(agent, image_keys=("image",), public=True):
         with open(file_path, "rb") as f:
             encoder_params = pkl.load(f)
 
-    param_count = sum(x.size for x in jax.tree_leaves(encoder_params))
+    param_count = sum(x.size for x in tree_leaves(encoder_params))
     print(
         f"Loaded {param_count/1e6}M parameters from ResNet-10 pretrained on ImageNet-1K"
     )

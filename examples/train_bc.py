@@ -264,7 +264,7 @@ def main(_):
         # replicate agent across devices
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
         bc_agent: BCAgent = jax.device_put(
-            jax.tree_map(jnp.array, bc_agent), sharding.replicate()
+            jax.tree_util.tree_map(jnp.array, bc_agent), sharding.replicate()
     )   
 
         # learner loop
@@ -293,7 +293,7 @@ def main(_):
         # replicate agent across devices
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
         bc_agent: BCAgent = jax.device_put(
-            jax.tree_map(jnp.array, bc_agent), sharding.replicate()
+            jax.tree_util.tree_map(jnp.array, bc_agent), sharding.replicate()
         )
 
         bc_ckpt = checkpoints.restore_checkpoint(
