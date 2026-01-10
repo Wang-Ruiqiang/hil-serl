@@ -46,11 +46,7 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
         ```
         To verify your installation:
         ```
-           python - <<'PY'
-           import jax
-           print(jax.__version__)
-           print(jax.devices())
-           PY
+           python -c "import jax; print(jax.__version__); print(jax.devices())"
         ```
         and output like:
         ```
