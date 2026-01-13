@@ -9,13 +9,7 @@ import numpy as np
 import optax
 from tqdm import tqdm
 from absl import app, flags
-import gymnasium as gym
-from gymnasium.spaces import flatten_space, flatten
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
-sys.path.insert(0, project_root)
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from serl_launcher.data.data_store import ReplayBuffer
@@ -28,13 +22,13 @@ from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "twist_bottle_cap", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 100, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 
 def main(_):
@@ -176,7 +170,6 @@ def main(_):
     classifier = create_classifier(key, 
                                    sample["observations"], 
                                    config.classifier_keys,
-                                   image_key_weights=config.classifier_key_weights,
                                    )
 
     def data_augmentation_fn(rng, observations):

@@ -22,13 +22,13 @@ class EnvConfig(DefaultEnvConfig):
         "front_camera": {
             "serial_number": "242422303461",
             "dim": (640, 480),
-            "exposure": 40000,
+            # "exposure": 40000,
             "depth": True,
         },
         "wrist_camera": {
             "serial_number": "218622273562",
             "dim": (640, 480),
-            "exposure": 40000,
+            # "exposure": 40000,
             "depth": True,
         },
     }
@@ -36,7 +36,7 @@ class EnvConfig(DefaultEnvConfig):
         "front_camera_2": {
             "serial_number": "318122301393",
             "dim": (640, 480),
-            "exposure": 40000,
+            # "exposure": 40000,
             "depth": True,
         },
     }
@@ -77,7 +77,7 @@ class EnvConfig(DefaultEnvConfig):
         4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
     ], dtype=np.float32)
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     EXP_NAME = "twist_bottle_cap"
     LOOP_CONTROL = True
 

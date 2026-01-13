@@ -30,6 +30,7 @@ from agentlace.data.data_store import QueuedDataStore
 
 from serl_launcher.utils.launcher import (
     make_sac_pixel_agent,
+    make_sac_pixel_agent_hybrid_single_arm,
     make_trainer_config,
     make_wandb_logger,
 )
@@ -47,10 +48,10 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 21000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 20, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -117,14 +118,14 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             agent = agent.replace(state=ckpt)
 
-            # if FLAGS.exp_name == "tennis_ball_place":
-            #     print_green("Loaded previous checkpoint at step 100000.")
-            #     ckpt_pick = checkpoints.restore_checkpoint(
-            #         os.path.abspath(FLAGS.checkpoint_path_pick),
-            #         agent.state,
-            #         step=100000,
-            #     )
-            #     agent_pick = agent.replace(state=ckpt_pick)
+            if FLAGS.exp_name == "tennis_ball_place":
+                print_green("Loaded previous checkpoint at step 100000.")
+                ckpt_pick = checkpoints.restore_checkpoint(
+                    os.path.abspath(FLAGS.checkpoint_path_pick),
+                    agent.state,
+                    step=100000,
+                )
+                agent_pick = agent.replace(state=ckpt_pick)
             
             obs, _ = env.reset()
             key_reader = KeyReader()
@@ -135,13 +136,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 done = False
                 start_time = time.time()
                 
-                print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
-                ckpt = checkpoints.restore_checkpoint(
-                    os.path.abspath(FLAGS.checkpoint_path),
-                    agent.state,
-                    step=ckpt_step,
-                )
-                agent = agent.replace(state=ckpt)
+                # print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
+                # ckpt = checkpoints.restore_checkpoint(
+                #     os.path.abspath(FLAGS.checkpoint_path),
+                #     agent.state,
+                #     step=ckpt_step,
+                # )
+                # agent = agent.replace(state=ckpt)
                 
                 while not done:
 
@@ -212,7 +213,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                             env.unwrapped.save_video_recording(episode)
                         print(f"{success_counter}/{episode + 1}")
                         intervention_label = 0
-                        ckpt_step += 1000
+                        ckpt_step += 3000
                         done_by_manual = False
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)
@@ -399,8 +400,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 masks=1.0 - done,
                 dones=done,
             )
-            # if 'grasp_penalty' in info:
-            #     transition['grasp_penalty']= info['grasp_penalty']
+            if 'grasp_penalty' in info:
+                transition['grasp_penalty']= info['grasp_penalty']
             data_store.insert(transition)
             transitions.append(copy.deepcopy(transition))
             if already_intervened:
@@ -576,18 +577,18 @@ def main(_):
     env = RecordEpisodeStatistics(env)
 
     # rng, sampling_rng = jax.random.split(rng)
-    agent: SACAgent = make_sac_pixel_agent(
+    agent: SACAgent = make_sac_pixel_agent_hybrid_single_arm(
         seed=FLAGS.seed,
         sample_obs=env.observation_space.sample(),
         sample_action=env.action_space.sample(),
         image_keys=config.image_keys,
         encoder_type=config.encoder_type,
         discount=config.discount,
-        state_weights=config.state_weights,
-        image_weights=config.image_weights,
+        # state_weights=config.state_weights,
+        # image_weights=config.image_weights,
     )
     
-    include_grasp_penalty = False
+    include_grasp_penalty = True
     
     # replicate agent across devices
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
@@ -611,19 +612,19 @@ def main(_):
             checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
         )[11:]
         print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
-        
-    include_grasp_penalty = False
+
     agent_pick = None
     if FLAGS.exp_name == "tennis_ball_place":
-        agent_pick: SACAgent = make_sac_pixel_agent(
+        agent_pick: SACAgent = make_sac_pixel_agent_hybrid_single_arm(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),
             sample_action=env.action_space.sample(),
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
             discount=config.discount,
-            state_weights=config.state_weights,
+            # state_weights=config.state_weights,
         )
+        include_grasp_penalty = True
         # replicate agent across devices
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     
@@ -660,7 +661,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="twist_bottle_cap-ablation-1-7",
+            project="tennis-ball-pick-1-13",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -689,8 +690,8 @@ def main(_):
                         break  # 读取结束
                 print("len trans = ", len(transitions))
                 for transition in transitions:
-                    # if 'infos' in transition and 'grasp_penalty' in transition['infos']:
-                    #     transition['grasp_penalty'] = transition['infos']['grasp_penalty']
+                    if 'infos' in transition and 'grasp_penalty' in transition['infos']:
+                        transition['grasp_penalty'] = transition['infos']['grasp_penalty']
                     demo_buffer.insert(transition)
         print_green(f"demo buffer size: {len(demo_buffer)}")
         print_green(f"online buffer size: {len(replay_buffer)}")

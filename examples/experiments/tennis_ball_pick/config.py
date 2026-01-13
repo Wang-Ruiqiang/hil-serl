@@ -14,7 +14,7 @@ from serl_launcher.wrappers.chunking import ChunkingWrapper
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from experiments.config import DefaultTrainingConfig
-from experiments.tennis_ball_pick.wrapper import RAMEnv
+from experiments.tennis_ball_pick.wrapper import RAMEnv, GripperPenaltyWrapper
 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
@@ -73,7 +73,7 @@ class EnvConfig(DefaultEnvConfig):
     
     
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     EXP_NAME = "tennis_ball_pick"
 
 
@@ -132,7 +132,6 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    image_key_weights=self.classifier_key_weights,
                     checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place/"),
                 )
             else:
@@ -146,7 +145,6 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    image_key_weights=self.classifier_key_weights,
                     checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place_no_tactile/"),
                 )
             
@@ -166,7 +164,7 @@ class TrainConfig(DefaultTrainingConfig):
             
                 prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.8
+                    success = prob > 0.90
                     reward = 1 if success else 0
                 else:
                     success = prob > 0.5
@@ -174,4 +172,5 @@ class TrainConfig(DefaultTrainingConfig):
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
+        env = GripperPenaltyWrapper(env, penalty=-0.02)
         return env

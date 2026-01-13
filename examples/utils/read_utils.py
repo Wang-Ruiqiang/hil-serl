@@ -4,7 +4,7 @@ import cv2
 import os
 import numpy as np
 import gymnasium as gym
-from examples.utils import kinematics_utils
+from utils import kinematics_utils
 import re
 from collections import deque
 from scipy.spatial.transform import Rotation as R
@@ -90,7 +90,7 @@ class ObsHistoryBuffer:
 
 def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="tennis_ball_pick"):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
-    color_image_path_wrist = os.path.join(frame_path, "color_image3.jpg")
+    color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
@@ -121,6 +121,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     
     hand_state = np.loadtxt(os.path.join(frame_path, "hand_state.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "hand_state.txt")) else 0.0
 
+    action = np.zeros(7, dtype=np.float32)
     if os.path.exists(action_file_path):
         with open(action_file_path, "r") as f:
             action = np.array([float(x.strip()) for x in f.readlines()])

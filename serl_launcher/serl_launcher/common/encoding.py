@@ -22,8 +22,8 @@ class EncodingWrapper(nn.Module):
     proprio_latent_dim: int = 64
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
-    image_weights: Optional[Dict[str, float]] = None
-    state_weights: Optional[Iterable[float]] = None
+    # image_weights: Optional[Dict[str, float]] = None
+    # state_weights: Optional[Iterable[float]] = None
 
     @nn.compact
     def __call__(

@@ -200,8 +200,16 @@ class ROSNodeInterface(Node):
     def publish_hand_action(self, hand_joints):
         # self.get_logger().info('publish_hand_action')
         stater = JointState()
-        stater.name = [f"joint_{i}" for i in range(len(hand_joints))]
-        stater.position = hand_joints
+        # 1) 转成 1D
+        joints = np.asarray(hand_joints).reshape(-1)
+
+        # 2) 转 float64 + 转 Python float 列表
+        joints = joints.astype(np.float64)
+        joints_list = [float(v) for v in joints]
+
+        stater.name = [f"joint_{i}" for i in range(len(joints_list))]
+        stater.position = joints_list
+
         self.publisher_hand.publish(stater)
     
     def get_current_robot_ee(self, timeout=5.0):
@@ -393,7 +401,7 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
-        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-1-7-2"  # 可自行修改
+        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-1-13-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -444,6 +452,12 @@ class DensoEnv(gym.Env):
         xyz_delta = action[:3]
 
         # print("action scaled = ", xyz_delta * self.action_scale[0])
+        if self.exp_name == "twist_bottle_cap":
+            if self.nextpos[2] < 0.22 and (0.6 < self.nextpos[0] < 0.8) and (-0.13 < self.nextpos[1] < -0.05):
+                action[:3] = np.clip(xyz_delta, -0.4, 0.4)
+                
+        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
+
         if self.exp_name == "tennis_ball_pick":
             if self.nextpos[2] < 0.03:
                 self.nextpos[2] = 0.03
@@ -452,11 +466,6 @@ class DensoEnv(gym.Env):
                 self.nextpos[2] = 0.05
             if self.nextpos[1] < -0.145:
                 self.nextpos[1] = -0.145
-        elif self.exp_name == "twist_bottle_cap":
-            if self.nextpos[2] < 0.22 and (0.6 < self.nextpos[0] < 0.8) and (-0.13 < self.nextpos[1] < -0.05):
-                action[:3] = np.clip(xyz_delta, -0.4, 0.4)
-                
-        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)

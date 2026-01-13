@@ -74,7 +74,7 @@ def make_sac_pixel_agent(
             # "tanh_squash_distribution": False,
             "std_parameterization": "exp",
             "std_min": 1e-5,
-            "std_max": 5,
+            "std_max": 0.5,
             # "std_max": 1,
         },
         critic_network_kwargs={
@@ -122,7 +122,7 @@ def make_sac_pixel_agent_hybrid_single_arm(
             "tanh_squash_distribution": True,
             "std_parameterization": "exp",
             "std_min": 1e-5,
-            "std_max": 5,
+            "std_max": 1,
         },
         critic_network_kwargs={
             "activations": nn.tanh,

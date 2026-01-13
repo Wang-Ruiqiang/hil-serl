@@ -7,6 +7,8 @@ import numpy as np
 
 def process_tactile_data(sensor, img_size=(320,240)):
     raw_img = sensor.get_rectify_crop_image()
+    if raw_img is None or raw_img.size == 0:
+        raise RuntimeError("raw_img is empty (camera not opened / frame not received)")
     img_GRAY = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
     height_map = sensor.raw_image_2_height_map(img_GRAY)
     height_map = sensor.expand_image(height_map)

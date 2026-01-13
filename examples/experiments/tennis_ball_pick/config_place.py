@@ -73,7 +73,7 @@ class EnvConfig(DefaultEnvConfig):
     
     
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TacExo/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     EXP_NAME = "tennis_ball_place"
 
 

@@ -3,6 +3,7 @@ import time
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 from typing import OrderedDict
+import gymnasium as gym
 
 from denso_env.envs.denso_env import DensoEnv
 
@@ -74,7 +75,7 @@ class RAMEnv(DensoEnv):
         # y_init = np.random.uniform(-0.08, -0.18)
         # z_init = np.random.uniform(0.16, 0.20)
         # init_pos = np.array([x_init, y_init, z_init])
-        init_pos = np.array([0.65513753, -0.2067503, 0.16153528])
+        init_pos = np.array([0.60513753, -0.1, 0.18153528])
         # init_pos = np.array([0.60513753, -0.1567503, 0.18153528])
         # init_pos = np.array([0.70513753, -0.3067503, 0.15153528])
         init_ori = np.array([0, 1, 0, 0])
@@ -86,10 +87,34 @@ class RAMEnv(DensoEnv):
 
         self.curr_path_length = 0
         # self.ros_interface.reset_cur_pose()
-        self._update_cur_position(init_arm_action, wait_threshold=0.02)
+        self._update_cur_position(init_arm_action, wait_threshold=0.05)
         # print("self.cur_position = ", self.cur_position)
         # self.save_training_frame()
         obs = self._get_obs()
         # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         self.terminate = False
         return obs, {}
+    
+class GripperPenaltyWrapper(gym.Wrapper):
+    def __init__(self, env, penalty=-0.05):
+        super().__init__(env)
+        self.penalty = penalty
+        self.last_hand_pos = None
+
+    def step(self, action):
+        """Modifies the :attr:`env` :meth:`step` reward using :meth:`self.reward`."""
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        robot_height = observation["state"][0, 2]
+        hand_state = observation["state"][0, 7]
+        print("robot_height: ", robot_height, " hand_state: ", hand_state)
+        if "intervene_action" in info:
+            action = info["intervene_action"]
+
+        if (robot_height > 0.05 and action[-1] > 0.3) or \
+        (robot_height > 0.05 and hand_state > 0.4):
+            info["grasp_penalty"] = self.penalty
+        else:
+            info["grasp_penalty"] = 0.0
+
+        self.last_gripper_pos = observation["state"][0, 0]
+        return observation, reward, terminated, truncated, info
