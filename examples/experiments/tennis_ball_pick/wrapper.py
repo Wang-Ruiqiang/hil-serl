@@ -47,6 +47,7 @@ class RAMEnv(DensoEnv):
         nextpos = np.concatenate((pos, ori), axis=0)
         self.ros_interface.publish_arm_action(nextpos)
         time.sleep(2.0)
+        self.get_im()
 
     def reset(self, joint_reset=False, **kwargs):
         print("RAMEnv reset")
@@ -96,25 +97,26 @@ class RAMEnv(DensoEnv):
         return obs, {}
     
 class GripperPenaltyWrapper(gym.Wrapper):
-    def __init__(self, env, penalty=-0.05):
+    def __init__(self, env, exp_name="tennis_ball_pick", penalty=-0.05):
         super().__init__(env)
         self.penalty = penalty
         self.last_hand_pos = None
+        self.exp_name = exp_name
 
     def step(self, action):
         """Modifies the :attr:`env` :meth:`step` reward using :meth:`self.reward`."""
         observation, reward, terminated, truncated, info = self.env.step(action)
         robot_height = observation["state"][0, 2]
         hand_state = observation["state"][0, 7]
-        print("robot_height: ", robot_height, " hand_state: ", hand_state)
+        # print("robot_height: ", robot_height, " hand_state: ", hand_state)
         if "intervene_action" in info:
             action = info["intervene_action"]
-
-        if (robot_height > 0.05 and action[-1] > 0.3) or \
-        (robot_height > 0.05 and hand_state > 0.4):
-            info["grasp_penalty"] = self.penalty
+        if self.exp_name == "tennis_ball_pick":
+            if (robot_height > 0.06 and action[-1] > 0.3) or \
+            (robot_height > 0.06 and hand_state > 0.4):
+                info["grasp_penalty"] = self.penalty
+            else:
+                info["grasp_penalty"] = 0.0
         else:
             info["grasp_penalty"] = 0.0
-
-        self.last_gripper_pos = observation["state"][0, 0]
         return observation, reward, terminated, truncated, info

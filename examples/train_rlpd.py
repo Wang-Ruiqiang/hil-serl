@@ -48,10 +48,10 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 21000, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 20, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -118,12 +118,12 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             agent = agent.replace(state=ckpt)
 
-            if FLAGS.exp_name == "tennis_ball_place":
-                print_green("Loaded previous checkpoint at step 100000.")
+            if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
+                print_green("Loaded previous checkpoint at step 20000.")
                 ckpt_pick = checkpoints.restore_checkpoint(
                     os.path.abspath(FLAGS.checkpoint_path_pick),
                     agent.state,
-                    step=100000,
+                    step=20000,
                 )
                 agent_pick = agent.replace(state=ckpt_pick)
             
@@ -147,7 +147,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 while not done:
 
                     sampling_rng, key = jax.random.split(sampling_rng)
-                    if FLAGS.exp_name == "tennis_ball_place" and mode == "S1_INFERENCE":
+                    if (FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap") and mode == "S1_INFERENCE":
                         # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
                         actions = agent_pick.sample_actions(
                             observations=jax.device_put(obs),
@@ -209,17 +209,17 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                             print(dt)
                         if not intervention_label or not done_by_manual:
                             success_counter += 1
-                        if FLAGS.save_video:
-                            env.unwrapped.save_video_recording(episode)
                         print(f"{success_counter}/{episode + 1}")
                         intervention_label = 0
-                        ckpt_step += 3000
+                        ckpt_step += 2000
                         done_by_manual = False
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)
                             time.sleep(1.5)
                         elif FLAGS.exp_name == "tennis_ball_pick":
                             env.move_up()
+                        if FLAGS.save_video:
+                            env.unwrapped.save_video_recording(episode)
                         mode = "S1_INFERENCE"
                         input("reset env")
                         obs, _ = env.reset()
@@ -287,10 +287,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     intervention_steps = 0
     mode = "S1_INFERENCE"
     pick_steps = 0
+    demo_count = 216
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
     for step in pbar:
-        if FLAGS.exp_name == "tennis_ball_place":
+        if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
             step = step - pick_steps
         if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
             # dump to pickle file
@@ -310,7 +311,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 demo_transitions = []
         
         sampling_rng, key = jax.random.split(sampling_rng)
-        if FLAGS.exp_name == "tennis_ball_place" and mode == "S1_INFERENCE":
+        if (FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap") and mode == "S1_INFERENCE":
             # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
             pick_steps += 1
             actions = agent_pick.sample_actions(
@@ -351,7 +352,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             sampling_rng, key = jax.random.split(sampling_rng)
             # print("obs shape = ", obs["state"].shape)
             actions_sample = agent.sample_actions(
-                observations=obs,
+                observations=jax.device_put(obs),
+                argmax=True,
                 seed=key,
             )
             actions = np.asarray(jax.device_get(actions_sample)).copy()
@@ -385,7 +387,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             #     is_pick = True
             state = obs["state"][0]
             if FLAGS.exp_name == "twist_bottle_cap":
-                if state[2] < 0.22 and (0.6 < state[0] < 0.8) and (-0.13 < state[1] < -0.05):
+                # if state[2] < 0.22 and (0.6 < state[0] < 0.8) and (-0.13 < state[1] < -0.05):
+                #     actions[:3] = np.clip(actions[:3], -0.4, 0.4)
+                if state[2] < 0.24 and (0.6 < state[0] < 0.8) and (-0.2 < state[1] < -0.1):
                     actions[:3] = np.clip(actions[:3], -0.4, 0.4)
             print("actions = ", actions)
             # print("reward = ", reward)
@@ -402,6 +406,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             )
             if 'grasp_penalty' in info:
                 transition['grasp_penalty']= info['grasp_penalty']
+            if 'robot_arm_penalty' in info:
+                transition['robot_arm_penalty']= info['robot_arm_penalty']
+            
+            print("info['robot_arm_penalty'] = ", info.get('robot_arm_penalty', 0))
+            print("info['grasp_penalty'] = ", info.get('grasp_penalty', 0))
             data_store.insert(transition)
             transitions.append(copy.deepcopy(transition))
             if already_intervened:
@@ -424,6 +433,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 already_intervened = False
                 client.update()
                 mode = "S1_INFERENCE"
+                if FLAGS.save_video:
+                    env.unwrapped.save_video_recording(demo_count)
+                demo_count += 1
+                # print("demo count: ", demo_count)
                 if FLAGS.exp_name == "tube_insertion":
                     env.open_hand(steps=20, step_time=0.05)
                     time.sleep(1.5)
@@ -587,6 +600,17 @@ def main(_):
         # state_weights=config.state_weights,
         # image_weights=config.image_weights,
     )
+    include_robot_arm_penalty = True
+    # agent: SACAgent = make_sac_pixel_agent(
+    #     seed=FLAGS.seed,
+    #     sample_obs=env.observation_space.sample(),
+    #     sample_action=env.action_space.sample(),
+    #     image_keys=config.image_keys,
+    #     encoder_type=config.encoder_type,
+    #     discount=config.discount,
+    #     # state_weights=config.state_weights,
+    #     # image_weights=config.image_weights,
+    # )
     
     include_grasp_penalty = True
     
@@ -614,7 +638,7 @@ def main(_):
         print_green(f"Loaded previous checkpoint at step {ckpt_number}.")
 
     agent_pick = None
-    if FLAGS.exp_name == "tennis_ball_place":
+    if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
         agent_pick: SACAgent = make_sac_pixel_agent_hybrid_single_arm(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),
@@ -624,7 +648,6 @@ def main(_):
             discount=config.discount,
             # state_weights=config.state_weights,
         )
-        include_grasp_penalty = True
         # replicate agent across devices
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     
@@ -658,10 +681,11 @@ def main(_):
             capacity=config.replay_buffer_capacity,
             image_keys=config.image_keys,
             include_grasp_penalty=include_grasp_penalty,
+            include_robot_arm_penalty=include_robot_arm_penalty,
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis-ball-pick-1-13",
+            project="lid-grip-ablation-2-2",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -677,6 +701,7 @@ def main(_):
             capacity=config.replay_buffer_capacity,
             image_keys=config.image_keys,
             include_grasp_penalty=include_grasp_penalty,
+            include_robot_arm_penalty=include_robot_arm_penalty,
         )
 
         assert FLAGS.demo_path is not None
@@ -690,8 +715,10 @@ def main(_):
                         break  # 读取结束
                 print("len trans = ", len(transitions))
                 for transition in transitions:
-                    if 'infos' in transition and 'grasp_penalty' in transition['infos']:
-                        transition['grasp_penalty'] = transition['infos']['grasp_penalty']
+                    # if 'infos' in transition and 'grasp_penalty' in transition:
+                    #     transition['grasp_penalty'] = transition['infos']['grasp_penalty']
+                    # if 'infos' in transition and 'robot_arm_penalty' in transition['infos']:
+                    #     transition['robot_arm_penalty'] = transition['infos']['robot_arm_penalty']
                     demo_buffer.insert(transition)
         print_green(f"demo buffer size: {len(demo_buffer)}")
         print_green(f"online buffer size: {len(replay_buffer)}")

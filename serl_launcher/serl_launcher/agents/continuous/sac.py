@@ -564,8 +564,8 @@ class SACAgent(flax.struct.PyTreeNode):
             use_proprio=use_proprio,
             enable_stacking=True,
             image_keys=image_keys,
-            image_weights=image_weights,
-            state_weights=state_weights,
+            # image_weights=image_weights,
+            # state_weights=state_weights,
         )
 
         encoders = {

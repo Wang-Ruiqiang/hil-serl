@@ -23,15 +23,15 @@ sys.path.insert(0, project_root)
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "lid_grip", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/classifier_ball_pick", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/classifier_lid_grip", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def save_batch_to_pickle(batch_data, file_path):
@@ -63,6 +63,15 @@ def main(_):
             if not os.path.exists("./classifier_data_bottle_twist_no_tactile"):
                 os.makedirs("./classifier_data_bottle_twist_no_tactile")
             file_dir_name = "./classifier_data_bottle_twist_no_tactile"
+    elif FLAGS.exp_name == "lid_grip":
+        if FLAGS.enable_tactile:
+            if not os.path.exists("./classifier_data_lid_grip"):
+                os.makedirs("./classifier_data_lid_grip")
+            file_dir_name = "./classifier_data_lid_grip"
+        else:
+            if not os.path.exists("./classifier_data_lid_grip_no_tactile"):
+                os.makedirs("./classifier_data_lid_grip_no_tactile")
+            file_dir_name = "./classifier_data_lid_grip_no_tactile"
     elif FLAGS.exp_name == "tube_insertion":
         if FLAGS.enable_tactile:
             if FLAGS.is_tube_pick:
@@ -120,7 +129,7 @@ def main(_):
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
         
-        if FLAGS.exp_name == "twist_bottle_cap":
+        if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "lid_grip":
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         elif FLAGS.exp_name == "tube_insertion":
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')

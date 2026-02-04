@@ -22,13 +22,13 @@ from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("num_epochs", 100, "Number of training epochs.")
+flags.DEFINE_string("exp_name", "lid_grip", "Name of experiment corresponding to folder.")
+flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 def main(_):
@@ -56,6 +56,11 @@ def main(_):
             success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*success*.pkl"))
         else:
             success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist_no_tactile", "*success*.pkl"))
+    elif FLAGS.exp_name == "lid_grip":
+        if FLAGS.enable_tactile:
+            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip", "*success*.pkl"))
+        else:
+            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip_no_tactile", "*success*.pkl"))
     elif FLAGS.exp_name == "tube_insertion":
         if FLAGS.enable_tactile:
             if FLAGS.is_tube_pick:
@@ -114,6 +119,11 @@ def main(_):
             failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*failure*.pkl"))
         else:
             failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist_no_tactile", "*failure*.pkl"))
+    elif FLAGS.exp_name == "lid_grip":
+        if FLAGS.enable_tactile:
+            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip", "*failure*.pkl"))
+        else:
+            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip_no_tactile", "*failure*.pkl"))
     elif FLAGS.exp_name == "tube_insertion":
         if FLAGS.enable_tactile:
             if FLAGS.is_tube_pick:
@@ -235,6 +245,21 @@ def main(_):
         else:
             checkpoints.save_checkpoint(
                 os.path.join(os.getcwd(), "classifier_ckpt_bottle_twist_no_tactile/"),
+                classifier,
+                step=FLAGS.num_epochs,
+                overwrite=True,
+            )
+    elif FLAGS.exp_name == "lid_grip":
+        if FLAGS.enable_tactile:
+            checkpoints.save_checkpoint(
+                os.path.join(os.getcwd(), "classifier_ckpt_lid_grip/"),
+                classifier,
+                step=FLAGS.num_epochs,
+                overwrite=True,
+            )
+        else:
+            checkpoints.save_checkpoint(
+                os.path.join(os.getcwd(), "classifier_ckpt_lid_grip_no_tactile/"),
                 classifier,
                 step=FLAGS.num_epochs,
                 overwrite=True,

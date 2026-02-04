@@ -58,7 +58,7 @@ def make_sac_pixel_agent(
     target_entropy=None,
     discount=0.97,
     state_weights=None,
-    image_weights: Dict[str, float] | None = None,
+    # image_weights: Dict[str, float] | None = None,
 ):
     agent = SACAgent.create_pixels(
         jax.random.PRNGKey(seed),
@@ -67,7 +67,7 @@ def make_sac_pixel_agent(
         encoder_type=encoder_type,
         use_proprio=True,
         state_weights=state_weights,
-        image_weights=image_weights,
+        # image_weights=image_weights,
         image_keys=image_keys,
         policy_kwargs={
             "tanh_squash_distribution": True,
@@ -122,7 +122,7 @@ def make_sac_pixel_agent_hybrid_single_arm(
             "tanh_squash_distribution": True,
             "std_parameterization": "exp",
             "std_min": 1e-5,
-            "std_max": 1,
+            "std_max": 5,
         },
         critic_network_kwargs={
             "activations": nn.tanh,

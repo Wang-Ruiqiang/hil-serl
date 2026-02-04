@@ -200,9 +200,17 @@ class SACAgentHybridSingleArm(flax.struct.PyTreeNode):
         # Minimum Q across (subsampled) ensemble members
         target_next_min_q = target_next_qs.min(axis=0)
         chex.assert_shape(target_next_min_q, (batch_size,))
-
+        # jax.debug.print(
+        #     "robot_arm_penalty shape={s} mean={m} min={mn} max={mx} first5={f}",
+        #     s=batch["robot_arm_penalty"].shape,
+        #     m=jnp.mean(batch["robot_arm_penalty"]),
+        #     mn=jnp.min(batch["robot_arm_penalty"]),
+        #     mx=jnp.max(batch["robot_arm_penalty"]),
+        #     f=batch["robot_arm_penalty"][:5],
+        # )
+        # input("debug")
         target_q = (
-            batch["rewards"]
+            batch["rewards"] + batch["robot_arm_penalty"]
             + self.config["discount"] * batch["masks"] * target_next_min_q
         )
         chex.assert_shape(target_q, (batch_size,))

@@ -9,6 +9,7 @@ import cv2
 CROP_CONFIG = {
     # "front_camera": [242, 370, 232, 360],   # y1, y2, x1, x2
     # "wrist_camera": [0, 480, 120, 600],  # y1, y2, x1, x2
+    # "front_camera": [35, 375, 160, 500],   # y1, y2, x1, x2
     "front_camera": [35, 375, 160, 500],   # y1, y2, x1, x2
     "wrist_camera": [0, 480, 120, 600],  # y1, y2, x1, x2
 }

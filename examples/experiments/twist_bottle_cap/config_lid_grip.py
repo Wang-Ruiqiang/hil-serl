@@ -78,7 +78,7 @@ class EnvConfig(DefaultEnvConfig):
     ], dtype=np.float32)
     ENABLE_TACTILE = True
     TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
-    EXP_NAME = "twist_bottle_cap"
+    EXP_NAME = "lid_grip"
     LOOP_CONTROL = True
 
 
@@ -105,19 +105,11 @@ class TrainConfig(DefaultTrainingConfig):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
         if enable_tactile:
-            # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            # self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
-            # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 0.5}
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.classifier_keys = ["front_camera", "tactile_data"]
-            self.classifier_keys_grip_lid = ["front_camera", "wrist_camera", "tactile_data"]
-            # self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
-            # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            self.classifier_keys= ["front_camera", "wrist_camera", "tactile_data"]
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
-            self.classifier_keys = ["front_camera", "wrist_camera"]
-            # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
-            # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
+            self.classifier_keys= ["front_camera", "wrist_camera"]
             
         env = RAMEnv(
             fake_env=fake_env,
@@ -135,49 +127,30 @@ class TrainConfig(DefaultTrainingConfig):
         env = RobotArmPenaltyWrapper(env, penalty=-0.02)
         if classifier:
             if enable_tactile:
-                classifier_bottle_twist = load_classifier_func(
-                    key=jax.random.PRNGKey(0),
-                    sample=env.observation_space.sample(),
-                    image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist"),
-                )
                 classifier_lid_grip = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
-                    image_keys=self.classifier_keys_grip_lid,
+                    image_keys=self.classifier_keys,
                     checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_lid_grip"),
                 )
             else:
-                classifier_bottle_twist = load_classifier_func(
+                classifier_lid_grip = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist_no_tactile"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_lid_grip_no_tactile"),
                 )
             def reward_func(obs, is_pick=True):
+                print("classifier = classifier_pick")
+                classifier = classifier_lid_grip
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-
-                if is_pick:
-                    print("classifier = classifier_pick")
-                    print("sigmoid(classifier(obs) = ", sigmoid(classifier_lid_grip(obs)))
-                    prob = sigmoid(classifier_lid_grip(obs)).item()
-                else:
-                    print("classifier = classifier_place")
-                    print("sigmoid(classifier(obs) = ", sigmoid(classifier_bottle_twist(obs)))
-                    prob = sigmoid(classifier_bottle_twist(obs)).item()
-
-                # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
-                # prob = sigmoid(classifier(obs)).item()
-                if is_pick:
-                    success = prob > 0.2
-                    reward = 1 if success else 0
-                else:
-                    success = prob > 0.8
-                    reward = 1 if success else 0
+                # classifier = classifier_bottle_twist
+                print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
+            
+                prob = sigmoid(classifier(obs)).item()
+                success = prob > 0.9
+                reward = 1 if success else 0
                 return reward
-                # success = prob > 0.5
-                # reward = 1 if success else 0
-                # return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         

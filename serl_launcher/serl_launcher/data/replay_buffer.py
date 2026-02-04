@@ -43,6 +43,7 @@ class ReplayBuffer(Dataset):
         include_next_actions: Optional[bool] = False,
         include_label: Optional[bool] = False,
         include_grasp_penalty: Optional[bool] = False,
+        include_robot_arm_penalty: Optional[bool] = False,
     ):
         if next_observation_space is None:
             next_observation_space = observation_space
@@ -67,6 +68,9 @@ class ReplayBuffer(Dataset):
         
         if include_grasp_penalty:
             dataset_dict['grasp_penalty'] = np.empty((capacity,), dtype=np.float32)
+        
+        if include_robot_arm_penalty:
+            dataset_dict['robot_arm_penalty'] = np.empty((capacity,), dtype=np.float32)
 
         super().__init__(dataset_dict)
 

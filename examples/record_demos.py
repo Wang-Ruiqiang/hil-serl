@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "lid_grip", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
@@ -114,9 +114,15 @@ def main(_):
                     rewards=rew,
                     masks=1.0 - done,
                     dones=done,
-                    infos=info,
                 )
             )
+            if 'grasp_penalty' in info:
+                transition['grasp_penalty']= info['grasp_penalty']
+            if 'robot_arm_penalty' in info:
+                transition['robot_arm_penalty']= info['robot_arm_penalty']
+                
+            print("info['robot_arm_penalty'] = ", info.get('robot_arm_penalty', None))
+            print("info['grasp_penalty'] = ", info.get('grasp_penalty', None))
             trajectory.append(transition)
             # if "is_pick" in info:
             #     is_pick = info["is_pick"]

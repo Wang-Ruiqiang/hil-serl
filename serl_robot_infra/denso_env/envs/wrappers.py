@@ -55,7 +55,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
 
     def step(self, action):
         start_time = time.time()
-        obs, rew, done, truncated, info = self.env.step(action)
+        obs, rew, done, truncated, info = self.env.step(action, self.is_pick)
         rew = self.compute_reward(obs)
         if self.config.EXP_NAME == "tube_insertion":
             done = 0 or (rew == 1)
@@ -64,6 +64,10 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         elif self.config.EXP_NAME == "tennis_ball_place":
             done = (rew == 1) and (not self.is_pick)
             self.is_pick = self.is_pick and not (rew == 1)
+        elif self.config.EXP_NAME == "twist_bottle_cap":
+            done = (rew == 1) and (not self.is_pick)
+            self.is_pick = self.is_pick and not (rew == 1)
+            
         else:
             done = done or (rew > 0)
             
@@ -82,10 +86,11 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         # if self.config.EXP_NAME == "tennis_ball_pick":
         #     if done and not self.is_pick:
         #         self.is_pick = True
+        rew = rew if rew >= 1 else 0
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
-        if self.config.EXP_NAME == "tennis_ball_place":
+        if self.config.EXP_NAME == "tennis_ball_place" or self.config.EXP_NAME == "twist_bottle_cap":
             self.is_pick = True
         obs, info = self.env.reset(**kwargs)
         info['succeed'] = False

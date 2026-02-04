@@ -132,7 +132,7 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_place/"),
                 )
             else:
                 classifier_pick = load_classifier_func(
@@ -157,6 +157,7 @@ class TrainConfig(DefaultTrainingConfig):
                 else:
                     print("classifier = classifier_place")
                     classifier = classifier_place
+                # classifier = classifier_place
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
@@ -164,7 +165,7 @@ class TrainConfig(DefaultTrainingConfig):
             
                 prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.90
+                    success = prob > 0.9
                     reward = 1 if success else 0
                 else:
                     success = prob > 0.5
@@ -172,5 +173,5 @@ class TrainConfig(DefaultTrainingConfig):
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
-        env = GripperPenaltyWrapper(env, penalty=-0.02)
+        env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)
         return env
