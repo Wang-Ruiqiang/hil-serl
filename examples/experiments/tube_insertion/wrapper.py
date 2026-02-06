@@ -4,6 +4,7 @@ from scipy.spatial.transform import Rotation as R
 import numpy as np
 import requests
 from typing import OrderedDict
+import gymnasium as gym
 
 from denso_env.envs.denso_env import DensoEnv
 from denso_env.camera.rs_capture import RSCapture
@@ -17,7 +18,7 @@ class RAMEnv(DensoEnv):
         self.config = kwargs.get("config", {})
         self.exp_name = self.config.EXP_NAME
 
-    def init_cameras(self, name_serial_dict=None, extra_cameras_dict=None):
+    def init_cameras(self, name_serial_dict=None):
         """Init both wrist cameras."""
         if self.cap is not None:  # close cameras if they are already open
             self.close_cameras()
@@ -32,11 +33,11 @@ class RAMEnv(DensoEnv):
                 )
                 self.cap[cam_name] = cap
                 
-        for cam_name, kwargs in extra_cameras_dict.items():
-            cap = VideoCapture(
-                RSCapture(name=cam_name, **kwargs)
-            )
-            self.cap[cam_name] = cap
+        # for cam_name, kwargs in extra_cameras_dict.items():
+        #     cap = VideoCapture(
+        #         RSCapture(name=cam_name, **kwargs)
+        #     )
+        #     self.cap[cam_name] = cap
                 
 
     def open_hand(self, steps=20, step_time=0.05):
@@ -59,7 +60,7 @@ class RAMEnv(DensoEnv):
         # z_init = np.random.uniform(0.08, 0.14)
         # init_pos = np.array([0.7, -0.1458, z_init])
         # init_pos = np.array([0.7, -0.1458, 0.0809])
-        init_pos = np.array([0.7, -0.1458, 0.0809])
+        init_pos = np.array([0.7, -0.1458, 0.1209])
         init_ori = np.array([0, 1, 0, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.publish_arm_action(init_arm_action)
@@ -74,3 +75,39 @@ class RAMEnv(DensoEnv):
         obs = self._get_obs()
         self.terminate = False
         return obs, {}
+    
+class GripperPenaltyWrapper(gym.Wrapper):
+    def __init__(self, env, exp_name="tennis_ball_pick", penalty=-0.05):
+        super().__init__(env)
+        self.penalty = penalty
+        self.last_hand_pos = None
+        self.exp_name = exp_name
+
+    def step(self, action):
+        """Modifies the :attr:`env` :meth:`step` reward using :meth:`self.reward`."""
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        robot_height = observation["state"]["tcp_pos"][2]
+        hand_state = observation["state"]["gripper_pose"]
+        print("robot_height: ", robot_height)
+        # print("robot_height: ", robot_height, " hand_state: ", hand_state)
+        if robot_height > 0.07 and action[-1] > 0.3 and hand_state < 0.7:
+            info["grasp_penalty"] = self.penalty
+        elif hand_state > 0.85 and action[-1] < -0.3:
+            info["grasp_penalty"] = self.penalty
+        else:
+            info["grasp_penalty"] = 0.0
+        return observation, reward, terminated, truncated, info
+        
+
+class RobotArmPenaltyWrapper(gym.Wrapper):
+    def __init__(self, env, penalty=-0.05):
+        super().__init__(env)
+        self.penalty = penalty
+        self.last_hand_pos = None
+
+    def step(self, action):
+        """Modifies the :attr:`env` :meth:`step` reward using :meth:`self.reward`."""
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        robot_height = observation["state"]["tcp_pos"][2]
+        info["robot_arm_penalty"] = 0.0
+        return observation, reward, terminated, truncated, info

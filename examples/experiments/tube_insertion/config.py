@@ -14,7 +14,7 @@ from serl_launcher.wrappers.chunking import ChunkingWrapper
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from experiments.config import DefaultTrainingConfig
-from experiments.tube_insertion.wrapper import RAMEnv
+from experiments.tube_insertion.wrapper import RAMEnv, GripperPenaltyWrapper, RobotArmPenaltyWrapper
 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
@@ -31,21 +31,21 @@ class EnvConfig(DefaultEnvConfig):
             "exposure": 40000,
             "depth": True,
         },
-        "front_classifier": {
-            "serial_number": "318122301393",
-            "dim": (640, 480),
-            "exposure": 40000,
-        },
+        # "front_classifier": {
+        #     "serial_number": "318122301393",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        # },
         
     }
-    EXTRA_REALSENSE_CAMERAS = {
-        "front_camera_2": {
-            "serial_number": "242422303461",
-            "dim": (640, 480),
-            "exposure": 40000,
-            "depth": True,
-        },
-    }
+    # EXTRA_REALSENSE_CAMERAS = {
+    #     "front_camera_2": {
+    #         "serial_number": "242422303461",
+    #         "dim": (640, 480),
+    #         "exposure": 40000,
+    #         "depth": True,
+    #     },
+    # }
     # IMAGE_CROP = {
     #     "front_camera": lambda img: img[242:370, 232:360],
     #     "wrist_camera": lambda img: img[0:480, 120:600],
@@ -54,10 +54,16 @@ class EnvConfig(DefaultEnvConfig):
     # "wrist_classifier": lambda img: img[50:280, 270:500],
     # "front_classifier": lambda img: img[240:360, 230:350],   D405 ROI
     # "front_camera": lambda img: img[60:340, 140:420],  D405 ROI
+    # IMAGE_CROP = {
+    #     "front_camera": lambda img: img[57:337, 115:395],
+    #     "wrist_camera": lambda img: img[0:480, 120:600],
+    #     "front_classifier": lambda img: img[240:360, 210:330],
+    # }
+
     IMAGE_CROP = {
         "front_camera": lambda img: img[57:337, 115:395],
         "wrist_camera": lambda img: img[0:480, 120:600],
-        "front_classifier": lambda img: img[240:360, 210:330],
+        # "front_classifier": lambda img: img[240:360, 210:330],
     }
     # TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
@@ -118,14 +124,14 @@ class TrainConfig(DefaultTrainingConfig):
         env_config.ENABLE_TACTILE = enable_tactile
         if enable_tactile:
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
-            self.classifier_keys = ["front_classifier", "wrist_camera", "tactile_data"]
-            self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
-            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            self.classifier_keys = ["front_camera", "wrist_camera", "tactile_data"]
+            # self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
-            self.classifier_keys = ["front_classifier", "wrist_camera"]
-            self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0}
-            self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
+            self.classifier_keys = ["front_camera", "wrist_camera"]
+            # self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0}
+            # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             
         env = RAMEnv(
             fake_env=fake_env,
@@ -133,6 +139,8 @@ class TrainConfig(DefaultTrainingConfig):
             config=env_config,
         )
         # env = GripperCloseEnv(env)
+        env = GripperPenaltyWrapper(env, penalty=-0.02)
+        env = RobotArmPenaltyWrapper(env, penalty=-0.02)
         if not fake_env:
             env = KeyboardIntervention(env)
         # env = RelativeFrame(env)
@@ -145,14 +153,12 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    image_key_weights=self.classifier_key_weights,
                     checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
                 )
                 classifier_pick = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    image_key_weights=self.classifier_key_weights,
                     checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
                 )
             else:
@@ -160,48 +166,44 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    image_key_weights=self.classifier_key_weights,
                     checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion_no_tactile/"),
                 )
                 classifier_pick = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    image_key_weights=self.classifier_key_weights,
                     checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick_no_tactile/"),
                 )
             # input("debug")
             def reward_func(obs, is_pick=True):
                 # print("classifier obs = ", classifier(obs))
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                if is_pick:
-                    print("classifier = classifier_pick")
-                    classifier = classifier_pick
-                else:
-                    print("classifier = classifier_place")
-                    classifier = classifier_insert
+                # if is_pick:
+                #     print("classifier = classifier_pick")
+                #     classifier = classifier_pick
+                # else:
+                #     print("classifier = classifier_place")
+                #     classifier = classifier_insert
+                
+                classifier = classifier_insert
                 print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
             
                 prob = sigmoid(classifier(obs)).item()
                 
-                if is_pick:
-                    if prob > 1:
-                        success = 1
-                    else:
-                        success = 0
-                    reward = 0.2 if success else 0
-                else:
-                    if prob > 1:
-                        success = 1
-                    else:
-                        success = 0
-                    reward = 1 if success else 0
-                # state = obs["state"]
-                # ee_pos = state[0, :3] if state.ndim > 1 else state[:3]
-                # if ee_pos[2] < 0.16:
-                #     reward -= 0.05
+                # if is_pick:
+                #     success = prob > 0.8
+                #     if success:
+                #         env.unwrapped.stop_cur_command()
+                #         reward = 0.2
+                #     else:
+                #         reward = 0
+                # else:
+                #     success = prob > 0.8
+                #     reward = 1 if success else 0
+                success = prob > 0.95
+                reward = 1 if success else 0
                 return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)

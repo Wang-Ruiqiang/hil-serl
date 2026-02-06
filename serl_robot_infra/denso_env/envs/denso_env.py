@@ -67,10 +67,10 @@ class DefaultEnvConfig:
         # "side_camera": "234222300515",
         "wrist_camera": "218622271185",
     }
-    EXTRA_REALSENSE_CAMERAS: Dict = {
-        # "front_camera": "242422303461",
-        "side_camera": "234222300515",
-    }
+    # EXTRA_REALSENSE_CAMERAS: Dict = {
+    #     # "front_camera": "242422303461",
+    #     "side_camera": "234222300515",
+    # }
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((7,))
     # GRASP_POSE: np.ndarray = np.zeros((6,))
@@ -377,7 +377,7 @@ class DensoEnv(gym.Env):
             self.start_tac_processing()
         
         self.cap = None
-        self.init_cameras(config.REALSENSE_CAMERAS, config.EXTRA_REALSENSE_CAMERAS)
+        self.init_cameras(config.REALSENSE_CAMERAS)
         if self.display_image:
             self.img_queue = queue.Queue()
             self.displayer = ImageDisplayer(self.img_queue, self.url)
@@ -397,7 +397,7 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
-        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-1-31-0"  # 可自行修改
+        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-2-6-0"  # 可自行修改
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
@@ -410,7 +410,7 @@ class DensoEnv(gym.Env):
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
-        elif self.exp_name == "twist_bottle_cap" or self.exp_name == "tube_insertion":
+        elif self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip" or self.exp_name == "tube_insertion":
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_twist_joint = config.GRIPPER_TWIST_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
@@ -449,7 +449,7 @@ class DensoEnv(gym.Env):
 
         # print("action scaled = ", xyz_delta * self.action_scale[0])
 
-        if self.exp_name == "twist_bottle_cap":
+        if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip":
             if self.nextpos[2] < 0.24 and (0.6 < self.nextpos[0] < 0.8) and (-0.2 < self.nextpos[1] < -0.1):
                 action[:3] = np.clip(xyz_delta, -0.4, 0.4)
                 
@@ -480,7 +480,7 @@ class DensoEnv(gym.Env):
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
 
-        if self.exp_name == "twist_bottle_cap" or self.exp_name == "tube_insertion":
+        if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip" or self.exp_name == "tube_insertion":
             target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
         elif self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
             target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
@@ -500,7 +500,6 @@ class DensoEnv(gym.Env):
 
         self.curr_path_length += 1
         self._update_cur_position(self.nextpos)
-
         # t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
@@ -1176,11 +1175,11 @@ class DensoEnv(gym.Env):
             )
             self.cap[cam_name] = cap
 
-        for cam_name, kwargs in extra_cameras_dict.items():
-            cap = VideoCapture(
-                RSCapture(name=cam_name, **kwargs)
-            )
-            self.cap[cam_name] = cap
+        # for cam_name, kwargs in extra_cameras_dict.items():
+        #     cap = VideoCapture(
+        #         RSCapture(name=cam_name, **kwargs)
+        #     )
+        #     self.cap[cam_name] = cap
 
     def close_cameras(self):
         """Close both wrist cameras."""
@@ -1324,6 +1323,15 @@ class DensoEnv(gym.Env):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
         self.arm_orientation = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
         # self.arm_pose = np.concatenate((position, orientation), axis=0)
+
+    def stop_cur_command(self):
+        print("stop current command")
+        pos = self.cur_position.copy()
+        ori = self.cur_oritation.copy()
+        nextpos = np.concatenate((pos, ori), axis=0)
+        self.ros_interface.publish_arm_action(nextpos)
+        # time.sleep(2.0)
+        # self.get_im()
 
 
     def save_training_frame(self):

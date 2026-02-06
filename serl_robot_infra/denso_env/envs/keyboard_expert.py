@@ -21,7 +21,7 @@ class KeyboardExpert:
         if exp_name == "tennis_ball_pick" or exp_name == "tennis_ball_place":
             self.LARGE_STEP = 1
             self.SMALL_STEP = 0.5
-        elif exp_name == "twist_bottle_cap":
+        elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
             self.LARGE_STEP = 1
             self.SMALL_STEP = 0.4
         elif exp_name == "tube_insertion":

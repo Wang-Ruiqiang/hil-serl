@@ -26,7 +26,7 @@ TENNIS_BALL_PICK_IMAGE_CROP = {
 }
 
 TUBE_INSERTION_IMAGE_CROP = {
-    "front_camera": lambda img: img[242:370, 232:360],
+    "front_camera": lambda img: img[60:340, 140:420],
     "wrist_camera": lambda img: img[0:480, 120:600],
 }
 
@@ -39,8 +39,6 @@ TUBE_INSERTION_CLASSIFIER_IMAGE_CROP = {
     "front_classifier": lambda img: img[240:360, 230:350],
     "wrist_classifier": lambda img: img[50:280, 270:500],
 }
-
-
 
 resize_dim = (128, 128)
 tactile_resize_dim = (128, 128)
@@ -93,6 +91,8 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
+    # index_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
+    # thumb_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
     middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
@@ -164,18 +164,18 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     cropped_wrist = IMAGE_CROP["wrist_camera"](color_image_wrist) if "wrist_camera" in IMAGE_CROP else color_image_wrist
 
     cropped_front_classifier = CLASSIFIER_IMAGE_CROP["front_classifier"](color_image) if "front_classifier" in CLASSIFIER_IMAGE_CROP else color_image
-    cropped_wrist_classifier = CLASSIFIER_IMAGE_CROP["wrist_classifier"](color_image_wrist) if "wrist_classifier" in CLASSIFIER_IMAGE_CROP else color_image_wrist
+    # cropped_wrist_classifier = CLASSIFIER_IMAGE_CROP["wrist_classifier"](color_image_wrist) if "wrist_classifier" in CLASSIFIER_IMAGE_CROP else color_image_wrist
 
     resized_image = cv2.resize(cropped_front, resize_dim)
     resized_image_wrist = cv2.resize(cropped_wrist, resize_dim)
     
     resized_image_front_classifier = cv2.resize(cropped_front_classifier, resize_dim)
-    resized_image_wrist_classifier = cv2.resize(cropped_wrist_classifier, resize_dim)
+    # resized_image_wrist_classifier = cv2.resize(cropped_wrist_classifier, resize_dim)
     
     front_camera_image = resized_image[..., ::-1]
     wrist_camera_image = resized_image_wrist[..., ::-1]
     front_classifier_image = resized_image_front_classifier[..., ::-1]
-    wrist_classifier_image = resized_image_wrist_classifier[..., ::-1]
+    # wrist_classifier_image = resized_image_wrist_classifier[..., ::-1]
     
     if not enable_tactile:
         if exp_name == "tennis_ball_pick" or exp_name == "tennis_ball_place":
@@ -187,7 +187,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
             obs = {
                 "front_camera": front_camera_image,
                 "wrist_camera": wrist_camera_image,
-                "front_classifier": front_classifier_image,
+                # "front_classifier": front_classifier_image,
                 "state": state_flattened
             }
         elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
@@ -207,7 +207,7 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
             obs = {
                 "front_camera": front_camera_image,
                 "wrist_camera": wrist_camera_image,
-                "front_classifier": front_classifier_image,
+                # "front_classifier": front_classifier_image,
                 "tactile_data": heatmap_canvas,
                 "state": state_flattened
             }

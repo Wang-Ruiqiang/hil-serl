@@ -23,9 +23,9 @@ sys.path.insert(0, project_root)
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "lid_grip", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
 # flags.DEFINE_integer("successes_needed", 200, "Number of successful transistions to collect.")
-flags.DEFINE_string("data_dir", "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/classifier_lid_grip", "classifier data dir")
+flags.DEFINE_string("data_dir", "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/classifier_tube_insertion", "classifier data dir")
 # flags.DEFINE_string("data_dir", "/home/qiangqiang/workspaces/data/2025-4-3/test_data", "classifier data dir")
 flags.DEFINE_string("robot_urdf_path", "/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf", "robot urdf dir")
 flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
@@ -128,7 +128,6 @@ def main(_):
             [os.path.join(collect_data_path, d) for d in os.listdir(collect_data_path) if os.path.isdir(os.path.join(collect_data_path, d))],
             key=lambda folder: int(re.search(r'frame_(\d+)', os.path.basename(folder)).group(1)) if re.search(r'frame_(\d+)', os.path.basename(folder)) else float('inf')
         )
-        
         if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "lid_grip":
             clip_marks_json = os.path.join(collect_data_path, 'clip_marks.json')
         elif FLAGS.exp_name == "tube_insertion":
@@ -145,20 +144,25 @@ def main(_):
         for clip in clip_marks:
             start_frame = int(clip['start'].split('_')[-1])
             end_frame = int(clip['end'].split('_')[-1])
-        
+            clip_frame_dirs = [
+                p for p in frame_dirs
+                if start_frame <= int(os.path.basename(p).split("_")[-1]) <= end_frame
+            ]
+
+            clip_frame_dirs.sort(
+                key=lambda p: int(os.path.basename(p).split("_")[-1])
+            )
             print("start_frame = ", start_frame)
             print("end_frame = ", end_frame)
             history_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
             history_next_obs = read_utils.ObsHistoryBuffer(obs_horizon=3)
             count = 0
-            for i in list(range(start_frame, end_frame)):
+            for i in range(len(clip_frame_dirs) - 1):
             # for i in list(range(start_frame, end_frame+1)):
-                current_frame_path = os.path.join(collect_data_path, frame_dirs[i])
-                next_frame_path = os.path.join(collect_data_path, frame_dirs[i + 1])
-
+                current_frame_path = clip_frame_dirs[i]
+                next_frame_path = clip_frame_dirs[i + 1]
                 if not (os.path.isdir(current_frame_path)):
                     continue
-                
                 obs, is_record_success, frame_action = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path,
                                                                                 FLAGS.enable_tactile, FLAGS.exp_name)
                 # if i == end_frame:

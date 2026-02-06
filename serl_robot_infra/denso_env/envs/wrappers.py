@@ -45,7 +45,6 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
         self.is_pick = True
-        self.pick_done = False
         self.config = env.config
 
     def compute_reward(self, obs):
@@ -55,12 +54,11 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
 
     def step(self, action):
         start_time = time.time()
-        obs, rew, done, truncated, info = self.env.step(action, self.is_pick)
+        obs, rew, done, truncated, info = self.env.step(action)
         rew = self.compute_reward(obs)
         if self.config.EXP_NAME == "tube_insertion":
-            done = 0 or (rew == 1)
-            if rew == 0.2:
-                self.pick_done = True
+            done = rew == 1
+            self.is_pick = self.is_pick and not (rew == 0.2)
         elif self.config.EXP_NAME == "tennis_ball_place":
             done = (rew == 1) and (not self.is_pick)
             self.is_pick = self.is_pick and not (rew == 1)
@@ -76,21 +74,11 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        # if self.config.EXP_NAME == "tube_insertion" or self.config.EXP_NAME == "tennis_ball_pick":
-        if self.config.EXP_NAME == "tube_insertion":
-            if self.pick_done and self.is_pick:
-                self.is_pick = False
-            elif done and not self.is_pick:
-                self.is_pick = True
-                self.pick_done = False
-        # if self.config.EXP_NAME == "tennis_ball_pick":
-        #     if done and not self.is_pick:
-        #         self.is_pick = True
         rew = rew if rew >= 1 else 0
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
-        if self.config.EXP_NAME == "tennis_ball_place" or self.config.EXP_NAME == "twist_bottle_cap":
+        if self.config.EXP_NAME == "tennis_ball_place" or self.config.EXP_NAME == "twist_bottle_cap" or self.config.EXP_NAME == "tube_insertion":
             self.is_pick = True
         obs, info = self.env.reset(**kwargs)
         info['succeed'] = False

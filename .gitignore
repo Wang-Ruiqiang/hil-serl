@@ -10,6 +10,9 @@ examples/experiments/tennis_ball_pick/202*
 examples/experiments/twist_bottle_cap/202*
 examples/experiments/tube_insertion/202*
 examples/experiments/twist_bottle_cap/videos/*
+examples/tennis_ball_pick_classifier/*
+examples/tube_insertion_classifier/*
+examples/twist_bottle_cap_classifier/*
 examples/experiments/tube_insertion/videos/*
 examples/experiments/tennis_ball_pick/__pycache__/*
 examples/experiments/twist_bottle_cap/__pycache__/*

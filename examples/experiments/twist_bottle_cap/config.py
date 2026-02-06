@@ -154,6 +154,14 @@ class TrainConfig(DefaultTrainingConfig):
                     image_keys=self.classifier_keys,
                     checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_bottle_twist_no_tactile"),
                 )
+                classifier_lid_grip = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=env.observation_space.sample(),
+                    image_keys=self.classifier_keys,
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_lid_grip_no_tactile"),
+                )
+
+
             def reward_func(obs, is_pick=True):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
 
@@ -169,10 +177,14 @@ class TrainConfig(DefaultTrainingConfig):
                 # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.2
-                    reward = 1 if success else 0
+                    success = prob > 0.6
+                    if success:
+                        env.unwrapped.stop_cur_command()
+                        reward = 1
+                    else:
+                        reward = 0
                 else:
-                    success = prob > 0.8
+                    success = prob > 0.9
                     reward = 1 if success else 0
                 return reward
                 # success = prob > 0.5

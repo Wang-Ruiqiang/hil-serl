@@ -48,9 +48,9 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 193000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
-flags.DEFINE_boolean("save_video", False, "Save video.")
+flags.DEFINE_boolean("save_video", True, "Save video.")
 flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
@@ -119,11 +119,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             agent = agent.replace(state=ckpt)
 
             if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
-                print_green("Loaded previous checkpoint at step 20000.")
+                print_green("Loaded previous checkpoint at step 48000.")
                 ckpt_pick = checkpoints.restore_checkpoint(
                     os.path.abspath(FLAGS.checkpoint_path_pick),
                     agent.state,
-                    step=20000,
+                    step=48000,
                 )
                 agent_pick = agent.replace(state=ckpt_pick)
             
@@ -213,6 +213,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         intervention_label = 0
                         ckpt_step += 2000
                         done_by_manual = False
+
+                        if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
+                            env.unwrapped.stop_cur_command()
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)
                             time.sleep(1.5)
@@ -386,7 +389,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             # else:
             #     is_pick = True
             state = obs["state"][0]
-            if FLAGS.exp_name == "twist_bottle_cap":
+            if FLAGS.exp_name == "twist_bottle_cap" or FLAGS.exp_name == "lid_grip":
                 # if state[2] < 0.22 and (0.6 < state[0] < 0.8) and (-0.13 < state[1] < -0.05):
                 #     actions[:3] = np.clip(actions[:3], -0.4, 0.4)
                 if state[2] < 0.24 and (0.6 < state[0] < 0.8) and (-0.2 < state[1] < -0.1):
@@ -433,6 +436,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 already_intervened = False
                 client.update()
                 mode = "S1_INFERENCE"
+                if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
+                    env.unwrapped.stop_cur_command()
                 if FLAGS.save_video:
                     env.unwrapped.save_video_recording(demo_count)
                 demo_count += 1
@@ -589,7 +594,6 @@ def main(_):
     )
     env = RecordEpisodeStatistics(env)
 
-    # rng, sampling_rng = jax.random.split(rng)
     agent: SACAgent = make_sac_pixel_agent_hybrid_single_arm(
         seed=FLAGS.seed,
         sample_obs=env.observation_space.sample(),
@@ -601,6 +605,8 @@ def main(_):
         # image_weights=config.image_weights,
     )
     include_robot_arm_penalty = True
+    include_grasp_penalty = True
+
     # agent: SACAgent = make_sac_pixel_agent(
     #     seed=FLAGS.seed,
     #     sample_obs=env.observation_space.sample(),
@@ -612,7 +618,6 @@ def main(_):
     #     # image_weights=config.image_weights,
     # )
     
-    include_grasp_penalty = True
     
     # replicate agent across devices
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
@@ -685,7 +690,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="lid-grip-ablation-2-2",
+            project="tube-insertion-ablation-2-6",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
