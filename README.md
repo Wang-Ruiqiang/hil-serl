@@ -30,7 +30,7 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
    ```
     create an environment and enter with
     ```python3.10 -m venv ~/workspaces/virtual_env/serl_env
-       source ~/workspaces/virtual_env/jax_cuda13_env/bin/activate
+       source ~/workspaces/virtual_env/jax_cuda12_env/bin/activate
        pip install -U pip
     ```
 
