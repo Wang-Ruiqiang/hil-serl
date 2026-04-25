@@ -28,7 +28,9 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
    ```sudo apt update
       sudo apt install -y python3.10 python3.10-venv python3.10-distutils
    ```
-    create an environment and enter with
+    create an environment
+      ```python3.10 -m venv venv```
+   and enter with
     ```python3.10 -m venv ~/workspaces/virtual_env/serl_env
        source ~/workspaces/virtual_env/jax_cuda12_env/bin/activate
        pip install -U pip
