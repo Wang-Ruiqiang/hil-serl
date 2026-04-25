@@ -24,12 +24,12 @@ HIL-SERL provides a set of libraries, env wrappers, and examples to train RL pol
 
 ## Installation
 1. **Setup venv Environment:**
-   we use RTX5090 and CUDA Version 13.0, jax-cuda13 needs python3.11.
+   we use RTX5090 and CUDA Version 12.0, jax-cuda12 needs python3.10.
    ```sudo apt update
-      sudo apt install -y python3.11 python3.11-venv python3.11-distutils
+      sudo apt install -y python3.1 python3.10-venv python3.11-distutils
    ```
     create an environment and enter with
-    ```python3.11 -m venv ~/workspaces/virtual_env/serl_env
+    ```python3.10 -m venv ~/workspaces/virtual_env/serl_env
        source ~/workspaces/virtual_env/jax_cuda13_env/bin/activate
        pip install -U pip
     ```
