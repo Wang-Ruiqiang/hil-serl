@@ -17,26 +17,26 @@ class RAMEnv(DensoEnv):
         super().__init__(**kwargs)
         self.should_regrasp = False
 
-    def init_cameras(self, name_serial_dict=None, extra_cameras_dict=None):
-        """Init both wrist cameras."""
-        if self.cap is not None:  # close cameras if they are already open
-            self.close_cameras()
+    # def init_cameras(self, name_serial_dict=None, extra_cameras_dict=None):
+    #     """Init both wrist cameras."""
+    #     if self.cap is not None:  # close cameras if they are already open
+    #         self.close_cameras()
 
-        self.cap = OrderedDict()
-        for cam_name, kwargs in name_serial_dict.items():
-            if cam_name == "front_classifier":
-                self.cap["front_classifier"] = self.cap["front_camera"]
-            else:
-                cap = VideoCapture(
-                    RSCapture(name=cam_name, **kwargs)
-                )
-                self.cap[cam_name] = cap
+    #     self.cap = OrderedDict()
+    #     for cam_name, kwargs in name_serial_dict.items():
+    #         if cam_name == "front_classifier":
+    #             self.cap["front_classifier"] = self.cap["front_camera"]
+    #         else:
+    #             cap = VideoCapture(
+    #                 RSCapture(name=cam_name, **kwargs)
+    #             )
+    #             self.cap[cam_name] = cap
                 
-        for cam_name, kwargs in extra_cameras_dict.items():
-            cap = VideoCapture(
-                RSCapture(name=cam_name, **kwargs)
-            )
-            self.cap[cam_name] = cap
+    #     for cam_name, kwargs in extra_cameras_dict.items():
+    #         cap = VideoCapture(
+    #             RSCapture(name=cam_name, **kwargs)
+    #         )
+    #         self.cap[cam_name] = cap
             
 
     def move_up(self):

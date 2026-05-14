@@ -45,8 +45,7 @@ class BCAgent(flax.struct.PyTreeNode):
     def update(self, batch: Batch, pmap_axis: str = None):
         if self.config["image_keys"][0] not in batch["next_observations"]:
             batch = _unpack(batch)
-        print("self.config['action_mean'] = ", self.config["action_mean"])
-        print("self.config['action_std'] = ", self.config["action_std"])
+
         rng, aug_rng = jax.random.split(self.state.rng)
         if "augmentation_function" in self.config.keys() and self.config["augmentation_function"] is not None:
             batch = self.config["augmentation_function"](batch, aug_rng)
@@ -62,43 +61,42 @@ class BCAgent(flax.struct.PyTreeNode):
                 name="actor",
             )
             pi_actions = dist.mode()
-            # if self.config["tanh_squash_distribution"]:
-            #     batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
-            # else:
-            normalized_xyz  = (batch["actions"][:, :3] - self.config["action_mean"]) / self.config["action_std"]
-            batch_actions = jnp.concatenate([normalized_xyz, batch["actions"][:, 3:]], axis=-1)
+            if self.config["tanh_squash_distribution"]:
+                batch_actions = jnp.clip(batch["actions"], -1+1e-6, 1-1e-6)
+            else:
+                batch_actions = batch["actions"]
 
-            pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
+            # pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
 
-            arm_std = dist.scale_diag[:, :7]
-            hand_std = dist.scale_diag[:, 7:]
+            # arm_std = dist.scale_diag[:, :7]
+            # hand_std = dist.scale_diag[:, 7:]
 
-            arm_dist = distrax.MultivariateNormalDiag(pi_arm, arm_std)
-            hand_dist = distrax.MultivariateNormalDiag(pi_hand, hand_std)
+            # arm_dist = distrax.MultivariateNormalDiag(pi_arm, arm_std)
+            # hand_dist = distrax.MultivariateNormalDiag(pi_hand, hand_std)
 
-            arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
-            hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
+            # arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
+            # hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
 
-            arm_weight = 0.7
-            hand_weight = 0.3
-            weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
-            # weighted_log_prob = arm_weight * arm_log_prob
-            actor_loss = -(weighted_log_prob).mean()
-            mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-
-            return actor_loss, {
-                "actor_loss": actor_loss,
-                "mse": mse.mean(),
-            }
-
-            # log_probs = dist.log_prob(batch_actions)
+            # arm_weight = 0.7
+            # hand_weight = 0.3
+            # weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
+            # # weighted_log_prob = arm_weight * arm_log_prob
+            # actor_loss = -(weighted_log_prob).mean()
             # mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-            # actor_loss = -(log_probs).mean()
 
             # return actor_loss, {
             #     "actor_loss": actor_loss,
             #     "mse": mse.mean(),
             # }
+
+            log_probs = dist.log_prob(batch_actions)
+            mse = ((pi_actions - batch_actions) ** 2).sum(-1)
+            actor_loss = -(log_probs).mean()
+
+            return actor_loss, {
+                "actor_loss": actor_loss,
+                "mse": mse.mean(),
+            }
 
         # compute gradients and update params
         new_state, info = self.state.apply_loss_fns(

@@ -114,6 +114,7 @@ class TrainConfig(DefaultTrainingConfig):
     )
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     buffer_period = 1000
+    batch_size = 128
     checkpoint_period = 1000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
@@ -153,26 +154,26 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/tube_insertion_classifier/classifier_ckpt_tube_insertion/"),
                 )
                 classifier_pick = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/tube_insertion_classifier/classifier_ckpt_tube_pick/"),
                 )
             else:
                 classifier_insert = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_insertion_no_tactile/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/tube_insertion_classifier/classifier_ckpt_tube_insertion_no_tactile/"),
                 )
                 classifier_pick = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_tube_pick_no_tactile/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/tube_insertion_classifier/classifier_ckpt_tube_pick_no_tactile/"),
                 )
             # input("debug")
             def reward_func(obs, is_pick=True):
@@ -202,7 +203,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # else:
                 #     success = prob > 0.8
                 #     reward = 1 if success else 0
-                success = prob > 0.95
+                success = prob > 0.5
                 reward = 1 if success else 0
                 return reward
 

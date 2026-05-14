@@ -2,7 +2,7 @@
 
 import glob
 import time
-import sys
+import os, sys, threading, queue, termios, tty, select
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -44,10 +44,12 @@ flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folde
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_string("bc_checkpoint_path", None, "Path to save checkpoints.")
-flags.DEFINE_integer("eval_n_trajs", 1000, "Number of trajectories to evaluate.")
-flags.DEFINE_integer("train_steps", 20000, "Number of pretraining steps.")
+flags.DEFINE_integer("eval_n_trajs", 0, "Number of trajectories to evaluate.")
+flags.DEFINE_integer("eval_checkpoint_step", 60000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("train_steps", 2000000, "Number of pretraining steps.")
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 robot_urdf_path = "/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf"
 
@@ -60,15 +62,6 @@ devices = jax.local_devices()
 num_devices = len(devices)
 sharding = jax.sharding.PositionalSharding(devices)
 
-palm_lower2denso_end_tf = np.array([
-    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
-    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
-    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
-    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
-])
-
-eval_checkpoint_step = 19000
-
 
 def print_green(x):
     return print("\033[92m {}\033[00m".format(x))
@@ -80,66 +73,228 @@ def print_yellow(x):
 
 ##############################################################################
 
-def eval(
-    env,
-    bc_agent: BCAgent,
-    sampling_rng,
-):
-    """
-    This is the actor loop, which runs when "--actor" is set to True.
-    """
-    print("evaluating")
-    ckpt = checkpoints.restore_checkpoint(
-        os.path.abspath(FLAGS.bc_checkpoint_path),
-        bc_agent.state,
-        step=eval_checkpoint_step,
-    )
+class KeyReader(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.q = queue.Queue()
+        self._stop = threading.Event()
+        self.fd = sys.stdin.fileno()
+        self.old = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)  # 立即读取，无需回车
 
-    print_green(f"Loaded previous checkpoint at step {eval_checkpoint_step}.")
+    def run(self):
+        try:
+            while not self._stop.is_set():
+                if sys.stdin in select.select([sys.stdin], [], [], 0.01)[0]:
+                    ch = sys.stdin.read(1)
+                    self.q.put(ch)
+        finally:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
-    bc_agent = bc_agent.replace(state=ckpt)
+    def get_key_nowait(self):
+        try:
+            return self.q.get_nowait()
+        except queue.Empty:
+            return None
 
-    success_counter = 0
-    time_list = []
-    # data, _= read_utils.read_data(robot_urdf_path, True)
-    data_count = 0
+    def stop(self):
+        self._stop.set()
+
+
+# def eval(
+#     env,
+#     bc_agent: BCAgent,
+#     sampling_rng,
+# ):
+#     """
+#     This is the actor loop, which runs when "--actor" is set to True.
+#     """
+#     print("evaluating")
+#     ckpt = checkpoints.restore_checkpoint(
+#         os.path.abspath(FLAGS.bc_checkpoint_path),
+#         bc_agent.state,
+#         step=eval_checkpoint_step,
+#     )
+
+#     print_green(f"Loaded previous checkpoint at step {eval_checkpoint_step}.")
+
+#     bc_agent = bc_agent.replace(state=ckpt)
+
+#     success_counter = 0
+#     time_list = []
+#     # data, _= read_utils.read_data(robot_urdf_path, True)
+#     data_count = 0
     
-    obs, _ = env.reset()
-    done = False
-    start_time = time.time()
-    while not done:
-        sampling_rng, key = jax.random.split(sampling_rng)
+#     obs, _ = env.reset()
+#     done = False
+#     start_time = time.time()
+#     while not done:
+#         sampling_rng, key = jax.random.split(sampling_rng)
 
-        print("obs state = ", obs["state"])
-        # obs = data[data_count]["observations"]
+#         print("obs state = ", obs["state"])
+#         # obs = data[data_count]["observations"]
 
-        # print("obs_read state = ", obs["state"])
+#         # print("obs_read state = ", obs["state"])
         
-        actions = bc_agent.sample_actions(observations=obs, seed=key)
-        actions = np.asarray(jax.device_get(actions))
-        actions = np.array(actions, copy=True)
+#         actions = bc_agent.sample_actions(observations=obs, seed=key)
+#         actions = np.asarray(jax.device_get(actions))
+#         actions = np.array(actions, copy=True)
         
-        # ori_index = [3, 0, 1, 2]
-        # tcp_ori = actions[3:7]
-        # actions[3:7] = tcp_ori[ori_index]
-        # actions[:3], actions[3:7] = kinematics_utils.apply_transformation(actions[:3], actions[3:7], palm_lower2denso_end_tf)
+#         # ori_index = [3, 0, 1, 2]
+#         # tcp_ori = actions[3:7]
+#         # actions[3:7] = tcp_ori[ori_index]
+#         # actions[:3], actions[3:7] = kinematics_utils.apply_transformation(actions[:3], actions[3:7], palm_lower2denso_end_tf)
         
-        # actions_read = data[data_count]["actions"]
+#         # actions_read = data[data_count]["actions"]
 
-        next_obs, reward, done, truncated, info = env.step(actions)
-        obs = next_obs
-        if done:
-            if reward:
-                dt = time.time() - start_time
-                time_list.append(dt)
-                print(dt)
-            success_counter += reward
-            print(reward)
-        data_count += 1
-        # if data_count >= len(data):
-        #     print("eval failed")
-        #     break
+#         next_obs, reward, done, truncated, info = env.step(actions)
+#         obs = next_obs
+#         if done:
+#             if reward:
+#                 dt = time.time() - start_time
+#                 time_list.append(dt)
+#                 print(dt)
+#             success_counter += reward
+#             print(reward)
+#         data_count += 1
+#         # if data_count >= len(data):
+#         #     print("eval failed")
+#         #     break
 
+
+def eval(env, bc_agent: BCAgent, sampling_rng):
+    try:
+        print("in eval mode")
+        mode = "S1_INFERENCE"
+        success_counter = 0
+        intervention_label = 0
+        time_list = []
+        print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
+        # ckpt = checkpoints.restore_checkpoint(
+        #     os.path.abspath(FLAGS.bc_checkpoint_path),
+        #     bc_agent.state,
+        #     step=FLAGS.eval_checkpoint_step,
+        # )
+        # agent = bc_agent.replace(state=ckpt)
+
+        if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
+            print_green("Loaded previous checkpoint at step 32000.")
+            ckpt_pick = checkpoints.restore_checkpoint(
+                os.path.abspath(FLAGS.bc_checkpoint_path_pick),
+                agent.state,
+                step=32000,
+            )
+            agent_pick = agent.replace(state=ckpt_pick)
+        
+        obs, _ = env.reset()
+        key_reader = KeyReader()
+        key_reader.start()
+        ckpt_step = FLAGS.eval_checkpoint_step
+        done_by_manual = False
+        for episode in range(FLAGS.eval_n_trajs):
+            done = False
+            start_time = time.time()
+            
+            print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
+            ckpt = checkpoints.restore_checkpoint(
+                os.path.abspath(FLAGS.bc_checkpoint_path),
+                bc_agent.state,
+                step=ckpt_step,
+            )
+            agent = bc_agent.replace(state=ckpt)
+            
+            while not done:
+                sampling_rng, key = jax.random.split(sampling_rng)
+                if (FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap") and mode == "S1_INFERENCE":
+                    # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
+                    actions = agent_pick.sample_actions(
+                        observations=jax.device_put(obs),
+                        argmax=True,    
+                        seed=key
+                    )
+                    actions = np.asarray(jax.device_get(actions)).copy()
+
+                    next_obs, reward, done, truncated, info = env.step(actions)
+                    obs = next_obs
+                    if "is_pick" in info:
+                        is_pick_task = info["is_pick"]
+                    else:
+                        is_pick_task = True
+
+                    # ==== 判定任务1完成（你可替换为自己的条件）====
+                    if not is_pick_task:
+                        print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                        mode = "S2_TRAIN"
+                        # 可在此清零统计（可选）
+                        intervention_count = 0
+                        intervention_steps = 0
+                        already_intervened = False
+                        continue
+                    else:
+                        # 任务1未完成就继续 S1 推理
+                        continue
+
+                print_green(f"obs[state] =  {obs['state']}")
+                actions = agent.sample_actions(
+                    observations=jax.device_put(obs),
+                    argmax=False,
+                    seed=key
+                )
+                
+                # actions = np.asarray(jax.device_get(actions))
+                actions = np.asarray(jax.device_get(actions)).copy()
+                actions[..., 3:6] = 0.0
+
+                print("actions = ", actions)
+
+                next_obs, reward, done, truncated, info = env.step(actions)
+                obs = next_obs
+                key = key_reader.get_key_nowait()
+                while key is not None:
+                    if key == '1':
+                        done = True
+                        info = dict(info)
+                        done_by_manual = True
+                        info['succeed'] = True
+                    key = key_reader.get_key_nowait()
+                    
+                if "intervene_action" in info:
+                    intervention_label = 1
+                if done:
+                    if reward:
+                        dt = time.time() - start_time
+                        time_list.append(dt)
+                        print(dt)
+                    if not intervention_label or not done_by_manual:
+                        success_counter += 1
+                    print(f"{success_counter}/{episode + 1}")
+                    intervention_label = 0
+                    ckpt_step += 20000
+                    done_by_manual = False
+
+                    if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
+                        env.unwrapped.stop_cur_command()
+                    if FLAGS.exp_name == "tube_insertion":
+                        env.open_hand(steps=20, step_time=0.05)
+                        time.sleep(1.5)
+                    elif FLAGS.exp_name == "tennis_ball_pick":
+                        env.move_up()
+                    if FLAGS.save_video:
+                        env.unwrapped.save_video_recording(episode)
+                    mode = "S1_INFERENCE"
+                    input("reset env")
+                    obs, _ = env.reset()
+
+        print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
+        print(f"average time: {np.mean(time_list)}")
+        return  # after done eval, return and exit
+    
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # env.save_all_data_on_exit()
+        # env.close()
+        return
 
 ##############################################################################
 
@@ -189,7 +344,7 @@ def train(
 
 
 def main(_):
-    config: DefaultTrainingConfig = NEW_MAPPING[FLAGS.exp_name]()
+    config = NEW_MAPPING[FLAGS.exp_name]()
 
     assert config.batch_size % num_devices == 0
     assert FLAGS.exp_name in NEW_MAPPING, "Experiment folder not found."
@@ -199,6 +354,7 @@ def main(_):
         fake_env=not eval_mode,
         save_video=FLAGS.save_video,
         classifier=True,
+        enable_tactile=FLAGS.enable_tactile
     )
     env = RecordEpisodeStatistics(env)
 
@@ -219,36 +375,42 @@ def main(_):
 
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="hil-serl",
+            project="bc_ball_pick-4-6",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
 
 
-        all_actions = []  # 存储所有动作
+        # all_actions = []  # 存储所有动作
         assert FLAGS.demo_path is not None
         for path in FLAGS.demo_path:
-            with open(path, "rb") as f:
-                transitions = []
-                while True:
-                    try:
-                        transitions.extend(pkl.load(f))  # 读取并扩展列表
-                    except EOFError:
-                        break  # 读取结束
+            # with open(path, "rb") as f:
+            #     transitions = []
+            #     while True:
+            #         try:
+            #             transitions.extend(pkl.load(f))  # 读取并扩展列表
+            #         except EOFError:
+            #             break  # 读取结束
+            #     for transition in transitions:
+            #         bc_replay_buffer.insert(transition)
+             with open(path, "rb") as f:
+                transitions = pkl.load(f)
                 for transition in transitions:
-                    # print("state shape = ", transition["observations"]["state"].shape)
-                    # print("front camera shape = ", transition["observations"]["front_camera"].shape)
-                    # print("side camera shape = ", transition["observations"]["side_camera"].shape)
-                    # print("transition = ", transition)
                     bc_replay_buffer.insert(transition)
-                    # print("transition keys = ", transition["observations"].keys())
-                    # print("transition[observation]state = ", transition["observations"]["state"])
-                    # input("debug")
-                    # print("transition[actions] = ", transition["actions"][:3])
-                    all_actions.append(transition["actions"])
+
+        if FLAGS.bc_checkpoint_path is not None and os.path.exists(
+            os.path.join(FLAGS.bc_checkpoint_path, "demo_buffer")
+        ):
+            for file in glob.glob(
+                os.path.join(FLAGS.bc_checkpoint_path, "demo_buffer/*.pkl")
+            ):
+                with open(file, "rb") as f:
+                    transitions = pkl.load(f)
+                    for transition in transitions:
+                        bc_replay_buffer.insert(transition)
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
 
-        all_actions = np.array(all_actions)
+        # all_actions = np.array(all_actions)
         # action_mean = np.mean(all_actions[:,:3], axis=0)
         # action_std = np.std(all_actions[:,:3], axis=0) + 1e-6  # 防止除以0
         # print("sample_obs=env.observation_space.sample() = ", env.observation_space.sample()["state"].shape)
@@ -304,11 +466,12 @@ def main(_):
 
         sampling_rng = jax.device_put(sampling_rng, sharding.replicate())
         print_green("starting actor loop")
-        eval(
-            env=env,
-            bc_agent=bc_agent,
-            sampling_rng=sampling_rng,
-        )
+        # eval(
+        #     env=env,
+        #     bc_agent=bc_agent,
+        #     sampling_rng=sampling_rng,
+        # )
+        eval(env=env, bc_agent=bc_agent, sampling_rng=sampling_rng)
 
 
 if __name__ == "__main__":

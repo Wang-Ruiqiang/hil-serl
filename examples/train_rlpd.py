@@ -48,10 +48,10 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 193000, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
-flags.DEFINE_boolean("save_video", True, "Save video.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_integer("eval_checkpoint_step", 21000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_n_trajs", 20, "Number of trajectories to evaluate.")
+flags.DEFINE_boolean("save_video", False, "Save video.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -119,11 +119,11 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             agent = agent.replace(state=ckpt)
 
             if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
-                print_green("Loaded previous checkpoint at step 48000.")
+                print_green("Loaded previous checkpoint at step 32000.")
                 ckpt_pick = checkpoints.restore_checkpoint(
                     os.path.abspath(FLAGS.checkpoint_path_pick),
                     agent.state,
-                    step=48000,
+                    step=32000,
                 )
                 agent_pick = agent.replace(state=ckpt_pick)
             
@@ -690,7 +690,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tube-insertion-ablation-2-6",
+            project="tube-insertion-4-2",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

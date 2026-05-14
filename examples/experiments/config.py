@@ -6,7 +6,7 @@ class DefaultTrainingConfig:
 
     agent: str = "drq"
     max_traj_length: int = 100
-    batch_size: int = 64
+    batch_size: int = 128
     cta_ratio: int = 3
     discount: float = 0.97
 

@@ -302,7 +302,7 @@ class DensoEnv(gym.Env):
                         {
                             **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS},
-                            "tactile_data": gym.spaces.Box(0, 255, shape=(128, 256, 3), dtype=np.uint8),
+                            "tactile_data": gym.spaces.Box(0, 255, shape=(64, 128, 3), dtype=np.uint8),  #TODO:tennins ball pick 使用64,64的tactile图像，其他任务不是，后续需要统一
                         }
                     ),
                 }
@@ -347,7 +347,8 @@ class DensoEnv(gym.Env):
             self.middle_tactile_sensor = Sensor(middle_cfg)
             # self.middle_tactile_vis  = Visualizer(self.middle_tactile_sensor.points)
 
-            self.tactile_size = (128, 128)
+            #TODO:tennins ball pick 使用64,64的tactile图像，其他任务不是，后续需要统一
+            self.tactile_size = (64, 64)
             self.thumb_raw_img = []
             self.index_raw_img = []
             self.middle_raw_img = []
@@ -377,7 +378,7 @@ class DensoEnv(gym.Env):
             self.start_tac_processing()
         
         self.cap = None
-        self.init_cameras(config.REALSENSE_CAMERAS)
+        self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
         if self.display_image:
             self.img_queue = queue.Queue()
             self.displayer = ImageDisplayer(self.img_queue, self.url)
