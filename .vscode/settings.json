@@ -6,5 +6,5 @@
         "./serl_robot_infra",
         "./serl_launcher"
     ],
-    "cmake.sourceDirectory": "/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/serl_robot_infra/egg_flip_controller"
+    "cmake.sourceDirectory": "/home/user/workspaces/DexTactHIL/hil-serl/serl_robot_infra/egg_flip_controller"
 }

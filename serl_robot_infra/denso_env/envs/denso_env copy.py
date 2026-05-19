@@ -17,7 +17,6 @@ from collections import OrderedDict
 from typing import Dict
 
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.transform import Rotation as R, Slerp
 
 import rclpy
 from rclpy.node import Node
@@ -29,7 +28,7 @@ from denso_env.camera.rs_capture import RSCapture
 from leap_hand.srv import LeapPosition, LeapPosVelEff
 from shape_reconstruction import Sensor
 
-# from examples.utils import read_utils
+from examples.utils import read_utils
 
 
 class ImageDisplayer(threading.Thread):
@@ -63,11 +62,9 @@ class DefaultEnvConfig:
     """Default configuration for FrankaEnv. Fill in the values below."""
 
     REALSENSE_CAMERAS: Dict = {
-        #denso
-        # "front_camera": "242422303461",
-        #franka
-        "front_camera": "151422254571",
-        # "wrist_camera": "218622271185",
+        "front_camera": "242422303461",
+        # "side_camera": "234222300515",
+        "wrist_camera": "218622271185",
     }
     # EXTRA_REALSENSE_CAMERAS: Dict = {
     #     # "front_camera": "242422303461",
@@ -107,7 +104,7 @@ class ROSNodeInterface(Node):
         # Publishers（发送）
         self.arm_pub = self.create_publisher(
             PoseStamped,
-            '/target_pose',
+            '/tactexo/robot_control',
             10
         )
 
@@ -117,10 +114,11 @@ class ROSNodeInterface(Node):
             10
         )
 
-        #franka
+        # Subscribers（接收）
+        # denso
         self.robot_ee_sub = self.create_subscription(
             PoseStamped,
-            '/franka_robot_state_broadcaster/current_pose',
+            '/cartesian_compliance_controller/current_pose',
             self.robot_ee_callback,
             10
         )
@@ -148,7 +146,7 @@ class ROSNodeInterface(Node):
         self.current_hand_joints = None
 
         self.cur_position = np.zeros(3, dtype=np.float32)
-        self.cur_orientation = np.array([0, 1, 0, 0], dtype=np.float32)
+        self.cur_oritation = np.zeros(4, dtype=np.float32)
 
 
     def robot_ee_callback(self, msg):
@@ -159,9 +157,7 @@ class ROSNodeInterface(Node):
 
         # 从 msg 中提取四元数方向数据（xyzw）
         orientation = msg.pose.orientation
-
-        # self.get_logger().info(f"cur_orientation:{self.cur_orientation}")
-        self.cur_orientation = np.array([
+        self.cur_oritation = np.array([
             orientation.w, orientation.x, orientation.y, orientation.z
         ])
         # 设置事件为已收到数据
@@ -173,9 +169,11 @@ class ROSNodeInterface(Node):
         # 将 joint name 和对应的位置打包为字典
         joint_dict = {name: pos for name, pos in zip(msg.name, msg.position)}
 
-        # 按照你需要的顺序提取关节角：joint1 ~ joint7
+        # 按照你需要的顺序提取关节角：joint1 ~ joint6
+        #denso
+        ordered_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
         #franka
-        ordered_joint_names = ["fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4", "fr3_joint5", "fr3_joint6", "fr3_joint7"]
+        # ordered_joint_names = ["fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4", "fr3_joint5", "fr3_joint6", "fr3_joint7"]
         ordered_joint_positions = [joint_dict.get(joint, 0.0) for joint in ordered_joint_names]
 
         # 保存为 numpy array
@@ -189,7 +187,6 @@ class ROSNodeInterface(Node):
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         x, y, z = map(float, pose[:3])
-        msg.header.frame_id = "base"
         msg.pose.position.x = x
         msg.pose.position.y = y
         msg.pose.position.z = z
@@ -199,73 +196,8 @@ class ROSNodeInterface(Node):
         msg.pose.orientation.x = ori_x
         msg.pose.orientation.y = ori_y
         msg.pose.orientation.z = ori_z
+        # print("msg.pose = ", msg.pose)
         self.arm_pub.publish(msg)
-
-
-    def arm_interpolate_and_publish(self, start_pose, end_pose, step_time=0.02, steps=100):
-        """
-        start_pose: [x, y, z, qw, qx, qy, qz]
-        end_pose:   [x, y, z, qw, qx, qy, qz]
-        step_time:  每一步间隔时间，例如 0.02 = 50Hz
-        steps:      插值步数，例如 100 步，整体大约 2 秒
-        """
-
-        start_pose = np.asarray(start_pose, dtype=np.float64)
-        end_pose = np.asarray(end_pose, dtype=np.float64)
-
-        start_pos = start_pose[:3]
-        end_pos = end_pose[:3]
-
-        # 你的 pose 是 [qw, qx, qy, qz]
-        start_quat_wxyz = start_pose[3:7]
-        end_quat_wxyz = end_pose[3:7]
-
-        # scipy Rotation 需要 [qx, qy, qz, qw]
-        start_quat_xyzw = np.array([
-            start_quat_wxyz[1],
-            start_quat_wxyz[2],
-            start_quat_wxyz[3],
-            start_quat_wxyz[0],
-        ])
-
-        end_quat_xyzw = np.array([
-            end_quat_wxyz[1],
-            end_quat_wxyz[2],
-            end_quat_wxyz[3],
-            end_quat_wxyz[0],
-        ])
-
-        # 姿态球面插值 Slerp
-        key_times = [0.0, 1.0]
-        key_rots = R.from_quat([start_quat_xyzw, end_quat_xyzw])
-        slerp = Slerp(key_times, key_rots)
-
-        for i in range(steps + 1):
-            alpha = i / steps
-
-            # 位置线性插值
-            interpolated_pos = start_pos + alpha * (end_pos - start_pos)
-
-            # 姿态 Slerp 插值
-            interpolated_rot = slerp([alpha])[0]
-            interpolated_quat_xyzw = interpolated_rot.as_quat()
-
-            # 转回你的格式 [qw, qx, qy, qz]
-            interpolated_quat_wxyz = np.array([
-                interpolated_quat_xyzw[3],
-                interpolated_quat_xyzw[0],
-                interpolated_quat_xyzw[1],
-                interpolated_quat_xyzw[2],
-            ])
-
-            interpolated_pose = np.concatenate([
-                interpolated_pos,
-                interpolated_quat_wxyz,
-            ])
-
-            self.publish_arm_action(interpolated_pose)
-
-            time.sleep(step_time)
 
 
     def publish_hand_action(self, hand_joints):
@@ -284,7 +216,7 @@ class ROSNodeInterface(Node):
         self.publisher_hand.publish(stater)
     
     def get_current_robot_ee(self, timeout=5.0):
-        return self.cur_position, self.cur_orientation
+        return self.cur_position, self.cur_oritation
     
 
     def get_current_joint(self, timeout=5.0):
@@ -316,7 +248,6 @@ class DensoEnv(gym.Env):
         self._TARGET_POSE = config.TARGET_POSE
         # self._RESET_POSE = config.RESET_POSE
         self._REWARD_THRESHOLD = config.REWARD_THRESHOLD
-        self.url = config.SERVER_URL
         self.config = config
         self.max_episode_length = config.MAX_EPISODE_LENGTH
         self.display_image = config.DISPLAY_IMAGE
@@ -448,7 +379,7 @@ class DensoEnv(gym.Env):
             self.start_tac_processing()
         
         self.cap = None
-        self.init_cameras(self.config.REALSENSE_CAMERAS)
+        self.init_cameras(config.REALSENSE_CAMERAS)
         if self.display_image:
             self.img_queue = queue.Queue()
             self.displayer = ImageDisplayer(self.img_queue, self.url)
@@ -468,15 +399,13 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
-        # self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-2-6-0"  # 可自行修改
-        # os.makedirs(self.frame_save_path, exist_ok=True)
+        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-2-6-0"  # 可自行修改
+        os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
 
         self.cur_position = np.zeros(3, dtype=np.float32)
-        self.cur_orientation = np.array([0, 1, 0, 0], dtype=np.float32)
-        # self.cmd_pose = np.concatenate([self.cur_position.copy(), self.cur_orientation.copy()], axis=0)
-
+        self.cur_oritation = np.zeros(4, dtype=np.float32)
 
         if self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
         # grip with index
@@ -490,7 +419,7 @@ class DensoEnv(gym.Env):
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
 
-        print("Initialized franka")
+        print("Initialized Denso")
 
 
     def start_tac_processing(self):
@@ -515,44 +444,40 @@ class DensoEnv(gym.Env):
         start_time = time.time()
         action = np.clip(action, self.action_space.low, self.action_space.high)
         self.current_action = action.copy()
-        self.cur_position, self.cur_orientation = self.ros_interface.get_current_robot_ee()
-        self.curpos = np.concatenate((self.cur_position, self.cur_orientation), axis=0)
-        # self.nextpos = self.curpos.copy()
 
-        self.nextpos = self.cmd_pose.copy()
-        # print("self.nextpos before step = ", self.nextpos)
-        # input("debug for step, press Enter to continue...")
+        self.nextpos = np.concatenate((self.cur_position, self.cur_oritation), axis=0)
         
         xyz_delta = action[:3]
 
         # print("action scaled = ", xyz_delta * self.action_scale[0])
 
-        # if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip":
-        #     if self.nextpos[2] < 0.24 and (0.6 < self.nextpos[0] < 0.8) and (-0.2 < self.nextpos[1] < -0.1):
-        #         action[:3] = np.clip(xyz_delta, -0.4, 0.4)
+        if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip":
+            if self.nextpos[2] < 0.24 and (0.6 < self.nextpos[0] < 0.8) and (-0.2 < self.nextpos[1] < -0.1):
+                action[:3] = np.clip(xyz_delta, -0.4, 0.4)
                 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
         if self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
-            if self.nextpos[2] < 0.20:
-                self.nextpos[2] = 0.20
+            if self.nextpos[2] < 0.030:
+                self.nextpos[2] = 0.030
         elif self.exp_name == "tube_insertion":
-            if self.nextpos[2] < 0.20:
-                self.nextpos[2] = 0.20
-            # if self.nextpos[1] < -0.09:
-            #     self.nextpos[1] = -0.09eeeeeeeeeee
+            if self.nextpos[2] < 0.05:
+                self.nextpos[2] = 0.05
+            if self.nextpos[1] < -0.145:
+                self.nextpos[1] = -0.145
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         # rpy_delta[0] = action[3]
         self.nextpos[3:6] = self.nextpos[3:6] + rpy_delta * self.action_scale[1]
         # self.nextpos[3:] = (
-        #     Rotation.from_euler("xyz", rpy_delta * self.action_scale[1])
-        #     * Rotation.from_quat(self.cur_orientation)
+        #     Rotation.from_euler("xyz", action[3:6] * self.action_scale[1])
+        #     * Rotation.from_quat(self.cur_oritation)
         # ).as_quat()
-        self.nextpos[3:] = self.cur_orientation.copy()
-
-        self.nextpos[3:] = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        self.nextpos[3:] = (
+            Rotation.from_euler("xyz", rpy_delta * self.action_scale[1])
+            * Rotation.from_quat(self.cur_oritation)
+        ).as_quat()
 
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
@@ -564,9 +489,7 @@ class DensoEnv(gym.Env):
 
         # print("target_hand_pos = ", target_hand_pos)
 
-        self.ros_interface.arm_interpolate_and_publish(self.cmd_pose, self.nextpos, 0.01, 10)
-        # self.ros_interface.publish_arm_action(self.nextpos)
-        self.cmd_pose = self.nextpos.copy()
+        self.ros_interface.publish_arm_action(self.nextpos)
 
         if -0.3 > grip_action or grip_action > 0.3:
             self._send_leap_hand_command(target_hand_pos.copy())
@@ -1059,8 +982,8 @@ class DensoEnv(gym.Env):
                     rgb = frame
                 rgb = rgb.astype(np.uint8)
                 video_images[key] = rgb
-                # cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
-                cropped_rgb = rgb #当前不需要裁剪
+                cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
+                # cropped_rgb = rgb #当前不需要裁剪
                 resized = cv2.resize(
                     cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
                 )
@@ -1073,7 +996,7 @@ class DensoEnv(gym.Env):
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS)
+                self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_im()
         # if not self.enable_tactile:
         #     if self.display_image:
@@ -1123,7 +1046,7 @@ class DensoEnv(gym.Env):
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS)
+                self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
                 return self.get_rgb_and_dpth_im()
             
         return images, depth_images
@@ -1314,9 +1237,9 @@ class DensoEnv(gym.Env):
         Internal function to get the latest state of the robot and its gripper.
         """
         start = time.time()
-        self.cur_position, self.cur_orientation = self.ros_interface.get_current_robot_ee()
-        # joint_position = self.ros_interface.get_current_joint()
-        # self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
+        self.cur_position, self.cur_oritation = self.ros_interface.get_current_robot_ee()
+        joint_position = self.ros_interface.get_current_joint()
+        self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
 
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
@@ -1328,9 +1251,9 @@ class DensoEnv(gym.Env):
                 print("[WARN] 等待机械臂到位超时")
                 break
             time.sleep(0.02)
-            self.cur_position, self.cur_orientation = self.ros_interface.get_current_robot_ee()
-            # joint_position = self.ros_interface.get_current_joint()
-            # self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
+            self.cur_position, self.cur_oritation = self.ros_interface.get_current_robot_ee()
+            joint_position = self.ros_interface.get_current_joint()
+            self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
             hand_joint_msg = self.ros_interface.get_current_leap_position()
             self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
             diff = np.linalg.norm(arm_action[:3] - self.cur_position)
@@ -1347,12 +1270,12 @@ class DensoEnv(gym.Env):
         # if self.grip_loop:
         #     state_observation = {
         #         "tcp_pos": self.cur_position,
-        #         "tcp_ori": self.cur_orientation,
+        #         "tcp_ori": self.cur_oritation,
         #     }
         # else:
         state_observation = {
             "tcp_pos": self.cur_position,
-            "tcp_ori": self.cur_orientation,
+            "tcp_ori": self.cur_oritation,
             "gripper_pose": self.hand_state,
         }
         
@@ -1406,9 +1329,9 @@ class DensoEnv(gym.Env):
     def stop_cur_command(self):
         print("stop current command")
         pos = self.cur_position.copy()
-        ori = self.cur_orientation.copy()
+        ori = self.cur_oritation.copy()
         nextpos = np.concatenate((pos, ori), axis=0)
-        self.ros_interface.arm_interpolate_and_publish(nextpos, nextpos)
+        self.ros_interface.publish_arm_action(nextpos)
         # time.sleep(2.0)
         # self.get_im()
 

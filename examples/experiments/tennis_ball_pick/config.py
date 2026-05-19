@@ -19,50 +19,72 @@ from experiments.tennis_ball_pick.wrapper import RAMEnv, GripperPenaltyWrapper
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
-        "front_camera": {
-            "serial_number": "242422303461",
-            "dim": (640, 480),
-            "exposure": 40000,
-            "depth": True,
-        },
-        # "wrist_camera": {
-        #     "serial_number": "218622271185",
+        #denso
+        # "front_camera": {
+        #     "serial_number": "242422303461",
         #     "dim": (640, 480),
         #     "exposure": 40000,
         #     "depth": True,
         # },
-        # "front_classifier": {
-        #     "serial_number": "318122301393",
-        #     "dim": (640, 480),
-        #     "exposure": 40000,
-        # },
-    }
-    EXTRA_REALSENSE_CAMERAS = {
-        "front_camera_2": {
-            "serial_number": "318122301393",
+        #franka
+        "front_camera": {
+            "serial_number": "036522072607",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
     }
-    IMAGE_CROP = {
-        "front_camera": lambda img: img[0:460, 60:520],
-        # "front_classifier": lambda img: img[240:360, 210:330],
-    }
+    # EXTRA_REALSENSE_CAMERAS = {
+    #     #denso
+    #     # "front_camera_2": {
+    #     #     "serial_number": "318122301393",
+    #     #     "dim": (640, 480),
+    #     #     "exposure": 40000,
+    #     #     "depth": True,
+    #     # },
+    #     #franka
+    #     "front_camera_2": {
+    #         "serial_number": "036522072607",
+    #         "dim": (640, 480),
+    #         "exposure": 40000,
+    #         "depth": True,
+    #     },
+    # }
+    # IMAGE_CROP = {
+    #     "front_camera": lambda img: img[0:460, 60:520],
+    #     # "front_classifier": lambda img: img[240:360, 210:330],
+    # }
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.03, 0.03, 0.03)
+    # ACTION_SCALE = (0.03, 0.03, 0.03)
+    ACTION_SCALE = (0.008, 0.008, 0.008)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
+
+    #denso
+    # GRIPPER_CLOSE_JOINT = np.array([
+    #     3.1584663, 4.4301367, 3.3057287, 3.3241363,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.6126804, 3.118583, 3.028078, 3.4085052,
+    # ], dtype=np.float32)
+    # GRIPPER_OPEN_JOINT = np.array([
+    #     3.209087848663330078, 4.022466754913330078, 3.210621833801269531, 3.652039194107055664,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.644893646240234375, 3.060291767120361328, 2.528000354766845703, 3.739845275878906250,
+    # ], dtype=np.float32)
+
+    #franka # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
     GRIPPER_CLOSE_JOINT = np.array([
-        3.1584663, 4.4301367, 3.3057287, 3.3241363,
+        3.1584663, 4.4301367, 3.4057287, 3.4241363,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.6126804, 3.118583, 3.028078, 3.4085052,
+        4.6126804, 3.118583, 3.128078, 3.5085052,
     ], dtype=np.float32)
     GRIPPER_OPEN_JOINT = np.array([
         3.209087848663330078, 4.022466754913330078, 3.210621833801269531, 3.652039194107055664,
@@ -73,7 +95,8 @@ class EnvConfig(DefaultEnvConfig):
     
     
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
+    # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
+    TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     EXP_NAME = "tennis_ball_pick"
 
 
@@ -165,10 +188,10 @@ class TrainConfig(DefaultTrainingConfig):
             
                 prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.9
+                    success = prob > 1
                     reward = 1 if success else 0
                 else:
-                    success = prob > 0.5
+                    success = prob > 1
                     reward = 1 if success else 0
                 return reward
 

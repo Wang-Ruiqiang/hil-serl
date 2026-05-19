@@ -19,10 +19,18 @@ from experiments.twist_bottle_cap.wrapper import RAMEnv, GripperPenaltyWrapper, 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
+        #denso
+        # "front_camera": {
+        #     "serial_number": "242422303461",
+        #     "dim": (640, 480),
+        #     # "exposure": 40000,
+        #     "depth": True,
+        # },
+        #franka
         "front_camera": {
-            "serial_number": "242422303461",
+            "serial_number": "036522072607",
             "dim": (640, 480),
-            # "exposure": 40000,
+            "exposure": 40000,
             "depth": True,
         },
         "wrist_camera": {
@@ -32,14 +40,23 @@ class EnvConfig(DefaultEnvConfig):
             "depth": True,
         },
     }
-    EXTRA_REALSENSE_CAMERAS = {
-        "front_camera_2": {
-            "serial_number": "318122301393",
-            "dim": (640, 480),
-            # "exposure": 40000,
-            "depth": True,
-        },
-    }
+    # EXTRA_REALSENSE_CAMERAS = {
+    #     #franka
+    #     # "front_camera_2": {
+    #     #     "serial_number": "318122301393",
+    #     #     "dim": (640, 480),
+    #     #     # "exposure": 40000,
+    #     #     "depth": True,
+    #     # },
+
+    #     #franka
+    #     "front_camera_2": {
+    #         "serial_number": "036522072607",
+    #         "dim": (640, 480),
+    #         "exposure": 40000,
+    #         "depth": True,
+    #     },
+    # }
     IMAGE_CROP = {
         "front_camera": lambda img: img[35:375, 160:500],
         "wrist_camera": lambda img: img[0:480, 120:600],
@@ -50,12 +67,37 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
-    ACTION_SCALE = (0.025, 0.025, 0.025)
+    #denso
+    # ACTION_SCALE = (0.025, 0.025, 0.025)
+    #franka
+    ACTION_SCALE = (0.006, 0.006, 0.006)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
     
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
+    # GRIPPER_CLOSE_JOINT = np.array([
+    #     3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.709321022033691406, 3.160000324249267578, 2.954447031021118164, 3.816544294357299805
+    # ], dtype=np.float32)
+            
+    # GRIPPER_TWIST_JOINT = np.array([
+    #     2.659922599792480469, 4.605010509490966797, 3.118582963943481445, 3.745980978012084961,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     5.062136650085449219, 2.856272220611572266, 2.954447031021118164, 3.816544294357299805
+    # ], dtype=np.float32)
+    
+    # GRIPPER_OPEN_JOINT = np.array([
+    #     2.989728450775146484, 3.231437253952026367, 3.438389015197753906, 3.96806390762329102,
+    #     3.406330614089965820, 3.529689788818359375, 3.438389015197753906, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
+    # ], dtype=np.float32)
+
+    #franka
     GRIPPER_CLOSE_JOINT = np.array([
         3.341010093688964844, 4.459281921386718750, 3.118582963943481445, 3.745980978012084961,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
@@ -76,8 +118,11 @@ class EnvConfig(DefaultEnvConfig):
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
         4.670971393585205078, 3.207553863525390625, 2.396078109741210938, 3.879437446594238281
     ], dtype=np.float32)
+
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
+    # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
+
+    TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     EXP_NAME = "twist_bottle_cap"
     LOOP_CONTROL = True
 
@@ -116,6 +161,8 @@ class TrainConfig(DefaultTrainingConfig):
         else:
             self.image_keys = ["front_camera", "wrist_camera"]
             self.classifier_keys = ["front_camera", "wrist_camera"]
+            # self.image_keys = ["front_camera"]
+            # self.classifier_keys = ["front_camera"]
             # self.classifier_key_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
             # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0}
             
@@ -177,7 +224,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
                 # prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.6
+                    success = prob > 1
                     if success:
                         env.unwrapped.stop_cur_command()
                         reward = 1

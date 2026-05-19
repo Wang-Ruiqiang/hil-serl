@@ -32,18 +32,25 @@ class RAMEnv(DensoEnv):
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
         # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
 
-        # init_pos = np.array([0.6580441126924457, -0.10, 0.20153528])
-        # init_ori = np.array([-0.03244228, 0.99039508, 0.12396424, -0.05194187])
-        # init_pos = np.array([0.65, -0.05, 0.22153528])
-        init_pos = np.array([0.5580441126924457, 0, 0.25153528])
-        init_ori = np.array([0, 1, 0, 0])
-        # init_ori = np.array([0, 0.7071, -0.7071, 0])
+        # init_pos = np.array([0.5580441126924457, 0, 0.25153528])
+        # init_ori = np.array([0, 1, 0, 0])
+        # init_arm_action = np.concatenate([init_pos, init_ori])
+        # self.ros_interface.publish_arm_action(init_arm_action)
+
+
+
+        cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
+        self.curpos = np.concatenate((cur_position, cur_orientation), axis=0)
+        # init_pos = np.array([x_init, y_init, z_init])
+        init_pos = np.array([0.51977625898067087, -0.030797684551726014, 0.4622486952647027])
+        init_ori = np.array([0, 1, 0, 0], dtype=np.float32)
         init_arm_action = np.concatenate([init_pos, init_ori])
-        self.ros_interface.publish_arm_action(init_arm_action)
+        self.ros_interface.arm_interpolate_and_publish(self.curpos, init_arm_action, 0.02, 200)
         max_steps = 15
         self._segmented_init(self.curr_leap_hand_pos, max_steps)
 
         time.sleep(5)
+        self.cmd_pose = np.concatenate([init_pos.copy(), init_ori.copy()], axis=0)
 
         self.curr_path_length = 0
 

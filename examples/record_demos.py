@@ -18,10 +18,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from experiments.mappings import NEW_MAPPING
 
+# NEW_MAPPING = {
+#     "tennis_ball_pick": TennisBallPickTrainConfig,
+#     "tennis_ball_place": TennisBallPlaceTrainConfig,
+#     "twist_bottle_cap": TwistBottleCapTrainConfig,
+#     "lid_grip": LidGripTrainConfig,
+#     "tube_insertion": TubeInsertionTrainConfig,
+# }
+
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
 
 
 # def _stdin_key_pressed(target_char="1"):
@@ -148,12 +156,12 @@ def main(_):
                 if FLAGS.exp_name == "tube_insertion":
                     env.unwrapped.open_hand(steps=20, step_time=0.05)
                     time.sleep(1.5)
-                elif FLAGS.exp_name == "tennis_ball_pick":
-                    env.move_up()
+                # elif FLAGS.exp_name == "tennis_ball_pick":
+                #     env.move_up()
                 input("reset env")
                 obs, info = env.reset()
     finally:
-        env.save_all_data_on_exit()
+        # env.save_all_data_on_exit()
         if hasattr(env, "keyboard_process") and env.keyboard_process.is_alive():
             print("Shutting down keyboard process...")
             env.keyboard_process.terminate()

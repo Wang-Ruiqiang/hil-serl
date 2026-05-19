@@ -15,7 +15,6 @@ robot_urdf_path = "/home/wrq/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_de
 class RAMEnv(DensoEnv):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.should_regrasp = False
 
     def init_cameras(self, name_serial_dict=None, extra_cameras_dict=None):
         """Init both wrist cameras."""
@@ -32,18 +31,18 @@ class RAMEnv(DensoEnv):
                 )
                 self.cap[cam_name] = cap
                 
-        for cam_name, kwargs in extra_cameras_dict.items():
-            cap = VideoCapture(
-                RSCapture(name=cam_name, **kwargs)
-            )
-            self.cap[cam_name] = cap
+        # for cam_name, kwargs in extra_cameras_dict.items():
+        #     cap = VideoCapture(
+        #         RSCapture(name=cam_name, **kwargs)
+        #     )
+        #     self.cap[cam_name] = cap
             
 
     def move_up(self):
         print("move up to avoid collision")
         pos = self.cur_position.copy()
         pos[2] += 0.02
-        ori = self.cur_oritation.copy()
+        ori = self.cur_orientation.copy()
         nextpos = np.concatenate((pos, ori), axis=0)
         self.ros_interface.publish_arm_action(nextpos)
         time.sleep(2.0)
@@ -51,19 +50,7 @@ class RAMEnv(DensoEnv):
 
     def reset(self, joint_reset=False, **kwargs):
         print("RAMEnv reset")
-        self.last_gripper_act = time.time()
-        # if self.save_video:
-        #     self.save_video_recording()
 
-        # # if True:
-        # if self.should_regrasp:
-        #     self.regrasp()
-        #     self.should_regrasp = False
-
-        # self._recover()
-        # self.go_to_reset(joint_reset=False)
-        # self._recover()
-        # obs, info =  self.env.reset(**kwargs)
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
         # print("self.curr_leap_hand_pos reset before= ", self.curr_leap_hand_pos)
@@ -71,20 +58,19 @@ class RAMEnv(DensoEnv):
         time.sleep(1)
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
         # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
-
-        # x_init = np.random.uniform(0.55, 0.65)
-        # y_init = np.random.uniform(-0.08, -0.18)
-        # z_init = np.random.uniform(0.16, 0.20)
+        cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
+        self.curpos = np.concatenate((cur_position, cur_orientation), axis=0)
         # init_pos = np.array([x_init, y_init, z_init])
-        init_pos = np.array([0.60513753, -0.1, 0.18153528])
-        # init_pos = np.array([0.60513753, -0.1567503, 0.18153528])
-        # init_pos = np.array([0.70513753, -0.3067503, 0.15153528])
-        init_ori = np.array([0, 1, 0, 0])
+        init_pos = np.array([0.55977625898067087, -0.040797684551726014, 0.4022486952647027])
+        init_ori = np.array([0, 1, 0, 0], dtype=np.float32)
         init_arm_action = np.concatenate([init_pos, init_ori])
-        self.ros_interface.publish_arm_action(init_arm_action)
+        self.ros_interface.arm_interpolate_and_publish(self.curpos, init_arm_action, 0.02, 200)
+
         self._close_open_pose_init(self.curr_leap_hand_pos)
 
         time.sleep(5)
+
+        self.cmd_pose = np.concatenate([init_pos.copy(), init_ori.copy()], axis=0)
 
         self.curr_path_length = 0
         # self.ros_interface.reset_cur_pose()

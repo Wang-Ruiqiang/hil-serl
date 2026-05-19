@@ -59,7 +59,7 @@ class KeyboardExpert:
         while not stop_event.is_set():
             action = [0.0] * 7
 
-            # 控制 xyz 方向移动
+            # 控制 xyz 方向移动  denso
             if 'w' in current_keys:
                 # print("z+")
                 action[2] += self.LARGE_STEP
@@ -72,10 +72,10 @@ class KeyboardExpert:
             if 'd' in current_keys:
                 # print("x+")
                 action[0] += self.LARGE_STEP
-            if 'q' in current_keys:
+            if 'e' in current_keys:
                 # print("y+")
                 action[1] += self.LARGE_STEP
-            if 'e' in current_keys:
+            if 'q' in current_keys:
                 # print("y-")
                 action[1] -= self.LARGE_STEP
 
@@ -98,14 +98,45 @@ class KeyboardExpert:
                 # print("y-")
                 action[1] -= self.SMALL_STEP
 
-            # rotate toward z-axis
-            # if 'k' in current_keys:
-            #     action[6] = 0.1
-            # if 'l' in current_keys:
-            #     action[6] = 0.5
-                
-            # if 'j' in current_keys:
-            #     action[6] = 1
+            # 控制 xyz 方向移动  franka
+            # if 'w' in current_keys:
+            #     # print("z+")
+            #     action[2] += self.LARGE_STEP
+            # if 's' in current_keys:
+            #     # print("z-")
+            #     action[2] -= self.LARGE_STEP
+            # if 'd' in current_keys:
+            #     # print("x-")
+            #     action[0] -= self.SMALL_STEP
+            # if 'a' in current_keys:
+            #     # print("x+")
+            #     action[0] += self.SMALL_STEP
+            # if 'q' in current_keys:
+            #     # print("y+")
+            #     action[1] += self.LARGE_STEP
+            # if 'e' in current_keys:
+            #     # print("y-")
+            #     action[1] -= self.LARGE_STEP
+
+            # if 't' in current_keys:
+            #     # print("z+")
+            #     action[2] += self.SMALL_STEP
+            # if 'g' in current_keys:
+            #     # print("z-")
+            #     action[2] -= self.SMALL_STEP
+            # if 'h' in current_keys:
+            #     # print("x-")
+            #     action[0] -= self.SMALL_STEP
+            # if 'f' in current_keys:
+            #     # print("x+")
+            #     action[0] += self.SMALL_STEP
+            # if 'y' in current_keys:
+            #     # print("y+")
+            #     action[1] += self.SMALL_STEP
+            # if 'r' in current_keys:
+            #     # print("y-")
+            #     action[1] -= self.SMALL_STEP
+
 
             # 可选：gripper 控制（i = close, o = open）
             if 'i' in current_keys:

@@ -19,23 +19,27 @@ from experiments.tube_insertion.wrapper import RAMEnv, GripperPenaltyWrapper, Ro
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
     REALSENSE_CAMERAS = {
-        "front_camera": {
-            "serial_number": "318122301393",
-            "dim": (640, 480),
-            "exposure": 40000,
-            "depth": True,
-        },
+        #denso
+        # "front_camera": {
+        #     "serial_number": "318122301393",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        #     "depth": True,
+        # },
         "wrist_camera": {
             "serial_number": "218622271185",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
-        # "front_classifier": {
-        #     "serial_number": "318122301393",
-        #     "dim": (640, 480),
-        #     "exposure": 40000,
-        # },
+
+        #franka
+        "front_camera": {
+            "serial_number": "036522072607",
+            "dim": (640, 480),
+            "exposure": 40000,
+            "depth": True,
+        },
         
     }
     # EXTRA_REALSENSE_CAMERAS = {
@@ -72,18 +76,41 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
     # ACTION_SCALE = (0.01, 0.01, 0.05)
-    ACTION_SCALE = (0.005, 0.005, 0.05)
+    # ACTION_SCALE = (0.005, 0.005, 0.05)
+    ACTION_SCALE = (0.002, 0.002, 0.002)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
     
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
     
+    # GRIPPER_CLOSE_JOINT = np.array([
+    #     3.121650934219360352, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.580466747283935547, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492,
+    # ], dtype=np.float32)
+    
+    # GRIPPER_OPEN_JOINT = np.array([
+    #     3.209087848663330078, 4.422466754913330078, 3.210621833801269531, 3.252039194107055664,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.644893646240234375, 3.060291767120361328, 2.528000354766845703, 3.739845275878906250,
+    # ], dtype=np.float32)
+    
+    # GRIPPER_TWIST_JOINT = np.array([
+    #     2.359922599792480469, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     3.982136650085449219, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492
+    # ], dtype=np.float32)
+
+    #franka
     GRIPPER_CLOSE_JOINT = np.array([
-        3.121650934219360352, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
+        3.121650934219360352, 4.624951839447021484, 3.964019870758056641, 2.866718912124633789,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.580466747283935547, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492,
+        4.580466747283935547, 3.147728681564331055, 3.663146018981933594, 2.746116971969604492,
     ], dtype=np.float32)
     
     GRIPPER_OPEN_JOINT = np.array([
@@ -94,14 +121,16 @@ class EnvConfig(DefaultEnvConfig):
     ], dtype=np.float32)
     
     GRIPPER_TWIST_JOINT = np.array([
-        2.359922599792480469, 4.624951839447021484, 3.364019870758056641, 3.166718912124633789,
+        2.359922599792480469, 4.624951839447021484, 3.964019870758056641, 2.866718912124633789,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        3.982136650085449219, 3.147728681564331055, 3.663146018981933594, 2.846116971969604492
+        3.982136650085449219, 3.147728681564331055, 3.663146018981933594, 2.746116971969604492
     ], dtype=np.float32)
     
     ENABLE_TACTILE = True
-    TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
+
+    TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
+    # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     EXP_NAME = "tube_insertion"
 
 
@@ -128,8 +157,12 @@ class TrainConfig(DefaultTrainingConfig):
             # self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
         else:
+            #denso
             self.image_keys = ["front_camera", "wrist_camera"]
             self.classifier_keys = ["front_camera", "wrist_camera"]
+            #franka
+            # self.image_keys = ["front_camera"]
+            # self.classifier_keys = ["front_camera"]
             # self.classifier_key_weights = {"front_classifier": 1.0, "wrist_camera": 1.0}
             # self.image_weights = {"front_camera": 1.0, "wrist_camera": 1.0, "tactile_data": 1.0}
             
