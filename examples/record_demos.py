@@ -18,14 +18,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from experiments.mappings import NEW_MAPPING
 
-# NEW_MAPPING = {
-#     "tennis_ball_pick": TennisBallPickTrainConfig,
-#     "tennis_ball_place": TennisBallPlaceTrainConfig,
-#     "twist_bottle_cap": TwistBottleCapTrainConfig,
-#     "lid_grip": LidGripTrainConfig,
-#     "tube_insertion": TubeInsertionTrainConfig,
-# }
-
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")

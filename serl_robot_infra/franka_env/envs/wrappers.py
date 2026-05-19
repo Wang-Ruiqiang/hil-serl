@@ -4,11 +4,12 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Box
 import copy
-from franka_env.spacemouse.spacemouse_expert import SpaceMouseExpert
+from franka_env.envs.keyboard_expert import KeyboardExpert
 import requests
 from scipy.spatial.transform import Rotation as R
 from franka_env.envs.franka_env import FrankaEnv
 from typing import List
+import jax.numpy as jnp
 
 sigmoid = lambda x: 1 / (1 + np.exp(-x))
 
@@ -43,24 +44,42 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         super().__init__(env)
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
+        self.is_pick = True
+        self.config = env.config
 
     def compute_reward(self, obs):
         if self.reward_classifier_func is not None:
-            return self.reward_classifier_func(obs)
+            return self.reward_classifier_func(obs, self.is_pick)
         return 0
 
     def step(self, action):
         start_time = time.time()
         obs, rew, done, truncated, info = self.env.step(action)
         rew = self.compute_reward(obs)
-        done = done or rew
-        info['succeed'] = bool(rew)
+        if self.config.EXP_NAME == "tube_insertion":
+            done = rew == 1
+            self.is_pick = self.is_pick and not (rew == 0.2)
+        elif self.config.EXP_NAME == "tennis_ball_place":
+            done = (rew == 1) and (not self.is_pick)
+            self.is_pick = self.is_pick and not (rew == 1)
+        elif self.config.EXP_NAME == "twist_bottle_cap":
+            done = (rew == 1) and (not self.is_pick)
+            self.is_pick = self.is_pick and not (rew == 1)
+            
+        else:
+            done = done or (rew > 0)
+            
+        info['succeed'] = bool(rew == 1)
+        info['is_pick'] = self.is_pick
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
-            
+        
+        rew = rew if rew >= 1 else 0
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
+        if self.config.EXP_NAME == "tennis_ball_place" or self.config.EXP_NAME == "twist_bottle_cap" or self.config.EXP_NAME == "tube_insertion":
+            self.is_pick = True
         obs, info = self.env.reset(**kwargs)
         info['succeed'] = False
         return obs, info
@@ -176,6 +195,52 @@ class DualQuat2EulerWrapper(gym.ObservationWrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         return self.observation(obs), info
+    
+
+class KeyboardIntervention(gym.ActionWrapper):
+    def __init__(self, env, action_indices=None):
+        super().__init__(env)
+
+        self.exp_name = env.config.EXP_NAME
+        self.expert = KeyboardExpert(self.exp_name)
+        self.action_indices = action_indices
+
+    def action(self, action: np.ndarray) -> np.ndarray:
+        """
+        Input:
+        - action: policy action
+        Output:
+        - action: spacemouse action if nonezero; else, policy action
+        """
+        expert_a = self.expert.get_action()
+        intervened = False
+        # 人为输入动作非0,触发干预
+        if np.linalg.norm(expert_a) > 0.001:
+            intervened = True
+
+        if self.action_indices is not None:
+            filtered_expert_a = np.zeros_like(expert_a)
+            filtered_expert_a[self.action_indices] = expert_a[self.action_indices]
+            expert_a = filtered_expert_a
+
+        if intervened:
+            new_action = np.zeros(7, dtype=np.float32)
+            # new_action[:3] = expert_a[:3]
+            # new_action[3:6] = expert_a[3:6]
+            new_action[:] = expert_a[:]
+
+            return new_action, True
+
+        return action, False
+
+    def step(self, action):
+        new_action, replaced = self.action(action)
+        obs, rew, done, truncated, info = self.env.step(new_action)
+        if replaced:
+            info["intervene_action"] = new_action
+
+        return obs, rew, done, truncated, info
+    
 
 class GripperCloseEnv(gym.ActionWrapper):
     """
@@ -202,140 +267,7 @@ class GripperCloseEnv(gym.ActionWrapper):
     
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
-
     
-class SpacemouseIntervention(gym.ActionWrapper):
-    def __init__(self, env, action_indices=None):
-        super().__init__(env)
-
-        self.gripper_enabled = True
-        if self.action_space.shape == (6,):
-            self.gripper_enabled = False
-
-        self.expert = SpaceMouseExpert()
-        self.left, self.right = False, False
-        self.action_indices = action_indices
-
-    def action(self, action: np.ndarray) -> np.ndarray:
-        """
-        Input:
-        - action: policy action
-        Output:
-        - action: spacemouse action if nonezero; else, policy action
-        """
-        expert_a, buttons = self.expert.get_action()
-        self.left, self.right = tuple(buttons)
-        intervened = False
-        
-        if np.linalg.norm(expert_a) > 0.001:
-            intervened = True
-
-        if self.gripper_enabled:
-            if self.left:  # close gripper
-                gripper_action = np.random.uniform(-1, -0.9, size=(1,))
-                intervened = True
-            elif self.right:  # open gripper
-                gripper_action = np.random.uniform(0.9, 1, size=(1,))
-                intervened = True
-            else:
-                gripper_action = np.zeros((1,))
-            expert_a = np.concatenate((expert_a, gripper_action), axis=0)
-            expert_a[:6] += np.random.uniform(-0.5, 0.5, size=6)
-
-        if self.action_indices is not None:
-            filtered_expert_a = np.zeros_like(expert_a)
-            filtered_expert_a[self.action_indices] = expert_a[self.action_indices]
-            expert_a = filtered_expert_a
-
-        if intervened:
-            return expert_a, True
-
-        return action, False
-
-    def step(self, action):
-
-        new_action, replaced = self.action(action)
-
-        obs, rew, done, truncated, info = self.env.step(new_action)
-        if replaced:
-            info["intervene_action"] = new_action
-        info["left"] = self.left
-        info["right"] = self.right
-        return obs, rew, done, truncated, info
-
-class DualSpacemouseIntervention(gym.ActionWrapper):
-    def __init__(self, env, action_indices=None, gripper_enabled=True):
-        super().__init__(env)
-
-        self.gripper_enabled = gripper_enabled
-
-        self.expert = SpaceMouseExpert()
-        self.left1, self.left2, self.right1, self.right2 = False, False, False, False
-        self.action_indices = action_indices
-
-    def action(self, action: np.ndarray) -> np.ndarray:
-        """
-        Input:
-        - action: policy action
-        Output:
-        - action: spacemouse action if nonezero; else, policy action
-        """
-        intervened = False
-        expert_a, buttons = self.expert.get_action()
-        self.left1, self.left2, self.right1, self.right2 = tuple(buttons)
-
-
-        if self.gripper_enabled:
-            if self.left1:  # close gripper
-                left_gripper_action = np.random.uniform(-1, -0.9, size=(1,))
-                intervened = True
-            elif self.left2:  # open gripper
-                left_gripper_action = np.random.uniform(0.9, 1, size=(1,))
-                intervened = True
-            else:
-                left_gripper_action = np.zeros((1,))
-
-            if self.right1:  # close gripper
-                right_gripper_action = np.random.uniform(-1, -0.9, size=(1,))
-                intervened = True
-            elif self.right2:  # open gripper
-                right_gripper_action = np.random.uniform(0.9, 1, size=(1,))
-                intervened = True
-            else:
-                right_gripper_action = np.zeros((1,))
-            expert_a = np.concatenate(
-                (expert_a[:6], left_gripper_action, expert_a[6:], right_gripper_action),
-                axis=0,
-            )
-
-        if self.action_indices is not None:
-            filtered_expert_a = np.zeros_like(expert_a)
-            filtered_expert_a[self.action_indices] = expert_a[self.action_indices]
-            expert_a = filtered_expert_a
-
-        if np.linalg.norm(expert_a) > 0.001:
-            intervened = True
-
-        if intervened:
-            return expert_a, True
-        return action, False
-
-    def step(self, action):
-
-        new_action, replaced = self.action(action)
-
-        obs, rew, done, truncated, info = self.env.step(new_action)
-        if replaced:
-            info["intervene_action"] = new_action
-        info["left1"] = self.left1
-        info["left2"] = self.left2
-        info["right1"] = self.right1
-        info["right2"] = self.right2
-        return obs, rew, done, truncated, info
-    
-    def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
-
 
 class GripperPenaltyWrapper(gym.RewardWrapper):
     def __init__(self, env, penalty=0.1):

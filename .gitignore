@@ -17,4 +17,4 @@ examples/experiments/tube_insertion/videos/*
 examples/experiments/tennis_ball_pick/__pycache__/*
 examples/experiments/twist_bottle_cap/__pycache__/*
 examples/experiments/tube_insertion/__pycache__/*
-serl_robot_infra/denso_env/envs/__pycache__/*
+serl_robot_infra/franka_env/envs/__pycache__/*

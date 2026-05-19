@@ -3,12 +3,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from serl_robot_infra.denso_env.envs.wrappers import (
+from serl_robot_infra.franka_env.envs.wrappers import (
     MultiCameraBinaryRewardClassifierWrapper,
     KeyboardIntervention,
 )
 
-from denso_env.envs.denso_env import DefaultEnvConfig
+from franka_env.envs.franka_env import DefaultEnvConfig
 from serl_launcher.wrappers.serl_obs_wrappers import SERLObsWrapper
 from serl_launcher.wrappers.chunking import ChunkingWrapper
 from serl_launcher.networks.reward_classifier import load_classifier_func
