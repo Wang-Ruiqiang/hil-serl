@@ -146,9 +146,11 @@ class TrainConfig(DefaultTrainingConfig):
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=False):
+    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=False, record_data=False, record_gaze=False):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
+        env_config.ENABLE_DATA_RECORDING = bool(record_data)
+        env_config.ENABLE_GAZE_COLLECTION = bool(record_gaze)
         if enable_tactile:
             # self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             # self.classifier_keys = ["front_camera", "wrist_camera","tactile_data"]
@@ -213,11 +215,11 @@ class TrainConfig(DefaultTrainingConfig):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
 
                 if is_pick:
-                    print("classifier = classifier_pick")
+                    # print("classifier = classifier_pick")
                     print("sigmoid(classifier(obs) = ", sigmoid(classifier_lid_grip(obs)))
                     prob = sigmoid(classifier_lid_grip(obs)).item()
                 else:
-                    print("classifier = classifier_place")
+                    # print("classifier = classifier_place")
                     print("sigmoid(classifier(obs) = ", sigmoid(classifier_bottle_twist(obs)))
                     prob = sigmoid(classifier_bottle_twist(obs)).item()
 

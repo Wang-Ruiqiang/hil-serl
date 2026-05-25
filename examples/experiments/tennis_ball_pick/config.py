@@ -98,6 +98,7 @@ class EnvConfig(DefaultEnvConfig):
     # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     EXP_NAME = "tennis_ball_pick"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-5-25-1"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -115,9 +116,11 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True):
+    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True, record_data=False, record_gaze=False):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
+        env_config.ENABLE_DATA_RECORDING = bool(record_data)
+        env_config.ENABLE_GAZE_COLLECTION = bool(record_gaze)
 
         if enable_tactile:
             self.image_keys = ["front_camera", "tactile_data"]

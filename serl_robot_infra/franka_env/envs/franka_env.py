@@ -14,7 +14,7 @@ import yaml
 
 from datetime import datetime
 from collections import OrderedDict
-from typing import Dict
+from typing import Dict, List, Tuple
 
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Rotation as R, Slerp
@@ -28,6 +28,8 @@ from franka_env.camera.video_capture import VideoCapture
 from franka_env.camera.rs_capture import RSCapture
 from leap_hand.srv import LeapPosition, LeapPosVelEff
 from shape_reconstruction import Sensor
+from franka_env.gaze.sam2_labeler import SAM2GazeLabeler
+from franka_env.recording.episode_recorder import EpisodeDataRecorder
 
 # from examples.utils import read_utils
 
@@ -55,6 +57,15 @@ class ImageDisplayer(threading.Thread):
                 cv2.imshow(f"{self.name} - {k}", v)
 
             cv2.waitKey(1)
+
+
+def _timing_enabled():
+    return os.environ.get("HIL_TIMING", "0") == "1"
+
+
+def _timing_log(label, start):
+    if _timing_enabled():
+        print(f"[timing][franka_env] {label}: {time.time() - start:.4f}s")
 
 
 ##############################################################################
@@ -96,6 +107,11 @@ class DefaultEnvConfig:
     # GRIPPER_SLEEP: float = 0.6
     MAX_EPISODE_LENGTH: int = 200
     # JOINT_RESET_PERIOD: int = 0
+    ENABLE_DATA_RECORDING: bool = False
+    ENABLE_GAZE_COLLECTION: bool = False
+    GAZE_FRAME_SAVE_PATH: str = "./recorded_gaze_data"
+    PUPIL_HOST: str = "127.0.0.1"
+    PUPIL_PORT: int = 50020
 
 
 ##############################################################################
@@ -323,6 +339,10 @@ class FrankaEnv(gym.Env):
         # self.gripper_sleep = config.GRIPPER_SLEEP
         self.tact_base_path = config.TACT_BASE_PATH
         self.enable_tactile = config.ENABLE_TACTILE
+        self.enable_gaze_collection = bool(getattr(config, "ENABLE_GAZE_COLLECTION", False))
+        self.enable_data_recording = bool(
+            getattr(config, "ENABLE_DATA_RECORDING", False)
+        ) or self.enable_gaze_collection
         self.fake_env = fake_env
         self.exp_name = config.EXP_NAME
 
@@ -348,16 +368,20 @@ class FrankaEnv(gym.Env):
             "gripper_pose": gym.spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float32),
         }
         
+        image_spaces = {
+            key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8)
+            for key in config.REALSENSE_CAMERAS
+        }
+        if self.enable_gaze_collection:
+            image_spaces["gaze_mask"] = gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8)
+
         if not self.enable_tactile:
             print("init arm without tactaile data")
 
             self.observation_space = gym.spaces.Dict(
                 {
                     "state": gym.spaces.Dict(state_dict),
-                    "images": gym.spaces.Dict(
-                        {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
-                                    for key in config.REALSENSE_CAMERAS}
-                    ),
+                    "images": gym.spaces.Dict(image_spaces),
                 }
             )
         else:
@@ -371,8 +395,7 @@ class FrankaEnv(gym.Env):
                     "state": gym.spaces.Dict(state_dict),
                     "images": gym.spaces.Dict(
                         {
-                            **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
-                                    for key in config.REALSENSE_CAMERAS},
+                            **image_spaces,
                             "tactile_data": gym.spaces.Box(0, 255, shape=(128, 256, 3), dtype=np.uint8),
                         }
                     ),
@@ -460,10 +483,10 @@ class FrankaEnv(gym.Env):
 
         self.ros_interface = ROSNodeInterface()
 
-        executor = rclpy.executors.MultiThreadedExecutor()
-        executor.add_node(self.ros_interface)
-        executor_thread = threading.Thread(target=executor.spin, daemon=True)
-        executor_thread.start()
+        self.executor = rclpy.executors.MultiThreadedExecutor()
+        self.executor.add_node(self.ros_interface)
+        self.executor_thread = threading.Thread(target=self.executor.spin, daemon=True)
+        self.executor_thread.start()
 
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
@@ -472,6 +495,16 @@ class FrankaEnv(gym.Env):
         # os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
         self.video_count = 0
+        self.global_frame_id = 0
+        self._cur_ep_start = None
+        self.episode_frame_ranges = []
+        self._episode_counter = 0
+        self.frame_save_path = getattr(config, "GAZE_FRAME_SAVE_PATH", "./recorded_gaze_data")
+        self.frame_root = self.frame_save_path
+        self.et_mirror_dir = os.path.join(self.frame_root, "et_images")
+        self.rs_mirror_dir = os.path.join(self.frame_root, "rs_images")
+        self.data_recorder = None
+        self.gaze_labeler = None
 
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_orientation = np.array([0, 1, 0, 0], dtype=np.float32)
@@ -489,6 +522,26 @@ class FrankaEnv(gym.Env):
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
         self.curr_leap_hand_pos = list(self.gripper_open_joint)
+
+        if self.enable_data_recording:
+            self.data_recorder = EpisodeDataRecorder(
+                self,
+                frame_root=self.frame_root,
+                enable_gaze=self.enable_gaze_collection,
+                pupil_host=getattr(config, "PUPIL_HOST", "127.0.0.1"),
+                pupil_port=int(getattr(config, "PUPIL_PORT", 50020)),
+            )
+            self.data_recorder.start()
+            if self.enable_gaze_collection:
+                self.gaze_labeler = SAM2GazeLabeler(
+                    frame_root=self.data_recorder.frame_root,
+                    et_mirror_dir=self.data_recorder.et_mirror_dir,
+                    rs_mirror_dir=self.data_recorder.rs_mirror_dir,
+                )
+            self.frame_save_path = self.data_recorder.frame_save_path
+            self.frame_root = self.data_recorder.frame_root
+            self.et_mirror_dir = self.data_recorder.et_mirror_dir
+            self.rs_mirror_dir = self.data_recorder.rs_mirror_dir
 
         print("Initialized franka")
 
@@ -564,27 +617,43 @@ class FrankaEnv(gym.Env):
 
         # print("target_hand_pos = ", target_hand_pos)
 
-        self.ros_interface.arm_interpolate_and_publish(self.cmd_pose, self.nextpos, 0.01, 10)
+        self.ros_interface.arm_interpolate_and_publish(self.cmd_pose, self.nextpos, 0.006, 10)
         # self.ros_interface.publish_arm_action(self.nextpos)
         self.cmd_pose = self.nextpos.copy()
 
         if -0.3 > grip_action or grip_action > 0.3:
             self._send_leap_hand_command(target_hand_pos.copy())
 
-        # time.sleep(1.5)
-        dt = time.time() - start_time
-        time.sleep(max(0, (1.0 / self.hz) - dt))
-        t_end = time.time()
+        
         # print(f"[publish End] {t_end:.6f}, Step总耗时(含sleep): {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
 
         self.curr_path_length += 1
+        t = time.time()
         self._update_cur_position(self.nextpos)
+        _timing_log("step.update_cur_position", t)
         # t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
         self.frame_count += 1
-        ob = self._get_obs()
+        if self.enable_data_recording:
+            t = time.time()
+            shared_images, shared_depth_images = self.get_rgb_and_dpth_im(show_display=True)
+            _timing_log("step.read_shared_rgb_depth", t)
+            t = time.time()
+            ob = self._get_obs(shared_images)
+            _timing_log("step.get_obs", t)
+        else:
+            shared_images = None
+            shared_depth_images = None
+            t = time.time()
+            ob = self._get_obs()
+            _timing_log("step.get_obs", t)
+        t = time.time()
+        frame_idx = self.save_training_frame(shared_images, shared_depth_images) if self.enable_data_recording else None
+        _timing_log("step.save_training_frame", t)
+        t = time.time()
         reward = self.compute_reward(ob)
+        _timing_log("step.compute_reward", t)
         # self.save_training_frame()
         # print(f"reward in franka_env = {reward}")
         # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
@@ -593,7 +662,17 @@ class FrankaEnv(gym.Env):
         # print(f"[Step End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("curr hand pos = ", self.curr_leap_hand_pos)
         # input("debug for hand pos")
-        return ob, int(reward), done, False, {"succeed": reward}
+        info = {"succeed": reward}
+        if self.enable_data_recording and frame_idx is not None:
+            info["frame_idx"] = int(frame_idx)
+            info["episode_id"] = int(self._episode_counter)
+        _timing_log("step.total", start_time)
+
+        # time.sleep(1.5)
+        dt = time.time() - start_time
+        time.sleep(max(0, (1.0 / self.hz) - dt))
+        t_end = time.time()
+        return ob, int(reward), done, False, info
     
     def _close_open_pose_init(self, current_hand_pos: np.ndarray, max_steps: int=10):
         self._lower = np.minimum(self.gripper_open_joint, self.gripper_close_joint)
@@ -1042,7 +1121,7 @@ class FrankaEnv(gym.Env):
             return False
     
 
-    def get_im(self) -> Dict[str, np.ndarray]:
+    def get_im(self, return_full_images: bool = False) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
         images = {}
         display_images = {}
@@ -1052,7 +1131,10 @@ class FrankaEnv(gym.Env):
             if key == "front_camera_2":
                 continue
             try:
+                t = time.time()
                 frame = cap.read()
+                _timing_log(f"get_im.{key}.cap_read", t)
+                t = time.time()
                 if frame.ndim == 3 and frame.shape[2] == 4:
                     rgb = frame[..., :3] # 这里是bgr格式，cv2.imshow输入bgr,显示rgb图像
                 else:
@@ -1068,13 +1150,14 @@ class FrankaEnv(gym.Env):
                 # display_images[key] = resized
                 display_images[key + "_full"] = cropped_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
+                _timing_log(f"get_im.{key}.process", t)
             except queue.Empty:
                 input(
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
                 self.init_cameras(self.config.REALSENSE_CAMERAS)
-                return self.get_im()
+                return self.get_im(return_full_images=return_full_images)
         # if not self.enable_tactile:
         #     if self.display_image:
         #         display_image = {
@@ -1088,13 +1171,24 @@ class FrankaEnv(gym.Env):
             with self.tac_index_lock:
                 display_images["heat_map"] = heat_map
         if self.display_image:
+            t = time.time()
             self.img_queue.put(display_images)
+            _timing_log("get_im.display_queue_put", t)
         if self.save_video:
             self.recording_frames.append(video_images)
+        if self.enable_gaze_collection and "gaze_mask" in self.observation_space["images"].spaces:
+            h, w, c = self.observation_space["images"]["gaze_mask"].shape
+            images["gaze_mask"] = np.zeros((h, w, c), dtype=np.uint8)
+        if return_full_images:
+            record_images = {key: img[..., ::-1] for key, img in full_res_images.items()}
+            return images, record_images
         return images
 
 
-    def get_rgb_and_dpth_im(self) -> Dict[str, np.ndarray]:
+    def get_rgb_and_dpth_im(
+        self,
+        show_display: bool = False,
+    ) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
         images = {}
         depth_images = {}
@@ -1102,30 +1196,42 @@ class FrankaEnv(gym.Env):
         full_res_images = {}  # New dictionary to store full resolution cropped images
         for key, cap in self.cap.items():
             try:
+                t = time.time()
                 frame = cap.read()
+                _timing_log(f"get_rgb_and_dpth_im.{key}.cap_read", t)
+                t = time.time()
                 if frame.ndim == 3 and frame.shape[2] == 4:
                     rgb = frame[..., :3]   # BGR 彩色
                     depth = frame[..., 3]    # 深度
                 else:
                     rgb = frame
                     depth = None
+                rgb = rgb.astype(np.uint8, copy=False)
                 cropped_rgb = rgb #当前不需要裁剪
                 resized = cv2.resize(
                     cropped_rgb, (640, 480)
                 )
                 images[key] = resized[..., ::-1]
                 depth_images[key] = depth
-                display_images[key] = resized
                 display_images[key + "_full"] = cropped_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
+                _timing_log(f"get_rgb_and_dpth_im.{key}.process", t)
             except queue.Empty:
                 input(
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
                 self.init_cameras(self.config.REALSENSE_CAMERAS)
-                return self.get_rgb_and_dpth_im()
-            
+                return self.get_rgb_and_dpth_im(show_display=show_display)
+
+        if show_display and self.enable_tactile:
+            heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+            display_images["heat_map"] = heat_map
+
+        if show_display and self.display_image:
+            t = time.time()
+            self.img_queue.put(display_images)
+            _timing_log("get_rgb_and_dpth_im.display_queue_put", t)
         return images, depth_images
 
 
@@ -1342,8 +1448,24 @@ class FrankaEnv(gym.Env):
         # self.hand_state = 0
 
 
-    def _get_obs(self) -> dict:
-        images = self.get_im()
+    def _get_obs(self, source_images=None, return_record_images: bool = False) -> dict:
+        record_images = None
+        if source_images is None:
+            if return_record_images:
+                images, record_images = self.get_im(return_full_images=True)
+            else:
+                images = self.get_im()
+        else:
+            images = {}
+            image_spaces = self.observation_space["images"].spaces
+            for cam_key, img in source_images.items():
+                if cam_key not in image_spaces:
+                    continue
+                target_hw = image_spaces[cam_key].shape[:2]
+                images[cam_key] = cv2.resize(img, target_hw[::-1])
+            if self.enable_gaze_collection and "gaze_mask" in image_spaces:
+                h, w, c = image_spaces["gaze_mask"].shape
+                images["gaze_mask"] = np.zeros((h, w, c), dtype=np.uint8)
         # if self.grip_loop:
         #     state_observation = {
         #         "tcp_pos": self.cur_position,
@@ -1367,17 +1489,30 @@ class FrankaEnv(gym.Env):
             heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
             obs["images"]["tactile_data"] = heatmap_canvas
                 
-        return copy.deepcopy(obs)
+        obs = copy.deepcopy(obs)
+        if return_record_images:
+            return obs, record_images
+        return obs
 
 
     def close(self):
+        self.enable_gaze_collection = False
+        if self.data_recorder is not None:
+            self.data_recorder.close()
         if hasattr(self, 'listener'):
             self.listener.stop()
         self.close_cameras()
-        if self.display_image:
-            self.img_queue.put(None)
-            cv2.destroyAllWindows()
-            self.displayer.join()
+        if self.display_image and hasattr(self, "img_queue"):
+            try:
+                self.img_queue.put(None)
+            except Exception:
+                pass
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
+            if hasattr(self, "displayer"):
+                self.displayer.join(timeout=1.0)
 
         # Ensure ROS executor and node are cleaned up to avoid threading errors
         if hasattr(self, "_ros_spin_stop"):
@@ -1398,6 +1533,30 @@ class FrankaEnv(gym.Env):
         if rclpy.ok():
             rclpy.shutdown()
 
+
+    def pause_display(self):
+        if not getattr(self, "display_image", False):
+            return
+        try:
+            if hasattr(self, "img_queue"):
+                self.img_queue.put(None, timeout=0.1)
+            if hasattr(self, "displayer"):
+                self.displayer.join(timeout=1.0)
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
+
+    def resume_display(self):
+        if not getattr(self, "display_image", False):
+            return
+        try:
+            self.img_queue = queue.Queue()
+            self.displayer = ImageDisplayer(self.img_queue, self.url)
+            self.displayer.start()
+        except Exception as exc:
+            print(f"[FrankaEnv][resume_display] failed: {exc}")
+
     def pose_callback(self, msg):
         self.arm_position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
         self.arm_orientation = np.array([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
@@ -1413,69 +1572,55 @@ class FrankaEnv(gym.Env):
         # self.get_im()
 
 
-    def save_training_frame(self):
-        try:
-            joint_pose = np.concatenate([
-                    self.joint_position, self.curr_leap_hand_pos], dtype=np.float32)
-            
-            self.joint_buffer.append(
-                            copy.deepcopy(joint_pose))
-            self.hand_state_buffer.append(copy.deepcopy(self.hand_state))
-            self.action_buffer.append(copy.deepcopy(self.current_action))
-            # 保存图像
-            images, depth_img = self.get_rgb_and_dpth_im()
-            for cam_name, img in images.items():
-                depth = depth_img[cam_name]
-                if cam_name == "front_camera":
-                    self.front_color_buffer.append(copy.deepcopy(img[..., ::-1]))
-                    self.front_depth_buffer.append(copy.deepcopy(depth))
-                elif cam_name == "front_camera_2":
-                    self.side_color_buffer.append(copy.deepcopy(img[..., ::-1]))
-                    self.side_depth_buffer.append(copy.deepcopy(depth))
-                elif cam_name == "wrist_camera":
-                    self.wrist_color_buffer.append(copy.deepcopy(img[..., ::-1]))
-                    self.wrist_depth_buffer.append(copy.deepcopy(depth))
-
-            if self.enable_tactile:
-                self.rthumb_raw_buffer.append(copy.deepcopy(self.thumb_raw_img))
-                self.rindex_raw_buffer.append(copy.deepcopy(self.index_raw_img))
-                self.rmiddle_raw_buffer.append(copy.deepcopy(self.middle_raw_img))
-
-                self.rthumb_heatmap_buffer.append(copy.deepcopy(self.thumb_heat_map))
-                self.rindex_heatmap_buffer.append(copy.deepcopy(self.index_heat_map))
-                self.rmiddle_heatmap_buffer.append(copy.deepcopy(self.middle_heat_map))
-
-        except Exception as e:
-            print("An error occurred while processing frames")
-            print(e)
+    def save_training_frame(self, images=None, depth_images=None):
+        if self.data_recorder is None:
+            return None
+        frame_id = self.data_recorder.save_frame(images=images, depth_images=depth_images)
+        self.global_frame_id = self.data_recorder.global_frame_id
+        return frame_id
 
 
     def save_all_data_on_exit(self):
-        for frame_id in range(self.frame_count):
-            print("save frame ", frame_id)
-            frame_dir = os.path.join(self.frame_save_path, f"frame_{frame_id}")
-            os.makedirs(frame_dir, exist_ok=True)
+        if self.data_recorder is None:
+            return
+        self.data_recorder.save_all_data_on_exit()
 
-            if len(self.front_color_buffer) > frame_id:
-                cv2.imwrite(os.path.join(frame_dir, "color_image.jpg"), self.front_color_buffer[frame_id])
-                cv2.imwrite(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
-            if len(self.side_color_buffer) > frame_id:
-                cv2.imwrite(os.path.join(frame_dir, "color_image3.jpg"), self.side_color_buffer[frame_id])
-                cv2.imwrite(os.path.join(frame_dir, "depth_image3.png"), self.side_depth_buffer[frame_id])
-            if len(self.wrist_color_buffer) > frame_id:
-                cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), self.wrist_color_buffer[frame_id])
-                cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), self.wrist_depth_buffer[frame_id])
 
-            if self.enable_tactile:
-                cv2.imwrite(os.path.join(frame_dir, "thumb_raw_image.jpg"), self.rthumb_raw_buffer[frame_id])
-                cv2.imwrite(os.path.join(frame_dir, "thumb_heat_map.jpg"), self.rthumb_heatmap_buffer[frame_id])
-            
-                cv2.imwrite(os.path.join(frame_dir, "index_raw_image.jpg"), self.rindex_raw_buffer[frame_id])
-                cv2.imwrite(os.path.join(frame_dir, "index_heat_map.jpg"), self.rindex_heatmap_buffer[frame_id])
-            
-                cv2.imwrite(os.path.join(frame_dir, "middle_raw_image.jpg"), self.rmiddle_raw_buffer[frame_id])
-                cv2.imwrite(os.path.join(frame_dir, "middle_heat_map.jpg"), self.rmiddle_heatmap_buffer[frame_id])
-            # 保存 state（TCP + orientation + hand joints）
-            np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
-            np.savetxt(os.path.join(frame_dir, "hand_state.txt"), np.atleast_1d(self.hand_state_buffer[frame_id]), fmt="%.6f")
-            np.savetxt(os.path.join(frame_dir, "action.txt"), np.atleast_1d(self.action_buffer[frame_id]), fmt="%.6f")
+    def end_episode_and_collect(self):
+        if self.data_recorder is None:
+            return None
+        self.data_recorder.cur_ep_start = self._cur_ep_start
+        frame_range = self.data_recorder.end_episode()
+        self._cur_ep_start = self.data_recorder.cur_ep_start
+        self.episode_frame_ranges = self.data_recorder.episode_frame_ranges
+        return frame_range
+
+
+    def mark_episode_start_for_recording(self):
+        if self.data_recorder is None:
+            return None
+        start = self.data_recorder.mark_episode_start()
+        self.global_frame_id = self.data_recorder.global_frame_id
+        self._cur_ep_start = self.data_recorder.cur_ep_start
+        self._episode_counter = self.data_recorder.episode_counter
+        return start
+
+
+    def run_inline_sam2_and_label_v2(
+        self,
+        frame_ranges: List[Tuple[int, int]],
+        y_prompts_et: int = 20,
+        y_prompts_rs: int = 10,
+        rs_select_uses_same_keyset: bool = False,
+        random_seed: int = 0,
+    ):
+        if self.gaze_labeler is None:
+            print("[SAM2 v2] gaze collection disabled; skip.")
+            return
+        self.gaze_labeler.run_inline_v2(
+            frame_ranges,
+            y_prompts_et=y_prompts_et,
+            y_prompts_rs=y_prompts_rs,
+            rs_select_uses_same_keyset=rs_select_uses_same_keyset,
+            random_seed=random_seed,
+        )

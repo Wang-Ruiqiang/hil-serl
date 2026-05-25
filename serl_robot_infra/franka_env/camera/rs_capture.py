@@ -30,10 +30,12 @@ class RSCapture:
 
     def read(self):
         frames = self.pipe.wait_for_frames()
-        aligned_frames = self.align.process(frames)
-        color_frame = aligned_frames.get_color_frame()
         if self.depth:
+            aligned_frames = self.align.process(frames)
+            color_frame = aligned_frames.get_color_frame()
             depth_frame = aligned_frames.get_depth_frame()
+        else:
+            color_frame = frames.get_color_frame()
 
         if color_frame.is_video_frame():
             image = np.asarray(color_frame.get_data())
