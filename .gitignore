@@ -18,3 +18,6 @@ examples/experiments/tennis_ball_pick/__pycache__/*
 examples/experiments/twist_bottle_cap/__pycache__/*
 examples/experiments/tube_insertion/__pycache__/*
 serl_robot_infra/franka_env/envs/__pycache__/*
+examples/gaze_data_process/gaze_heatmap_vis/*
+examples/gaze_data_process/gaze_heatmap_ckpt/*
+examples/gaze_data_process/gaze_cls_data/*

@@ -29,6 +29,7 @@ from agentlace.trainer import TrainerServer, TrainerClient
 from agentlace.data.data_store import QueuedDataStore
 
 from serl_launcher.utils.launcher import (
+    make_gaze_sac_pixel_agent_hybrid_single_arm,
     make_sac_pixel_agent,
     make_sac_pixel_agent_hybrid_single_arm,
     make_trainer_config,
@@ -52,6 +53,31 @@ flags.DEFINE_integer("eval_checkpoint_step", 193000, "Step to evaluate the check
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", True, "Save video.")
 flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_boolean(
+    "use_gaze_relevance",
+    False,
+    "Use the gaze-relevance critic variant. False keeps the original HIL-RL/SAC logic.",
+)
+flags.DEFINE_float(
+    "gaze_regularization_weight",
+    0.0,
+    "Weight for the gaze auxiliary critic loss when use_gaze_relevance=True.",
+)
+flags.DEFINE_float(
+    "gaze_relevance_min",
+    0.2,
+    "Lower bound for the effective gaze relevance gate.",
+)
+flags.DEFINE_float(
+    "gaze_relevance_regularizer_weight",
+    1e-3,
+    "Small regularizer that discourages the gaze relevance gate from collapsing to zero.",
+)
+flags.DEFINE_string(
+    "gaze_aux_loss_key",
+    "gaze_aux_loss",
+    "Batch/observation key used by the gaze agent for per-sample gaze auxiliary loss.",
+)
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -594,7 +620,29 @@ def main(_):
     )
     env = RecordEpisodeStatistics(env)
 
-    agent: SACAgent = make_sac_pixel_agent_hybrid_single_arm(
+    agent_factory = (
+        make_gaze_sac_pixel_agent_hybrid_single_arm
+        if FLAGS.use_gaze_relevance
+        else make_sac_pixel_agent_hybrid_single_arm
+    )
+    gaze_agent_kwargs = {}
+    if FLAGS.use_gaze_relevance:
+        gaze_agent_kwargs = {
+            "gaze_regularization_weight": FLAGS.gaze_regularization_weight,
+            "gaze_relevance_min": FLAGS.gaze_relevance_min,
+            "gaze_relevance_regularizer_weight": FLAGS.gaze_relevance_regularizer_weight,
+            "gaze_aux_loss_key": FLAGS.gaze_aux_loss_key,
+        }
+        print_green(
+            "Using gaze relevance agent "
+            f"(weight={FLAGS.gaze_regularization_weight}, "
+            f"min={FLAGS.gaze_relevance_min}, "
+            f"aux_key={FLAGS.gaze_aux_loss_key})."
+        )
+    else:
+        print_green("Using original HIL-RL/SAC agent without gaze relevance.")
+
+    agent: SACAgent = agent_factory(
         seed=FLAGS.seed,
         sample_obs=env.observation_space.sample(),
         sample_action=env.action_space.sample(),
@@ -603,6 +651,7 @@ def main(_):
         discount=config.discount,
         # state_weights=config.state_weights,
         # image_weights=config.image_weights,
+        **gaze_agent_kwargs,
     )
     include_robot_arm_penalty = True
     include_grasp_penalty = True
@@ -644,7 +693,7 @@ def main(_):
 
     agent_pick = None
     if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
-        agent_pick: SACAgent = make_sac_pixel_agent_hybrid_single_arm(
+        agent_pick: SACAgent = agent_factory(
             seed=FLAGS.seed,
             sample_obs=env.observation_space.sample(),
             sample_action=env.action_space.sample(),
@@ -652,6 +701,7 @@ def main(_):
             encoder_type=config.encoder_type,
             discount=config.discount,
             # state_weights=config.state_weights,
+            **gaze_agent_kwargs,
         )
         # replicate agent across devices
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives

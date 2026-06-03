@@ -91,10 +91,10 @@ class KeyboardExpert:
             if 'h' in current_keys:
                 # print("x+")
                 action[0] += self.SMALL_STEP
-            if 'r' in current_keys:
+            if 'y' in current_keys:
                 # print("y+")
                 action[1] += self.SMALL_STEP
-            if 'y' in current_keys:
+            if 'r' in current_keys:
                 # print("y-")
                 action[1] -= self.SMALL_STEP
 

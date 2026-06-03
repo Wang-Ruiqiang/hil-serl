@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,15 +31,49 @@ def sam2_prompt_child_main(mirror_dir: str, key_indices: list[int], mode: str, t
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
 
     prompts = {}
+    max_objects = 3
+    obj_colors = {
+        0: (0, 255, 255),
+        1: (255, 0, 255),
+        2: (0, 165, 255),
+    }
     active_obj = 0
     tmp_box = []
     tmp_box_end = None
     dragging = False
     cur_i = 0
 
+    def _draw_text_lines(image, lines, origin=(10, 28), line_height=26):
+        x, y = origin
+        pad = 6
+        max_width = 0
+        for line in lines:
+            (tw, _), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+            max_width = max(max_width, tw)
+        box_h = line_height * len(lines) + pad
+        cv2.rectangle(
+            image,
+            (x - pad, y - 20 - pad),
+            (x + max_width + pad, y - 20 + box_h),
+            (0, 0, 0),
+            -1,
+        )
+        for i, line in enumerate(lines):
+            cv2.putText(
+                image,
+                line,
+                (x, y + i * line_height),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 255, 0),
+                2,
+            )
+
     def _on_mouse(event, x, y, flags, param):
         nonlocal dragging, tmp_box, tmp_box_end, active_obj
         idx = param["cur_idx"]
+        if idx < 0:
+            return
         d = prompts.setdefault(idx, {})
         if active_obj not in d:
             d[active_obj] = {"clicks": [], "labels": [], "boxes": []}
@@ -75,27 +110,58 @@ def sam2_prompt_child_main(mirror_dir: str, key_indices: list[int], mode: str, t
 
         vis = img.copy()
         for oid, rec in prompts.get(frame_idx, {}).items():
+            color = obj_colors.get(int(oid), (255, 255, 255))
             for (px, py), lbl in zip(rec.get("clicks", []), rec.get("labels", [])):
-                cv2.circle(vis, (px, py), 6, (0, 255, 0) if lbl else (0, 0, 255), -1)
+                cv2.circle(vis, (px, py), 7, color, -1)
+                if not lbl:
+                    cv2.line(vis, (px - 6, py - 6), (px + 6, py + 6), (0, 0, 255), 2)
+                    cv2.line(vis, (px - 6, py + 6), (px + 6, py - 6), (0, 0, 255), 2)
+                cv2.putText(vis, str(oid), (px + 8, py - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             for box in rec.get("boxes", []):
                 if len(box) == 2:
-                    cv2.rectangle(vis, box[0], box[1], (255, 0, 0), 2)
+                    cv2.rectangle(vis, box[0], box[1], color, 2)
+                    cv2.putText(vis, f"obj{oid}", box[0], cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         if len(tmp_box) == 1 and tmp_box_end is not None:
-            cv2.rectangle(vis, tmp_box[0], tmp_box_end, (200, 200, 0), 1)
+            cv2.rectangle(vis, tmp_box[0], tmp_box_end, obj_colors.get(active_obj, (255, 255, 255)), 1)
 
-        msg = f"[{mode}] key {cur_i+1}/{len(key_indices)} frame={frame_idx} obj={active_obj} (j/k prev/next, n new obj, Enter finish, q quit)"
-        cv2.putText(vis, msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        cv2.setMouseCallback(win, _on_mouse, param={"cur_idx": frame_idx})
+        _draw_text_lines(
+            vis,
+            [
+                f"[{mode}] key {cur_i+1}/{len(key_indices)} frame={frame_idx} obj={active_obj}",
+                "mouse: drag box | left double-click positive | middle-click negative",
+                "obj: 0/1/2 switch | n next obj | u undo",
+                "clear: c current obj | x whole frame",
+                "nav: j prev | k next | Enter finish | q quit",
+            ],
+        )
         cv2.imshow(win, vis)
         key = cv2.waitKey(10) & 0xFF
         if key in (13, 10) or key == ord("q"):
             break
         if key == ord("n"):
-            active_obj += 1
+            active_obj = (active_obj + 1) % max_objects
+        elif ord("0") <= key <= ord(str(max_objects - 1)):
+            active_obj = key - ord("0")
+        elif key == ord("u"):
+            rec = prompts.get(frame_idx, {}).get(active_obj)
+            if rec:
+                if rec.get("boxes"):
+                    rec["boxes"].pop()
+                elif rec.get("clicks"):
+                    rec["clicks"].pop()
+                    if rec.get("labels"):
+                        rec["labels"].pop()
+        elif key == ord("c"):
+            prompts.get(frame_idx, {}).pop(active_obj, None)
+        elif key == ord("x"):
+            prompts.pop(frame_idx, None)
         elif key == ord("j") and cur_i > 0:
             cur_i -= 1
+            active_obj = 0
         elif key == ord("k") and cur_i < len(key_indices) - 1:
             cur_i += 1
-        cv2.setMouseCallback(win, _on_mouse, param={"cur_idx": frame_idx})
+            active_obj = 0
 
     try:
         cv2.destroyWindow(win)
@@ -116,6 +182,7 @@ class SAM2GazeLabeler:
     def run_inline_v2(
         self,
         frame_ranges: List[Tuple[int, int]],
+        prompt_frame_groups: List[List[Tuple[int, int]]] | None = None,
         y_prompts_et: int = 20,
         y_prompts_rs: int = 10,
         rs_select_uses_same_keyset: bool = False,
@@ -133,8 +200,9 @@ class SAM2GazeLabeler:
             return
 
         print(f"[SAM2 v2] total frames in batch: {len(selected_all)}, ranges={frame_ranges}")
-        key_et = self._select_keyframes_per_episode(
-            frame_ranges,
+        prompt_frame_groups = prompt_frame_groups or [[rng] for rng in frame_ranges]
+        key_et = self._select_keyframes_per_episode_groups(
+            prompt_frame_groups,
             prompts_per_ep=y_prompts_et,
             include_ends=True,
         )
@@ -147,8 +215,8 @@ class SAM2GazeLabeler:
             save_union=True,
         )
 
-        key_rs = key_et if rs_select_uses_same_keyset else self._select_keyframes_per_episode(
-            frame_ranges,
+        key_rs = key_et if rs_select_uses_same_keyset else self._select_keyframes_per_episode_groups(
+            prompt_frame_groups,
             prompts_per_ep=y_prompts_rs,
             include_ends=True,
         )
@@ -168,9 +236,54 @@ class SAM2GazeLabeler:
             eye_wh=(1280, 720),
         )
         print(
-            f"[SAM2 v2] done. episodes={len(frame_ranges)} frames={len(selected_all)} "
+            f"[SAM2 v2] done. episodes={len(prompt_frame_groups)} frames={len(selected_all)} "
             f"prompts_et={len(key_et)} prompts_rs={len(key_rs)}"
         )
+
+    def _select_keyframes_per_episode_groups(
+        self,
+        frame_groups: List[List[Tuple[int, int]]],
+        prompts_per_ep: int | None = 20,
+        include_ends: bool = True,
+    ) -> list[int]:
+        selected = set()
+        count = max(0, int(prompts_per_ep or 0))
+        if count <= 0:
+            return []
+
+        for ranges in frame_groups:
+            frames = []
+            for start, end in ranges:
+                start, end = int(start), int(end)
+                if end < start:
+                    start, end = end, start
+                frames.extend(range(start, end + 1))
+            frames = sorted(set(frames))
+            if not frames:
+                continue
+            if len(frames) <= count:
+                selected.update(frames)
+                continue
+
+            if include_ends:
+                positions = np.rint(np.linspace(0, len(frames) - 1, num=count)).astype(int).tolist()
+            else:
+                stride = len(frames) / float(count + 1)
+                positions = [int(round(stride * k)) for k in range(1, count + 1)]
+
+            chosen = []
+            for pos in positions:
+                pos = max(0, min(len(frames) - 1, int(pos)))
+                idx = frames[pos]
+                if idx not in chosen:
+                    chosen.append(idx)
+            for idx in frames:
+                if len(chosen) >= count:
+                    break
+                if idx not in chosen:
+                    chosen.append(idx)
+            selected.update(chosen[:count])
+        return sorted(selected)
 
     def _select_keyframes_per_episode(
         self,
@@ -270,6 +383,30 @@ class SAM2GazeLabeler:
             print(f"[SAM2] no prompts for {mode}; skip propagation.")
             return
 
+        subset_dir = tempfile.TemporaryDirectory(prefix=f"sam2_{mode}_frames_")
+        original_to_video_idx = {}
+        video_idx_to_original = {}
+        for original_frame_idx in sorted(set(map(int, selected_indices))):
+            src = pathlib.Path(mirror_dir) / f"{original_frame_idx}.jpg"
+            if not src.exists():
+                continue
+            video_idx = len(original_to_video_idx)
+            dst = pathlib.Path(subset_dir.name) / f"{video_idx}.jpg"
+            try:
+                os.symlink(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+            original_to_video_idx[original_frame_idx] = video_idx
+            video_idx_to_original[video_idx] = original_frame_idx
+        if not original_to_video_idx:
+            subset_dir.cleanup()
+            print(f"[SAM2] no selected frames found in {mirror_dir}; skip propagation.")
+            return
+        print(
+            f"[SAM2] {mode} subset video: {len(original_to_video_idx)} frames "
+            f"from {min(original_to_video_idx)}..{max(original_to_video_idx)}"
+        )
+
         import torch
         from contextlib import nullcontext
         from torch.amp import autocast
@@ -279,7 +416,7 @@ class SAM2GazeLabeler:
         amp_ctx = autocast("cuda", dtype=torch.bfloat16, enabled=(device == "cuda")) if device == "cuda" else nullcontext()
         with torch.inference_mode(), amp_ctx:
             state = predictor.init_state(
-                mirror_dir,
+                subset_dir.name,
                 offload_video_to_cpu=True,
                 offload_state_to_cpu=True,
             )
@@ -288,15 +425,20 @@ class SAM2GazeLabeler:
             normalized_prompts = {}
             for frame_idx, per_obj in prompts_dict.items():
                 try:
-                    frame_idx = int(frame_idx)
+                    original_frame_idx = int(frame_idx)
                 except Exception:
                     continue
+                if original_frame_idx not in original_to_video_idx:
+                    print(f"[SAM2] skip prompt outside current subset: frame {original_frame_idx}")
+                    continue
+                frame_idx = original_to_video_idx[original_frame_idx]
                 normalized_prompts[frame_idx] = per_obj
                 for obj_id, data in (per_obj or {}).items():
                     if data.get("clicks") or data.get("boxes"):
                         allowed_oids.add(int(obj_id))
             if not allowed_oids:
                 print(f"[SAM2] no valid objects for {mode}; skip propagation.")
+                subset_dir.cleanup()
                 return
 
             for frame_idx, per_obj in normalized_prompts.items():
@@ -325,14 +467,19 @@ class SAM2GazeLabeler:
                                 box=np.asarray([x0, y0, x1, y1], dtype=np.float32),
                             )
 
-            keep = set(map(int, selected_indices))
+            keep = {
+                original_to_video_idx[int(idx)]
+                for idx in selected_indices
+                if int(idx) in original_to_video_idx
+            }
             prefix = "et_" if mode == "et" else "rs_"
             oid_remap = {old: new for new, old in enumerate(sorted(allowed_oids))}
             for frame_idx, obj_ids, masks in predictor.propagate_in_video(state):
                 frame_idx = int(frame_idx)
                 if frame_idx not in keep:
                     continue
-                frame_dir = pathlib.Path(self.frame_root) / f"frame_{frame_idx}"
+                original_frame_idx = video_idx_to_original[frame_idx]
+                frame_dir = pathlib.Path(self.frame_root) / f"frame_{original_frame_idx}"
                 frame_dir.mkdir(parents=True, exist_ok=True)
                 union = None
                 for i, oid in enumerate(obj_ids):
@@ -345,6 +492,7 @@ class SAM2GazeLabeler:
                     union = mask if union is None else (union | mask)
                 if save_union and union is not None:
                     cv2.imwrite(str(frame_dir / f"{prefix}mask_union.png"), union * 255)
+        subset_dir.cleanup()
 
     def _build_gaze_contacts_subset(
         self,

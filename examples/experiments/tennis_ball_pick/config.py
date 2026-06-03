@@ -27,8 +27,14 @@ class EnvConfig(DefaultEnvConfig):
         #     "depth": True,
         # },
         #franka
+        # "front_camera": {
+        #     "serial_number": "036522072607",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        #     "depth": True,
+        # },
         "front_camera": {
-            "serial_number": "036522072607",
+            "serial_number": "151422254571",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
@@ -60,7 +66,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
     # ACTION_SCALE = (0.03, 0.03, 0.03)
-    ACTION_SCALE = (0.008, 0.008, 0.008)
+    ACTION_SCALE = (0.005, 0.005, 0.005)
     DISPLAY_IMAGE = True
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
@@ -98,7 +104,7 @@ class EnvConfig(DefaultEnvConfig):
     # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     EXP_NAME = "tennis_ball_pick"
-    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-5-25-1"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-5-27-0"
 
 
 class TrainConfig(DefaultTrainingConfig):

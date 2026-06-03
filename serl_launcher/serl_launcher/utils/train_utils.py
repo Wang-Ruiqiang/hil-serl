@@ -101,11 +101,8 @@ def _unpack(batch):
     return batch
 
 
-def load_resnet10_params(agent, image_keys=("image",), public=True):
-    """
-    Load pretrained resnet10 params from github release to an agent.
-    :return: agent with pretrained resnet10 params
-    """
+def load_resnet10_encoder_params(public=True):
+    """Load raw pretrained ResNet-10 encoder params from cache or GitHub release."""
     file_name = "resnet10_params.pkl"
     if not public:  # if github repo is not public, load from local file
         with open(file_name, "rb") as f:
@@ -147,6 +144,15 @@ def load_resnet10_params(agent, image_keys=("image",), public=True):
     print(
         f"Loaded {param_count/1e6}M parameters from ResNet-10 pretrained on ImageNet-1K"
     )
+    return encoder_params
+
+
+def load_resnet10_params(agent, image_keys=("image",), public=True):
+    """
+    Load pretrained resnet10 params from github release to an agent.
+    :return: agent with pretrained resnet10 params
+    """
+    encoder_params = load_resnet10_encoder_params(public=public)
 
     new_params = agent.state.params
 

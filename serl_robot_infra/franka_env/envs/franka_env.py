@@ -54,7 +54,8 @@ class ImageDisplayer(threading.Thread):
             # cv2.waitKey(1)
             for k, v in img_array.items():
                 # img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
-                cv2.imshow(f"{self.name} - {k}", v)
+                img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
+                cv2.imshow(f"{self.name} - {k}", img)
 
             cv2.waitKey(1)
 
