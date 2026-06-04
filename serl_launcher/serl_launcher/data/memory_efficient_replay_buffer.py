@@ -19,6 +19,8 @@ class MemoryEfficientReplayBuffer(ReplayBuffer):
         include_next_actions: Optional[bool] = False,
         include_grasp_penalty: Optional[bool] = False,
         include_robot_arm_penalty: Optional[bool] = False,
+        include_gaze_aux: Optional[bool] = False,
+        gaze_heatmap_shape: Tuple[int, int] = (128, 128),
     ):
         self.pixel_keys = pixel_keys
 
@@ -54,6 +56,8 @@ class MemoryEfficientReplayBuffer(ReplayBuffer):
             include_next_actions=include_next_actions,
             include_grasp_penalty=include_grasp_penalty,
             include_robot_arm_penalty=include_robot_arm_penalty,
+            include_gaze_aux=include_gaze_aux,
+            gaze_heatmap_shape=gaze_heatmap_shape,
         )
 
     def insert(self, data_dict: DatasetDict):

@@ -32,9 +32,11 @@ class EncodingWrapper(nn.Module):
         train=False,
         stop_gradient=False,
         is_encoded=False,
+        return_attention=False,
     ) -> jnp.ndarray:
         # encode images with encoder
         encoded = []
+        attention_maps = []
         for image_key in self.image_keys:
             image = observations[image_key]
             if not is_encoded:
@@ -44,7 +46,16 @@ class EncodingWrapper(nn.Module):
                         image = rearrange(image, "T H W C -> H W (T C)")
                     if len(image.shape) == 5:
                         image = rearrange(image, "B T H W C -> B H W (T C)")
-            image = self.encoder[image_key](image, train=train, encode=not is_encoded)
+            if return_attention:
+                image, spatial_features = self.encoder[image_key](
+                    image,
+                    train=train,
+                    encode=not is_encoded,
+                    return_spatial=True,
+                )
+                attention_maps.append(jnp.mean(jnp.square(spatial_features), axis=-1))
+            else:
+                image = self.encoder[image_key](image, train=train, encode=not is_encoded)
 
             if stop_gradient:
                 image = jax.lax.stop_gradient(image)
@@ -81,5 +92,9 @@ class EncodingWrapper(nn.Module):
             state = nn.LayerNorm()(state)
             state = nn.tanh(state)
             encoded = jnp.concatenate([encoded, state], axis=-1)
+
+        if return_attention:
+            attention_map = jnp.mean(jnp.stack(attention_maps, axis=0), axis=0)
+            return encoded, attention_map
 
         return encoded

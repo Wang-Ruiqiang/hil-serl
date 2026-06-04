@@ -215,6 +215,7 @@ class ResNetEncoder(nn.Module):
         cond_var=None,
         stop_gradient=False,
         encode: bool = True,
+        return_spatial: bool = False,
     ):
         # put inputs in [-1, 1]
         # x = observations.astype(jnp.float32) / 127.5 - 1.0
@@ -319,6 +320,7 @@ class ResNetEncoder(nn.Module):
                     )(cond_var)
                     x_mult = jnp.expand_dims(jnp.expand_dims(cond_out, 1), 1)
                     x = x * x_mult
+        spatial_features = x
         if self.pre_pooling:
             return jax.lax.stop_gradient(x)
             # return x
@@ -356,6 +358,9 @@ class ResNetEncoder(nn.Module):
             x = nn.LayerNorm()(x)
             x = nn.tanh(x)
 
+        if return_spatial:
+            return x, spatial_features
+
         return x
 
 
@@ -373,10 +378,12 @@ class PreTrainedResNetEncoder(nn.Module):
         observations: jnp.ndarray,
         encode: bool = True,
         train: bool = True,
+        return_spatial: bool = False,
     ):
         x = observations
         if encode:
             x = self.pretrained_encoder(x, train=train)
+        spatial_features = x
 
         if self.pooling_method == "spatial_learned_embeddings":
             height, width, channel = x.shape[-3:]
@@ -410,6 +417,9 @@ class PreTrainedResNetEncoder(nn.Module):
             x = nn.Dense(self.bottleneck_dim)(x)
             x = nn.LayerNorm()(x)
             x = nn.tanh(x)
+
+        if return_spatial:
+            return x, spatial_features
 
         return x
 

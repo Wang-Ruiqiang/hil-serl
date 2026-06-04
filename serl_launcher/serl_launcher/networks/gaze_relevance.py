@@ -27,10 +27,13 @@ class GazeRegularizedCritic(nn.Module):
         actions: jnp.ndarray,
         train: bool = False,
         return_gaze_relevance: bool = False,
+        return_attention: bool = False,
     ):
         if jnp.ndim(actions) == 3:
-            if return_gaze_relevance:
-                raise ValueError("return_gaze_relevance=True is only supported for 2D actions.")
+            if return_gaze_relevance or return_attention:
+                raise ValueError(
+                    "return_gaze_relevance/return_attention are only supported for 2D actions."
+                )
             return jax.vmap(
                 lambda a: self(observations, a, train=train),
                 in_axes=1,
@@ -39,8 +42,16 @@ class GazeRegularizedCritic(nn.Module):
 
         if self.encoder is None:
             obs_enc = observations
+            attention_map = None
+        elif return_attention:
+            obs_enc, attention_map = self.encoder(
+                observations,
+                train=train,
+                return_attention=True,
+            )
         else:
             obs_enc = self.encoder(observations)
+            attention_map = None
 
         inputs = jnp.concatenate([obs_enc, actions], -1)
         outputs = self.network(inputs, train)
@@ -53,9 +64,6 @@ class GazeRegularizedCritic(nn.Module):
             value = nn.Dense(1, kernel_init=default_init())(outputs)
         q_value = jnp.squeeze(value, -1)
 
-        if not return_gaze_relevance:
-            return q_value
-
         relevance = nn.Dense(self.relevance_hidden_dim, kernel_init=default_init())(
             inputs
         )
@@ -63,4 +71,13 @@ class GazeRegularizedCritic(nn.Module):
         relevance = nn.tanh(relevance)
         relevance_logit = nn.Dense(1, kernel_init=default_init())(relevance)
         relevance_logit = jnp.squeeze(relevance_logit, -1)
+
+        if not return_gaze_relevance:
+            if return_attention:
+                return q_value, attention_map
+            return q_value
+
+        if return_attention:
+            return q_value, relevance_logit, attention_map
+
         return q_value, relevance_logit

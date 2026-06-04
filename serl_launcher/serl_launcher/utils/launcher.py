@@ -163,8 +163,12 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
     discount=0.97,
     gaze_regularization_weight=0.0,
     gaze_relevance_min=0.2,
+    gaze_conf_min=0.3,
     gaze_relevance_regularizer_weight=1e-3,
-    gaze_aux_loss_key="gaze_aux_loss",
+    gaze_heatmap_key="gaze_heatmap",
+    gaze_heatmap_size=(128, 128),
+    gaze_cgl_threshold=1e-4,
+    gaze_conf_key="gaze_conf",
 ):
     agent = SACAgentHybridSingleArmGaze.create_pixels(
         jax.random.PRNGKey(seed),
@@ -204,8 +208,12 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
         augmentation_function=make_batch_augmentation_func(image_keys),
         gaze_regularization_weight=gaze_regularization_weight,
         gaze_relevance_min=gaze_relevance_min,
+        gaze_conf_min=gaze_conf_min,
         gaze_relevance_regularizer_weight=gaze_relevance_regularizer_weight,
-        gaze_aux_loss_key=gaze_aux_loss_key,
+        gaze_heatmap_key=gaze_heatmap_key,
+        gaze_heatmap_size=gaze_heatmap_size,
+        gaze_cgl_threshold=gaze_cgl_threshold,
+        gaze_conf_key=gaze_conf_key,
     )
     return agent
 
