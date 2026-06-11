@@ -200,9 +200,9 @@ class EpisodeDataRecorder:
                     cv2.imwrite(os.path.join(frame_dir, "index_raw_image.jpg"), self.rindex_raw_buffer[frame_id])
                 if len(self.rindex_heatmap_buffer) > frame_id:
                     cv2.imwrite(os.path.join(frame_dir, "index_heat_map.jpg"), self.rindex_heatmap_buffer[frame_id])
-                if len(self.rmiddle_raw_buffer) > frame_id:
+                if getattr(self.env, "enable_dm_tac_middle", False) and len(self.rmiddle_raw_buffer) > frame_id:
                     cv2.imwrite(os.path.join(frame_dir, "middle_raw_image.jpg"), self.rmiddle_raw_buffer[frame_id])
-                if len(self.rmiddle_heatmap_buffer) > frame_id:
+                if getattr(self.env, "enable_dm_tac_middle", False) and len(self.rmiddle_heatmap_buffer) > frame_id:
                     cv2.imwrite(os.path.join(frame_dir, "middle_heat_map.jpg"), self.rmiddle_heatmap_buffer[frame_id])
 
             if len(self.joint_buffer) > frame_id:
@@ -346,10 +346,11 @@ class EpisodeDataRecorder:
             return
         self.rthumb_raw_buffer.append(copy.deepcopy(self.env.thumb_raw_img))
         self.rindex_raw_buffer.append(copy.deepcopy(self.env.index_raw_img))
-        self.rmiddle_raw_buffer.append(copy.deepcopy(self.env.middle_raw_img))
         self.rthumb_heatmap_buffer.append(copy.deepcopy(self.env.thumb_heat_map))
         self.rindex_heatmap_buffer.append(copy.deepcopy(self.env.index_heat_map))
-        self.rmiddle_heatmap_buffer.append(copy.deepcopy(self.env.middle_heat_map))
+        if getattr(self.env, "enable_dm_tac_middle", False):
+            self.rmiddle_raw_buffer.append(copy.deepcopy(self.env.middle_raw_img))
+            self.rmiddle_heatmap_buffer.append(copy.deepcopy(self.env.middle_heat_map))
 
     def _append_mirror_and_gaze_buffers(self, images):
         if not self.enable_gaze:

@@ -25,7 +25,7 @@ flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment correspo
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean("record_data", True, "Save robot/camera/tactile frame data while recording demos.")
-flags.DEFINE_boolean("record_gaze", True, "Collect Pupil gaze/world frames while recording demos.")
+flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames while recording demos.")
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
 
 

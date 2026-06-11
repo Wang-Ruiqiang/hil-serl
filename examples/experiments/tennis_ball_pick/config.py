@@ -104,7 +104,7 @@ class EnvConfig(DefaultEnvConfig):
     # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     EXP_NAME = "tennis_ball_pick"
-    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-5-27-0"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-8-0"
 
 
 class TrainConfig(DefaultTrainingConfig):

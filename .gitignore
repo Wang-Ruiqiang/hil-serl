@@ -21,3 +21,4 @@ serl_robot_infra/franka_env/envs/__pycache__/*
 examples/gaze_data_process/gaze_heatmap_vis/*
 examples/gaze_data_process/gaze_heatmap_ckpt/*
 examples/gaze_data_process/gaze_cls_data/*
+sdk_log.log

@@ -10,7 +10,6 @@ import time
 import requests
 import queue
 import threading
-import yaml
 
 from datetime import datetime
 from collections import OrderedDict
@@ -27,7 +26,7 @@ import threading
 from franka_env.camera.video_capture import VideoCapture
 from franka_env.camera.rs_capture import RSCapture
 from leap_hand.srv import LeapPosition, LeapPosVelEff
-from shape_reconstruction import Sensor
+from dmrobotics import Sensor as DMTacSensor
 from franka_env.gaze.sam2_labeler import SAM2GazeLabeler
 from franka_env.recording.episode_recorder import EpisodeDataRecorder
 
@@ -53,8 +52,8 @@ class ImageDisplayer(threading.Thread):
             # cv2.imshow(self.name, frame)
             # cv2.waitKey(1)
             for k, v in img_array.items():
-                # img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
-                img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
+                img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
+                # img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
                 cv2.imshow(f"{self.name} - {k}", img)
 
             cv2.waitKey(1)
@@ -90,29 +89,17 @@ class DefaultEnvConfig:
     # GRASP_POSE: np.ndarray = np.zeros((6,))
     REWARD_THRESHOLD: np.ndarray = np.zeros((6,))
     ACTION_SCALE = np.zeros((3,))
-    # RESET_POSE = np.zeros((6,))
-    # RANDOM_RESET = False
-    # RANDOM_XY_RANGE = (0.0,)
-    # RANDOM_RZ_RANGE = (0.0,)
-    # ABS_POSE_LIMIT_HIGH = np.zeros((6,))
-    # ABS_POSE_LIMIT_LOW = np.zeros((6,))
-    # COMPLIANCE_PARAM: Dict[str, float] = {}
-    # RESET_PARAM: Dict[str, float] = {}
-    # PRECISION_PARAM: Dict[str, float] = {}
-    # LOAD_PARAM: Dict[str, float] = {
-    #     "mass": 0.0,
-    #     "F_x_center_load": [0.0, 0.0, 0.0],
-    #     "load_inertia": [0, 0, 0, 0, 0, 0, 0, 0, 0]
-    # }
     DISPLAY_IMAGE: bool = True
-    # GRIPPER_SLEEP: float = 0.6
     MAX_EPISODE_LENGTH: int = 200
-    # JOINT_RESET_PERIOD: int = 0
     ENABLE_DATA_RECORDING: bool = False
     ENABLE_GAZE_COLLECTION: bool = False
     GAZE_FRAME_SAVE_PATH: str = "./recorded_gaze_data"
     PUPIL_HOST: str = "127.0.0.1"
     PUPIL_PORT: int = 50020
+    DM_TAC_THUMB_SERIAL_ID = "2501130504"
+    DM_TAC_INDEX_SERIAL_ID = "2501130556"
+    DM_TAC_MIDDLE_SERIAL_ID = "2501130530"
+    ENABLE_DM_TAC_MIDDLE = False
 
 
 ##############################################################################
@@ -338,7 +325,7 @@ class FrankaEnv(gym.Env):
         self.max_episode_length = config.MAX_EPISODE_LENGTH
         self.display_image = config.DISPLAY_IMAGE
         # self.gripper_sleep = config.GRIPPER_SLEEP
-        self.tact_base_path = config.TACT_BASE_PATH
+        self.tact_base_path = getattr(config, "TACT_BASE_PATH", "")
         self.enable_tactile = config.ENABLE_TACTILE
         self.enable_gaze_collection = bool(getattr(config, "ENABLE_GAZE_COLLECTION", False))
         self.enable_data_recording = bool(
@@ -420,40 +407,37 @@ class FrankaEnv(gym.Env):
             return
         
         if self.enable_tactile:
-            # tactile configuration loading and init
-            thumb_cfg_path = os.path.join(self.tact_base_path, "shape_config_thumb.yaml")
-            # assert the path exists
-            if not os.path.exists(thumb_cfg_path):
-                raise FileNotFoundError(f"Configuration file not found: {thumb_cfg_path}")
-            thumb_f = open(thumb_cfg_path, 'r+', encoding='utf-8')
-            thumb_cfg = yaml.load(thumb_f, Loader=yaml.FullLoader)
-            self.thumb_tactile_sensor = Sensor(thumb_cfg)
-            # self.thumb_tactile_vis  = Visualizer(self.thumb_tactile_sensor.points)
+            if DMTacSensor is None:
+                raise ImportError(
+                    "dmrobotics is required for DM-TAC tactile sensing. "
+                    "Please install the DM-TAC SDK package first."
+                )
 
-            index_cfg_path = os.path.join(self.tact_base_path, "shape_config_index.yaml")
-            index_f = open(index_cfg_path, 'r+', encoding='utf-8')
-            index_cfg = yaml.load(index_f, Loader=yaml.FullLoader)
-            self.index_tactile_sensor = Sensor(index_cfg)
-            # self.index_tactile_vis  = Visualizer(self.index_tactile_sensor.points)
+            self.enable_dm_tac_middle = bool(getattr(config, "ENABLE_DM_TAC_MIDDLE", False))
+            thumb_serial = getattr(config, "DM_TAC_THUMB_SERIAL_ID", None)
+            index_serial = getattr(config, "DM_TAC_INDEX_SERIAL_ID", None)
+            middle_serial = getattr(config, "DM_TAC_MIDDLE_SERIAL_ID", None)
+            if thumb_serial is None or index_serial is None:
+                raise ValueError(
+                    "DM_TAC_THUMB_SERIAL_ID and DM_TAC_INDEX_SERIAL_ID must be set "
+                    "when ENABLE_TACTILE=True."
+                )
+            if self.enable_dm_tac_middle and middle_serial is None:
+                raise ValueError("DM_TAC_MIDDLE_SERIAL_ID must be set when ENABLE_DM_TAC_MIDDLE=True.")
 
-            middle_cfg_path = os.path.join(self.tact_base_path, "shape_config_middle.yaml")
-            middle_f = open(middle_cfg_path, 'r+', encoding='utf-8')
-            middle_cfg = yaml.load(middle_f, Loader=yaml.FullLoader)
-            self.middle_tactile_sensor = Sensor(middle_cfg)
-            # self.middle_tactile_vis  = Visualizer(self.middle_tactile_sensor.points)
+            self.thumb_tactile_sensor = DMTacSensor(str(thumb_serial))
+            self.index_tactile_sensor = DMTacSensor(str(index_serial))
+            if self.enable_dm_tac_middle:
+                self.middle_tactile_sensor = DMTacSensor(str(middle_serial))
 
             self.tactile_size = (128, 128)
-            self.thumb_raw_img = []
-            self.index_raw_img = []
-            self.middle_raw_img = []
+            self.thumb_raw_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.index_raw_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.middle_raw_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
 
-            self.thumb_points = []
-            self.index_points = []
-            self.middle_points = []
-
-            self.thumb_heat_map = []
-            self.index_heat_map = []
-            self.middle_heat_map = []
+            self.thumb_heat_map = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.index_heat_map = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.middle_heat_map = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
 
             self.rthumb_raw_buffer = []  # Right thumb raw tactile image
             self.rindex_raw_buffer = []  # Right index raw tactile image
@@ -467,6 +451,7 @@ class FrankaEnv(gym.Env):
             self.tac_index_lock = threading.Lock()
             self.tac_middle_lock = threading.Lock()
             self.tac_main_lock = threading.Lock()
+            self.tac_running = True
 
             # Start threads for each tactile sensor
             self.start_tac_processing()
@@ -553,15 +538,23 @@ class FrankaEnv(gym.Env):
         self.thumb_thread.start()
         self.index_thread = threading.Thread(target=self.process_index_tactile, daemon=True)
         self.index_thread.start()
-        self.middle_thread = threading.Thread(target=self.process_middle_tactile, daemon=True)
-        self.middle_thread.start()
+        if getattr(self, "enable_dm_tac_middle", False):
+            self.middle_thread = threading.Thread(target=self.process_middle_tactile, daemon=True)
+            self.middle_thread.start()
 
 
     def close_tac_processing(self):
-        # Close threads for each tactile sensor
-        self.thumb_thread.join()
-        self.index_thread.join()
-        self.middle_thread.join()
+        self.tac_running = False
+        for thread_name in ("thumb_thread", "index_thread", "middle_thread"):
+            if hasattr(self, thread_name):
+                getattr(self, thread_name).join(timeout=1.0)
+
+        for sensor_name in ("thumb_tactile_sensor", "index_tactile_sensor", "middle_tactile_sensor"):
+            if hasattr(self, sensor_name):
+                try:
+                    getattr(self, sensor_name).disconnect()
+                except Exception as exc:
+                    print(f"[DM-TAC] failed to disconnect {sensor_name}: {exc}")
 
 
     def step(self, action: np.ndarray) -> tuple:
@@ -1237,56 +1230,68 @@ class FrankaEnv(gym.Env):
 
 
     def process_tactile_data(self, sensor, img_size):
-        heat_map = []
-        raw_img = []
-        points = []
-       
-        raw_img = sensor.get_rectify_crop_image()
-        img_GRAY = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
-        height_map = sensor.raw_image_2_height_map(img_GRAY)
-        height_map = sensor.expand_image(height_map)
-        heat_map_input = cv2.normalize(height_map, None, 0, 255, cv2.NORM_MINMAX)
-        heat_map_input = np.uint8(heat_map_input)
-        heat_map = cv2.applyColorMap(heat_map_input, cv2.COLORMAP_JET)
-        target_size = img_size
-        heat_map = cv2.resize(heat_map, target_size, interpolation=cv2.INTER_LINEAR)
-        points, gradients = sensor.height_map_2_point_cloud_gradients(height_map)
+        raw_img = sensor.getRawImage()
+        depth = sensor.getDepth()
 
-        return raw_img, points, heat_map
+        raw_img = np.asarray(raw_img)
+        if raw_img.ndim == 2:
+            raw_img = cv2.cvtColor(raw_img, cv2.COLOR_GRAY2BGR)
+        elif raw_img.ndim == 3 and raw_img.shape[-1] == 4:
+            raw_img = raw_img[..., :3]
+        raw_img = cv2.resize(raw_img.astype(np.uint8, copy=False), img_size, interpolation=cv2.INTER_LINEAR)
+
+        depth = np.asarray(depth, dtype=np.float32)
+        heat_map_input = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
+        heat_map_input = np.uint8(np.nan_to_num(heat_map_input))
+        heat_map = cv2.applyColorMap(heat_map_input, cv2.COLORMAP_JET)
+        heat_map = cv2.resize(heat_map, img_size, interpolation=cv2.INTER_LINEAR)
+
+        return raw_img, heat_map
     
 
     def process_thumb_tactile(self):
-        while True:
-            # thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, (320, 240))
-            thumb_raw_img, thumb_points, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, self.tactile_size)
+        while getattr(self, "tac_running", True):
+            try:
+                thumb_raw_img, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, self.tactile_size)
+            except Exception as exc:
+                print(f"[DM-TAC][thumb] {exc}")
+                time.sleep(0.1)
+                continue
 
             with self.tac_thumb_lock:
                 self.thumb_raw_img = thumb_raw_img
-                self.thumb_points = thumb_points
                 self.thumb_heat_map = thumb_heat_map
             time.sleep(0.01)
 
 
     def process_index_tactile(self):
         # Process index tactile data
-        while True:
-            index_raw_img, index_points, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, self.tactile_size)
+        while getattr(self, "tac_running", True):
+            try:
+                index_raw_img, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, self.tactile_size)
+            except Exception as exc:
+                print(f"[DM-TAC][index] {exc}")
+                time.sleep(0.1)
+                continue
 
             with self.tac_index_lock:
                 self.index_raw_img = index_raw_img
-                self.index_points = index_points
                 self.index_heat_map = index_heat_map
             time.sleep(0.01)
     
 
     def process_middle_tactile(self):
-        # Process middle tactile data
-        while True:
-            middle_raw_img, middle_points, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, self.tactile_size)
+        # Middle DM-TAC is kept off by default and is not included in tactile_data.
+        while getattr(self, "tac_running", True):
+            try:
+                middle_raw_img, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, self.tactile_size)
+            except Exception as exc:
+                print(f"[DM-TAC][middle] {exc}")
+                time.sleep(0.1)
+                continue
 
             with self.tac_middle_lock:
                 self.middle_raw_img = middle_raw_img
-                self.middle_points = middle_points
                 self.middle_heat_map = middle_heat_map
             time.sleep(0.01)
     
@@ -1500,6 +1505,8 @@ class FrankaEnv(gym.Env):
         self.enable_gaze_collection = False
         if self.data_recorder is not None:
             self.data_recorder.close()
+        if getattr(self, "enable_tactile", False):
+            self.close_tac_processing()
         if hasattr(self, 'listener'):
             self.listener.stop()
         self.close_cameras()

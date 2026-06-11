@@ -93,7 +93,6 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     # index_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
     # thumb_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
-    middle_heat_map_path = os.path.join(frame_path, "middle_heat_map.jpg")
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
@@ -105,11 +104,9 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     if enable_tactile:
         index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
         thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
-        middle_heat_map_image = cv2.imread(middle_heat_map_path) if os.path.exists(middle_heat_map_path) else None
 
         index_heat_map_image = cv2.resize(index_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
         thumb_heat_map_image = cv2.resize(thumb_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-        middle_heat_map_image = cv2.resize(middle_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
         heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
