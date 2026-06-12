@@ -177,9 +177,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         gaze_conf, has_gaze_conf = self._gaze_conf_per_sample(batch)
         gaze_conf = jnp.reshape(gaze_conf, (batch_size,))
         gaze_conf = jnp.clip(gaze_conf, 0.0, 1.0)
-        gaze_conf_eff = self.config["gaze_conf_min"] + (
-            1.0 - self.config["gaze_conf_min"]
-        ) * gaze_conf
         gaze_relevance, attention_map = self.forward_gaze_relevance_and_attention(
             batch["observations"],
             actions,
@@ -193,7 +190,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         valid_gaze_count = jnp.maximum(jnp.sum(valid_gaze), 1.0)
         has_active_gaze_aux = has_gaze_heatmap and gaze_weight > 0.0
         gaze_aux_loss = (
-            jnp.sum(gaze_relevance * gaze_conf_eff * cgl_loss_per_sample * valid_gaze)
+            jnp.sum(gaze_relevance * gaze_conf * cgl_loss_per_sample * valid_gaze)
             / valid_gaze_count
         )
         if not has_active_gaze_aux:
@@ -216,7 +213,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             "gaze_aux_available": jnp.asarray(float(has_active_gaze_aux)),
             "gaze_conf_available": jnp.asarray(float(has_gaze_conf)),
             "gaze_conf_mean": jnp.mean(gaze_conf),
-            "gaze_conf_eff_mean": jnp.mean(gaze_conf_eff),
+            "gaze_conf_weight_mean": jnp.mean(gaze_conf),
             "gaze_aux_loss": gaze_aux_loss,
             "gaze_cgl_kl": jnp.sum(cgl_loss_per_sample * valid_gaze) / valid_gaze_count,
             "gaze_valid_fraction": jnp.mean(valid_gaze),
@@ -256,7 +253,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         augmentation_function: Optional[callable] = None,
         gaze_regularization_weight: float = 0.0,
         gaze_relevance_min: float = 0.2,
-        gaze_conf_min: float = 0.3,
         gaze_relevance_regularizer_weight: float = 1e-3,
         gaze_heatmap_key: str = "gaze_heatmap",
         gaze_heatmap_size: tuple = (128, 128),
@@ -361,7 +357,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             augmentation_function=augmentation_function,
             gaze_regularization_weight=gaze_regularization_weight,
             gaze_relevance_min=gaze_relevance_min,
-            gaze_conf_min=gaze_conf_min,
             gaze_relevance_regularizer_weight=gaze_relevance_regularizer_weight,
             gaze_heatmap_key=gaze_heatmap_key,
             gaze_heatmap_size=gaze_heatmap_size,
