@@ -5,6 +5,7 @@ import numpy as np
 from gymnasium.spaces import Box
 import copy
 from franka_env.envs.keyboard_expert import KeyboardExpert
+from franka_env.envs.spacemouse_expert import SpaceMouseExpert
 import requests
 from scipy.spatial.transform import Rotation as R
 from franka_env.envs.franka_env import FrankaEnv
@@ -240,7 +241,66 @@ class KeyboardIntervention(gym.ActionWrapper):
             info["intervene_action"] = new_action
 
         return obs, rew, done, truncated, info
+
+    def close(self):
+        self.expert.close()
+        if hasattr(self.env, "close"):
+            self.env.close()
     
+
+class SpacemouseIntervention(gym.ActionWrapper):
+    def __init__(self, env, action_indices=None):
+        super().__init__(env)
+        self.expert = SpaceMouseExpert()
+        self.left = False
+        self.right = False
+        self.action_indices = action_indices
+
+    def action(self, action: np.ndarray) -> tuple[np.ndarray, bool]:
+        """
+        Input:
+        - action: policy or inner-wrapper action
+        Output:
+        - action: SpaceMouse action if nonzero; else input action
+        """
+        expert_a, buttons = self.expert.get_action()
+        self.left = bool(buttons[0]) if len(buttons) > 0 else False
+        self.right = bool(buttons[1]) if len(buttons) > 1 else False
+        intervened = bool(np.linalg.norm(expert_a) > 0.001 or self.left or self.right)
+
+        if not intervened:
+            return action, False
+
+        new_action = np.zeros_like(action, dtype=np.float32)
+        arm_dims = min(6, new_action.shape[0], expert_a.shape[0])
+        new_action[:arm_dims] = expert_a[:arm_dims]
+
+        if self.left:
+            new_action[6] = -1.0
+        elif self.right:
+            new_action[6] = 1.0
+
+        if self.action_indices is not None:
+            filtered_action = np.zeros_like(new_action)
+            filtered_action[self.action_indices] = new_action[self.action_indices]
+            new_action = filtered_action
+
+        return new_action, True
+
+    def step(self, action):
+        new_action, replaced = self.action(action)
+        obs, rew, done, truncated, info = self.env.step(new_action)
+        if replaced:
+            info["intervene_action"] = new_action
+        info["spacemouse_left"] = self.left
+        info["spacemouse_right"] = self.right
+        return obs, rew, done, truncated, info
+
+    def close(self):
+        self.expert.close()
+        if hasattr(self.env, "close"):
+            self.env.close()
+
 
 class GripperCloseEnv(gym.ActionWrapper):
     """

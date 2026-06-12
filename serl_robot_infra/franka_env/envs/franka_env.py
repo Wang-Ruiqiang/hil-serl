@@ -27,7 +27,7 @@ from franka_env.camera.video_capture import VideoCapture
 from franka_env.camera.rs_capture import RSCapture
 from leap_hand.srv import LeapPosition, LeapPosVelEff
 from dmrobotics import Sensor as DMTacSensor
-from franka_env.gaze.sam2_labeler import SAM2GazeLabeler
+from franka_env.gaze.display_markers import draw_gaze_display_markers, marker_points_for_size
 from franka_env.recording.episode_recorder import EpisodeDataRecorder
 
 # from examples.utils import read_utils
@@ -52,8 +52,8 @@ class ImageDisplayer(threading.Thread):
             # cv2.imshow(self.name, frame)
             # cv2.waitKey(1)
             for k, v in img_array.items():
-                img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
-                # img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
+                # img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
+                img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
                 cv2.imshow(f"{self.name} - {k}", img)
 
             cv2.waitKey(1)
@@ -96,6 +96,9 @@ class DefaultEnvConfig:
     GAZE_FRAME_SAVE_PATH: str = "./recorded_gaze_data"
     PUPIL_HOST: str = "127.0.0.1"
     PUPIL_PORT: int = 50020
+    GAZE_DISPLAY_MARKERS: bool = True
+    GAZE_RS_SAVE_WIDTH: int = 640
+    GAZE_RS_SAVE_HEIGHT: int = 480
     DM_TAC_THUMB_SERIAL_ID = "2501130504"
     DM_TAC_INDEX_SERIAL_ID = "2501130556"
     DM_TAC_MIDDLE_SERIAL_ID = "2501130530"
@@ -328,6 +331,13 @@ class FrankaEnv(gym.Env):
         self.tact_base_path = getattr(config, "TACT_BASE_PATH", "")
         self.enable_tactile = config.ENABLE_TACTILE
         self.enable_gaze_collection = bool(getattr(config, "ENABLE_GAZE_COLLECTION", False))
+        self.gaze_display_markers = bool(getattr(config, "GAZE_DISPLAY_MARKERS", True))
+        self.gaze_rs_save_width = int(getattr(config, "GAZE_RS_SAVE_WIDTH", 640))
+        self.gaze_rs_save_height = int(getattr(config, "GAZE_RS_SAVE_HEIGHT", 480))
+        self.gaze_marker_points_realsense = marker_points_for_size(
+            self.gaze_rs_save_width,
+            self.gaze_rs_save_height,
+        )
         self.enable_data_recording = bool(
             getattr(config, "ENABLE_DATA_RECORDING", False)
         ) or self.enable_gaze_collection
@@ -490,7 +500,6 @@ class FrankaEnv(gym.Env):
         self.et_mirror_dir = os.path.join(self.frame_root, "et_images")
         self.rs_mirror_dir = os.path.join(self.frame_root, "rs_images")
         self.data_recorder = None
-        self.gaze_labeler = None
 
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_orientation = np.array([0, 1, 0, 0], dtype=np.float32)
@@ -518,12 +527,6 @@ class FrankaEnv(gym.Env):
                 pupil_port=int(getattr(config, "PUPIL_PORT", 50020)),
             )
             self.data_recorder.start()
-            if self.enable_gaze_collection:
-                self.gaze_labeler = SAM2GazeLabeler(
-                    frame_root=self.data_recorder.frame_root,
-                    et_mirror_dir=self.data_recorder.et_mirror_dir,
-                    rs_mirror_dir=self.data_recorder.rs_mirror_dir,
-                )
             self.frame_save_path = self.data_recorder.frame_save_path
             self.frame_root = self.data_recorder.frame_root
             self.et_mirror_dir = self.data_recorder.et_mirror_dir
@@ -1142,7 +1145,14 @@ class FrankaEnv(gym.Env):
                 )
                 images[key] = resized[..., ::-1]
                 # display_images[key] = resized
-                display_images[key + "_full"] = cropped_rgb
+                display_rgb = cropped_rgb
+                if (
+                    key == "front_camera"
+                    and self.enable_gaze_collection
+                    and self.gaze_display_markers
+                ):
+                    display_rgb = draw_gaze_display_markers(display_rgb)
+                display_images[key + "_full"] = display_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
                 _timing_log(f"get_im.{key}.process", t)
             except queue.Empty:
@@ -1207,7 +1217,14 @@ class FrankaEnv(gym.Env):
                 )
                 images[key] = resized[..., ::-1]
                 depth_images[key] = depth
-                display_images[key + "_full"] = cropped_rgb
+                display_rgb = cropped_rgb
+                if (
+                    key == "front_camera"
+                    and self.enable_gaze_collection
+                    and self.gaze_display_markers
+                ):
+                    display_rgb = draw_gaze_display_markers(display_rgb)
+                display_images[key + "_full"] = display_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
                 _timing_log(f"get_rgb_and_dpth_im.{key}.process", t)
             except queue.Empty:
@@ -1613,22 +1630,3 @@ class FrankaEnv(gym.Env):
         self._episode_counter = self.data_recorder.episode_counter
         return start
 
-
-    def run_inline_sam2_and_label_v2(
-        self,
-        frame_ranges: List[Tuple[int, int]],
-        y_prompts_et: int = 20,
-        y_prompts_rs: int = 10,
-        rs_select_uses_same_keyset: bool = False,
-        random_seed: int = 0,
-    ):
-        if self.gaze_labeler is None:
-            print("[SAM2 v2] gaze collection disabled; skip.")
-            return
-        self.gaze_labeler.run_inline_v2(
-            frame_ranges,
-            y_prompts_et=y_prompts_et,
-            y_prompts_rs=y_prompts_rs,
-            rs_select_uses_same_keyset=rs_select_uses_same_keyset,
-            random_seed=random_seed,
-        )

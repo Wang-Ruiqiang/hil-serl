@@ -7,6 +7,8 @@ import time
 import cv2
 import numpy as np
 
+from franka_env.gaze.display_markers import detect_gaze_display_markers, marker_points_for_size
+
 try:
     import msgpack
     import zmq
@@ -215,6 +217,8 @@ class EpisodeDataRecorder:
                 )
 
             if self.enable_gaze:
+                et_img = None
+                gaze = self._gaze_for_frame(frame_id)
                 if (
                     len(self.et_world_payload_buffer) > frame_id
                     and self.et_world_payload_buffer[frame_id] is not None
@@ -222,11 +226,15 @@ class EpisodeDataRecorder:
                     et_img = self._decode_et_payload(self.et_world_payload_buffer[frame_id])
                     if et_img is not None:
                         cv2.imwrite(os.path.join(self.et_mirror_dir, f"{frame_id}.jpg"), et_img)
-                        et_gaze = self._draw_gaze_point(et_img, self._gaze_for_frame(frame_id))
+                        et_gaze = self._draw_gaze_point(et_img, gaze)
                         cv2.imwrite(os.path.join(self.et_gaze_dir, f"{frame_id}.jpg"), et_gaze)
-                if len(self.pupil_gaze_buffer) > frame_id and self.pupil_gaze_buffer[frame_id] is not None:
+                if gaze is not None:
                     with open(os.path.join(frame_dir, "pupil_gaze.json"), "w") as f:
-                        json.dump(self.pupil_gaze_buffer[frame_id], f, indent=2)
+                        json.dump(gaze, f, indent=2)
+                    gaze_contact = self._build_screen_marker_gaze_contact(et_img, gaze)
+                    if gaze_contact is not None:
+                        with open(os.path.join(frame_dir, "gaze_contact.json"), "w") as f:
+                            json.dump(gaze_contact, f, indent=2)
             if len(self.action_buffer) > frame_id:
                 np.savetxt(
                     os.path.join(frame_dir, "action.txt"),
@@ -311,6 +319,41 @@ class EpisodeDataRecorder:
             2,
         )
         return vis
+
+    def _build_screen_marker_gaze_contact(self, et_img, gaze):
+        if et_img is None or gaze is None:
+            return None
+
+        eye_uv = self._gaze_uv(et_img.shape, gaze)
+        if eye_uv is None:
+            return None
+
+        marker_points_eye = detect_gaze_display_markers(et_img)
+        if marker_points_eye is None:
+            return None
+
+        dst_w = int(getattr(self.env, "gaze_rs_save_width", 640))
+        dst_h = int(getattr(self.env, "gaze_rs_save_height", 480))
+        marker_points_rs = np.asarray(
+            getattr(self.env, "gaze_marker_points_realsense", marker_points_for_size(dst_w, dst_h)),
+            dtype=np.float32,
+        )
+        homography = cv2.getPerspectiveTransform(marker_points_eye, marker_points_rs)
+        eye_pt = np.asarray(eye_uv, dtype=np.float32).reshape(1, 1, 2)
+        rs_xy = cv2.perspectiveTransform(eye_pt, homography)[0, 0]
+        rs_xy[0] = np.clip(rs_xy[0], 0.0, max(0.0, dst_w - 1))
+        rs_xy[1] = np.clip(rs_xy[1], 0.0, max(0.0, dst_h - 1))
+
+        return {
+            "hit": True,
+            "source": "screen_marker_homography",
+            "gaze_uv_in_eye": [float(eye_uv[0]), float(eye_uv[1])],
+            "gaze_uv_in_realsense": [float(rs_xy[0]), float(rs_xy[1])],
+            "realsense_size": [dst_w, dst_h],
+            "marker_points_eye": marker_points_eye.tolist(),
+            "marker_points_realsense": marker_points_rs.tolist(),
+            "homography_eye_to_realsense": homography.tolist(),
+        }
 
     def _append_robot_state(self):
         try:

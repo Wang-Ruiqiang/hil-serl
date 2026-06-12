@@ -52,23 +52,40 @@ class GazeHeatmapPredictor(nn.Module):
 
 def heatmap_confidence_from_logits(
     logits: jnp.ndarray,
-    peak_mass_pixels: int = 64,
+    peak_mass_pixels: int = 256,
     eps: float = 1e-8,
 ):
-    """Estimate label-free gaze confidence from peak-localized heatmap mass."""
+    """Estimate label-free gaze confidence from heatmap peak contrast.
+
+    This score is intentionally not a correctness score because online HIL-RL has
+    no ground-truth gaze point. It measures whether the predicted heatmap has a
+    clear peak relative to its own background while still giving credit to wider
+    heatmaps whose peak location is stable.
+    """
     batch_size = logits.shape[0]
     heatmap = jax.nn.sigmoid(logits).reshape(batch_size, -1)
     saliency = heatmap - jnp.min(heatmap, axis=-1, keepdims=True)
     saliency = jnp.maximum(saliency, 0.0)
     num_pixels = saliency.shape[-1]
+
+    peak = jnp.max(saliency, axis=-1)
+    mean = jnp.mean(saliency, axis=-1)
+    std = jnp.std(saliency, axis=-1)
+    peak_z = (peak - mean) / (std + eps)
+    peak_contrast_score = jax.nn.sigmoid((peak_z - 2.0) / 1.5)
+
     k = min(int(peak_mass_pixels), int(num_pixels))
     topk_values, _ = jax.lax.top_k(saliency, k)
     topk_mass = jnp.sum(topk_values, axis=-1)
     total_mass = jnp.sum(saliency, axis=-1)
     uniform_mass = float(k) / float(num_pixels)
     peak_mass_ratio = topk_mass / (total_mass + eps)
-    calibrated = (peak_mass_ratio - uniform_mass) / max(1.0 - uniform_mass, eps)
-    return jnp.clip(calibrated, 0.0, 1.0)
+    peak_mass_score = (peak_mass_ratio - uniform_mass) / max(1.0 - uniform_mass, eps)
+    peak_mass_score = jnp.clip(peak_mass_score, 0.0, 1.0)
+
+    confidence = 0.75 * peak_contrast_score + 0.25 * peak_mass_score
+    has_signal = total_mass > eps
+    return jnp.where(has_signal, jnp.clip(confidence, 0.0, 1.0), 0.0)
 
 
 def _infer_heatmap_size(sample_observations: Dict[str, jnp.ndarray], image_keys: List[str]):

@@ -22,10 +22,10 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
+flags.DEFINE_integer("successes_needed", 10, "Number of successful demos to collect.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean("record_data", True, "Save robot/camera/tactile frame data while recording demos.")
-flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames while recording demos.")
+flags.DEFINE_boolean("record_gaze", True, "Collect Pupil gaze/world frames while recording demos.")
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
 
 
@@ -122,6 +122,16 @@ def _write_recording_metadata(env, exp_name, successes_needed, success_count, ep
         "episode_ranges": episode_records,
         "created_at": datetime.datetime.now().isoformat(),
     }
+    if hasattr(root_env, "gaze_marker_points_realsense"):
+        metadata["gaze_display_markers"] = bool(getattr(root_env, "gaze_display_markers", False))
+        metadata["gaze_marker_points_realsense"] = np.asarray(
+            root_env.gaze_marker_points_realsense,
+            dtype=float,
+        ).tolist()
+        metadata["gaze_realsense_size"] = [
+            int(getattr(root_env, "gaze_rs_save_width", 640)),
+            int(getattr(root_env, "gaze_rs_save_height", 480)),
+        ]
     frame_root.mkdir(parents=True, exist_ok=True)
     meta_path = frame_root / "recording_metadata.json"
     meta_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))

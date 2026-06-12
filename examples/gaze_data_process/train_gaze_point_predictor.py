@@ -187,6 +187,7 @@ def _heatmap_to_xy_jnp(heatmap: jnp.ndarray):
 
 def eval_gaze_heatmap_epoch(state, samples, batch_size: int, image_keys: list[str]):
     xy_err_sum = 0.0
+    xy_err_px_sum = 0.0
     heatmap_loss_sum = 0.0
     count = 0
     for batch in _val_batches(samples, batch_size, image_keys):
@@ -201,12 +202,18 @@ def eval_gaze_heatmap_epoch(state, samples, batch_size: int, image_keys: list[st
         xy_pred = np.asarray(_heatmap_to_xy_jnp(probs))
         y_xy = batch["xy"]
         heatmap_loss = ((probs_np - batch["heatmap"]) ** 2).mean(axis=(1, 2))
-        abs_err = np.abs(xy_pred - y_xy).sum(axis=-1)
+        abs_err = np.linalg.norm(xy_pred - y_xy, axis=-1)
+        abs_err_px = abs_err * float(max(FLAGS.image_width, FLAGS.image_height))
         heatmap_loss_sum += float(heatmap_loss.sum())
         xy_err_sum += float(abs_err.sum())
+        xy_err_px_sum += float(abs_err_px.sum())
         count += int(y_xy.shape[0])
 
-    return heatmap_loss_sum / max(1, count), xy_err_sum / max(1, count)
+    return (
+        heatmap_loss_sum / max(1, count),
+        xy_err_sum / max(1, count),
+        xy_err_px_sum / max(1, count),
+    )
 
 
 def main(_):
@@ -284,8 +291,9 @@ def main(_):
         (total_loss, (heatmap_loss, probs)), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
         new_state = state.apply_gradients(grads=grads)
         xy_pred = _heatmap_to_xy_jnp(probs)
-        xy_err = jnp.abs(xy_pred - y_xy).sum(axis=-1).mean()
-        return new_state, total_loss, heatmap_loss, xy_err
+        xy_err = jnp.linalg.norm(xy_pred - y_xy, axis=-1).mean()
+        xy_err_px = xy_err * float(max(FLAGS.image_width, FLAGS.image_height))
+        return new_state, total_loss, heatmap_loss, xy_err, xy_err_px
 
     best_val = {"xy_err": float("inf"), "epoch": -1}
     ckpt_dir = Path(FLAGS.checkpoint_dir).expanduser().resolve()
@@ -293,13 +301,14 @@ def main(_):
 
     for epoch in tqdm(range(FLAGS.num_epochs)):
         xy_err_sum = 0.0
+        xy_err_px_sum = 0.0
         total_sum = 0.0
         heatmap_loss_sum = 0.0
 
         for step in range(FLAGS.steps_per_epoch):
             batch = next(train_iter)
             rng, step_key = jax.random.split(rng)
-            state, total_loss, heatmap_loss, xy_err = train_step(
+            state, total_loss, heatmap_loss, xy_err, xy_err_px = train_step(
                 state,
                 batch,
                 step_key,
@@ -307,23 +316,25 @@ def main(_):
             total_sum += float(total_loss)
             heatmap_loss_sum += float(heatmap_loss)
             xy_err_sum += float(xy_err)
+            xy_err_px_sum += float(xy_err_px)
 
             if step % 100 == 0:
                 print(
                     f"[gaze-heatmap] epoch={epoch + 1} step={step + 1}/{FLAGS.steps_per_epoch} "
                     f"total={float(total_loss):.4f} heatmap_loss={float(heatmap_loss):.4f} "
-                    f"xy_err={float(xy_err):.4f}"
+                    f"xy_err={float(xy_err):.4f} xy_err_px={float(xy_err_px):.2f}"
                 )
 
         denom = max(1, FLAGS.steps_per_epoch)
         train_xy_err = xy_err_sum / denom
+        train_xy_err_px = xy_err_px_sum / denom
         print(
             f"[gaze-heatmap][train] epoch={epoch + 1} "
             f"total={total_sum / denom:.4f} heatmap_loss={heatmap_loss_sum / denom:.4f} "
-            f"xy_err={train_xy_err:.4f}"
+            f"xy_err={train_xy_err:.4f} xy_err_px={train_xy_err_px:.2f}"
         )
 
-        val_heatmap_loss, val_xy_err = eval_gaze_heatmap_epoch(
+        val_heatmap_loss, val_xy_err, val_xy_err_px = eval_gaze_heatmap_epoch(
             state,
             val_samples,
             FLAGS.batch_size,
@@ -331,7 +342,8 @@ def main(_):
         )
         print(
             f"[gaze-heatmap][val]   epoch={epoch + 1} "
-            f"heatmap_loss={val_heatmap_loss:.4f} xy_err={val_xy_err:.4f}"
+            f"heatmap_loss={val_heatmap_loss:.4f} xy_err={val_xy_err:.4f} "
+            f"xy_err_px={val_xy_err_px:.2f}"
         )
 
         if val_xy_err < best_val["xy_err"]:

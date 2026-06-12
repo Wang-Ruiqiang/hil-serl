@@ -6,6 +6,7 @@ import numpy as np
 from serl_robot_infra.franka_env.envs.wrappers import (
     MultiCameraBinaryRewardClassifierWrapper,
     KeyboardIntervention,
+    SpacemouseIntervention,
 )
 
 from franka_env.envs.franka_env import DefaultEnvConfig
@@ -68,6 +69,9 @@ class EnvConfig(DefaultEnvConfig):
     # ACTION_SCALE = (0.03, 0.03, 0.03)
     ACTION_SCALE = (0.005, 0.005, 0.005)
     DISPLAY_IMAGE = True
+    GAZE_DISPLAY_MARKERS = True
+    GAZE_RS_SAVE_WIDTH = 640
+    GAZE_RS_SAVE_HEIGHT = 480
     MAX_EPISODE_LENGTH = 100
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
 
@@ -103,8 +107,9 @@ class EnvConfig(DefaultEnvConfig):
     ENABLE_TACTILE = True
     # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
+    USE_SPACEMOUSE = True
     EXP_NAME = "tennis_ball_pick"
-    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-8-0"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-12-0"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -148,6 +153,8 @@ class TrainConfig(DefaultTrainingConfig):
         # env = GripperCloseEnv(env)
         if not fake_env:
             env = KeyboardIntervention(env)
+            if getattr(env_config, "USE_SPACEMOUSE", False):
+                env = SpacemouseIntervention(env)
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
