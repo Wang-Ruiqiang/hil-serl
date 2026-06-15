@@ -2,6 +2,7 @@ import os, sys
 import jax
 import jax.numpy as jnp
 import numpy as np
+from pathlib import Path
 
 from serl_robot_infra.franka_env.envs.wrappers import (
     MultiCameraBinaryRewardClassifierWrapper,
@@ -16,6 +17,15 @@ from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from experiments.config import DefaultTrainingConfig
 from experiments.tennis_ball_pick.wrapper import RAMEnv, GripperPenaltyWrapper
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REWARD_CLASSIFIER_DIR = REPO_ROOT / "examples" / "reward_classifier"
+
+
+def _reward_classifier_ckpt(name):
+    return str((REWARD_CLASSIFIER_DIR / name).resolve())
+
 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.2:5000/"
@@ -68,6 +78,7 @@ class EnvConfig(DefaultEnvConfig):
     # ACTION_SCALE = (0.01, 0.06, 1)
     # ACTION_SCALE = (0.03, 0.03, 0.03)
     ACTION_SCALE = (0.005, 0.005, 0.005)
+    CMD_POSE_RESYNC_THRESHOLD = 0.05
     DISPLAY_IMAGE = True
     GAZE_DISPLAY_MARKERS = True
     GAZE_RS_SAVE_WIDTH = 640
@@ -109,7 +120,7 @@ class EnvConfig(DefaultEnvConfig):
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     USE_SPACEMOUSE = True
     EXP_NAME = "tennis_ball_pick"
-    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-12-0"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-15-0"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -127,22 +138,22 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
+    def get_image_keys(self, enable_tactile=True):
+        if enable_tactile:
+            return ["front_camera", "tactile_data"]
+        return ["front_camera"]
+
+    def get_classifier_keys(self, enable_tactile=True):
+        return self.get_image_keys(enable_tactile)
+
     def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True, record_data=False, record_gaze=False):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
         env_config.ENABLE_DATA_RECORDING = bool(record_data)
         env_config.ENABLE_GAZE_COLLECTION = bool(record_gaze)
 
-        if enable_tactile:
-            self.image_keys = ["front_camera", "tactile_data"]
-            self.classifier_keys = ["front_camera", "tactile_data"]
-            self.classifier_key_weights = {"front_camera": 1.0, "tactile_data": 1.0}
-            self.image_weights = {"front_camera": 1.0, "tactile_data": 1.0}
-        else:
-            self.image_keys = ["front_camera"]
-            self.classifier_keys = ["front_camera"]
-            self.classifier_key_weights = {"front_camera": 1.0}
-            self.image_weights = {"front_camera": 1.0}
+        self.image_keys = self.get_image_keys(enable_tactile)
+        self.classifier_keys = self.get_classifier_keys(enable_tactile)
             
         
         env = RAMEnv(
@@ -161,55 +172,28 @@ class TrainConfig(DefaultTrainingConfig):
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             if enable_tactile:
-                classifier_pick = load_classifier_func(
+                reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick/"),
-                )
-                classifier_place = load_classifier_func(
-                    key=jax.random.PRNGKey(0),
-                    sample=env.observation_space.sample(),
-                    image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_place/"),
+                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
                 )
             else:
-                classifier_pick = load_classifier_func(
+                reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_ball_pick_no_tactile/"),
-                )
-                classifier_place = load_classifier_func(
-                    key=jax.random.PRNGKey(0),
-                    sample=env.observation_space.sample(),
-                    image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("../../classifier_ckpt_ball_place_no_tactile/"),
+                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick_no_tactile"),
                 )
             
             # input("debug")
             def reward_func(obs, is_pick=True):
-                # print("classifier obs = ", classifier(obs))
-                if is_pick:
-                    print("classifier = classifier_pick")
-                    classifier = classifier_pick
-                else:
-                    print("classifier = classifier_place")
-                    classifier = classifier_place
-                # classifier = classifier_place
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                print("sigmoid(classifier(obs) = ", sigmoid(classifier(obs)))
+                prob = sigmoid(reward_classifier(obs)).item()
+                print("sigmoid(reward_classifier(obs)) = ", prob)
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
-            
-                prob = sigmoid(classifier(obs)).item()
-                if is_pick:
-                    success = prob > 1
-                    reward = 1 if success else 0
-                else:
-                    success = prob > 1
-                    reward = 1 if success else 0
-                return reward
+                return int(prob > 0.95)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

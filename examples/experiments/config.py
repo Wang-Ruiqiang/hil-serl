@@ -31,7 +31,6 @@ class DefaultTrainingConfig:
 
     image_keys: List[str] = None
     classifier_keys: List[str] = None
-    classifier_key_weights: dict[str, float] | None = None
     proprio_keys: List[str] = None
     state_weights: List[float] | None = None
     

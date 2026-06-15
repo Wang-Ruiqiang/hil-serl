@@ -49,23 +49,23 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 193000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
-flags.DEFINE_boolean("save_video", True, "Save video.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_boolean("save_video", False, "Save video.")
+flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean(
     "use_gaze_relevance",
-    False,
+    True,
     "Use the gaze-relevance critic variant. False keeps the original HIL-RL/SAC logic.",
 )
 flags.DEFINE_float(
     "gaze_regularization_weight",
-    0.0,
+    0.2,
     "Weight for the gaze auxiliary critic loss when use_gaze_relevance=True.",
 )
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
-    "",
+    "examples/gaze_data_process/gaze_heatmap_ckpt",
     "Checkpoint directory for the frozen gaze heatmap predictor used by the actor.",
 )
 flags.DEFINE_boolean(
@@ -216,6 +216,44 @@ def _compute_gaze_transition_fields(obs, gaze_predictor, gaze_heatmap_shape):
     }
 
 
+def _gaze_xy_from_heatmap(gaze_heatmap):
+    gaze_heatmap = np.asarray(gaze_heatmap)
+    while gaze_heatmap.ndim > 2:
+        gaze_heatmap = gaze_heatmap[0]
+    if gaze_heatmap.ndim != 2 or gaze_heatmap.size == 0:
+        return None
+    if not np.isfinite(gaze_heatmap).all() or float(np.max(gaze_heatmap)) <= 0.0:
+        return None
+
+    y, x = np.unravel_index(int(np.argmax(gaze_heatmap)), gaze_heatmap.shape)
+    height, width = gaze_heatmap.shape
+    x_norm = 0.0 if width <= 1 else float(x) / float(width - 1)
+    y_norm = 0.0 if height <= 1 else float(y) / float(height - 1)
+    return x_norm, y_norm
+
+
+def _update_env_gaze_prediction_overlay(env, gaze_fields, gaze_predictor):
+    try:
+        set_overlay = env.unwrapped.set_gaze_prediction_overlay
+    except Exception:
+        return
+
+    if not FLAGS.use_gaze_relevance or gaze_predictor is None:
+        set_overlay(xy_norm=None)
+        return
+
+    _, image_key = gaze_predictor
+    xy_norm = _gaze_xy_from_heatmap(gaze_fields.get("gaze_heatmap"))
+    if xy_norm is None:
+        set_overlay(image_key=image_key, xy_norm=None)
+        return
+    set_overlay(
+        image_key=image_key,
+        xy_norm=xy_norm,
+        conf=float(gaze_fields.get("gaze_conf", 0.0)),
+    )
+
+
 def _ensure_gaze_transition_fields(transition, gaze_heatmap_shape):
     if not FLAGS.use_gaze_relevance:
         return transition
@@ -225,10 +263,17 @@ def _ensure_gaze_transition_fields(transition, gaze_heatmap_shape):
     return transition
 
 
+def _ensure_optional_transition_fields(transition):
+    transition = dict(transition)
+    transition.setdefault("grasp_penalty", np.float32(0.0))
+    transition.setdefault("robot_arm_penalty", np.float32(0.0))
+    return transition
+
+
 def _add_or_compute_gaze_transition_fields(transition, gaze_predictor, gaze_heatmap_shape):
+    transition = _ensure_optional_transition_fields(transition)
     if not FLAGS.use_gaze_relevance:
         return transition
-    transition = dict(transition)
     if "gaze_conf" not in transition or "gaze_heatmap" not in transition:
         transition.update(
             _compute_gaze_transition_fields(
@@ -508,7 +553,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                             # 任务1未完成就继续 S1 推理
                             continue
 
-                    print_green(f"obs[state] =  {obs['state']}")
+                    # print_green(f"obs[state] =  {obs['state']}")
                     actions = agent.sample_actions(
                         observations=jax.device_put(obs),
                         argmax=False,
@@ -548,13 +593,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                         ckpt_step += 2000
                         done_by_manual = False
 
-                        if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
-                            env.unwrapped.stop_cur_command()
+                        # if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
+                        #     env.unwrapped.stop_cur_command()
                         if FLAGS.exp_name == "tube_insertion":
                             env.open_hand(steps=20, step_time=0.05)
                             time.sleep(1.5)
-                        elif FLAGS.exp_name == "tennis_ball_pick":
-                            env.move_up()
+                        # elif FLAGS.exp_name == "tennis_ball_pick":
+                        #     env.move_up()
                         if FLAGS.save_video:
                             env.unwrapped.save_video_recording(episode)
                         mode = "S1_INFERENCE"
@@ -702,6 +747,16 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             # if actions[..., 6] < 0.0:
             #     random_action = np.random.uniform(0.0, 0.30)
             #     actions[..., 6] = random_action
+            gaze_fields = _compute_gaze_transition_fields(
+                obs,
+                gaze_predictor,
+                gaze_heatmap_shape,
+            )
+            _update_env_gaze_prediction_overlay(
+                env,
+                gaze_fields,
+                gaze_predictor,
+            )
             
         # Step environment
         with timer.context("step_env"):
@@ -744,16 +799,12 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 masks=1.0 - done,
                 dones=done,
             )
-            transition.update(
-                _compute_gaze_transition_fields(obs, gaze_predictor, gaze_heatmap_shape)
-            )
-            if 'grasp_penalty' in info:
-                transition['grasp_penalty']= info['grasp_penalty']
-            if 'robot_arm_penalty' in info:
-                transition['robot_arm_penalty']= info['robot_arm_penalty']
+            transition.update(gaze_fields)
+            transition["grasp_penalty"] = np.float32(info.get("grasp_penalty", 0.0))
+            transition["robot_arm_penalty"] = np.float32(info.get("robot_arm_penalty", 0.0))
             
-            print("info['robot_arm_penalty'] = ", info.get('robot_arm_penalty', 0))
-            print("info['grasp_penalty'] = ", info.get('grasp_penalty', 0))
+            # print("info['robot_arm_penalty'] = ", info.get('robot_arm_penalty', 0))
+            # print("info['grasp_penalty'] = ", info.get('grasp_penalty', 0))
             data_store.insert(transition)
             transitions.append(copy.deepcopy(transition))
             if already_intervened:
@@ -776,8 +827,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 already_intervened = False
                 client.update()
                 mode = "S1_INFERENCE"
-                if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
-                    env.unwrapped.stop_cur_command()
+                # if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
+                #     env.unwrapped.stop_cur_command()
                 if FLAGS.save_video:
                     env.unwrapped.save_video_recording(demo_count)
                 demo_count += 1
@@ -785,8 +836,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 if FLAGS.exp_name == "tube_insertion":
                     env.open_hand(steps=20, step_time=0.05)
                     time.sleep(1.5)
-                elif FLAGS.exp_name == "tennis_ball_pick":
-                    env.move_up()
+                # elif FLAGS.exp_name == "tennis_ball_pick":
+                #     env.move_up()
                 input("reset env")
                 obs, _ = env.reset()
                 
@@ -963,7 +1014,6 @@ def main(_):
         encoder_type=config.encoder_type,
         discount=config.discount,
         # state_weights=config.state_weights,
-        # image_weights=config.image_weights,
         **gaze_agent_kwargs,
     )
     include_robot_arm_penalty = True
@@ -977,7 +1027,6 @@ def main(_):
     #     encoder_type=config.encoder_type,
     #     discount=config.discount,
     #     # state_weights=config.state_weights,
-    #     # image_weights=config.image_weights,
     # )
     
     
@@ -1055,7 +1104,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tube-insertion-ablation-2-6",
+            project="tennis_ball_pick-6-15",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

@@ -50,6 +50,7 @@ class EpisodeDataRecorder:
         self.wrist_color_buffer = []
         self.wrist_depth_buffer = []
         self.joint_buffer = []
+        self.robot_ee_pose_buffer = []
         self.hand_state_buffer = []
         self.action_buffer = []
         self.rthumb_raw_buffer = []
@@ -209,6 +210,12 @@ class EpisodeDataRecorder:
 
             if len(self.joint_buffer) > frame_id:
                 np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
+            if len(self.robot_ee_pose_buffer) > frame_id:
+                np.savetxt(
+                    os.path.join(frame_dir, "robot_ee_pose.txt"),
+                    np.atleast_1d(self.robot_ee_pose_buffer[frame_id]),
+                    fmt="%.9f",
+                )
             if len(self.hand_state_buffer) > frame_id:
                 np.savetxt(
                     os.path.join(frame_dir, "hand_state.txt"),
@@ -367,7 +374,20 @@ class EpisodeDataRecorder:
             [self.env.joint_position, self.env.curr_leap_hand_pos],
             dtype=np.float32,
         )
+        try:
+            ee_pos, ee_quat = self.env.ros_interface.get_current_robot_ee()
+        except Exception:
+            ee_pos = getattr(self.env, "cur_position", np.zeros(3, dtype=np.float32))
+            ee_quat = getattr(self.env, "cur_orientation", np.array([0, 1, 0, 0], dtype=np.float32))
+        ee_pose = np.concatenate(
+            [
+                np.asarray(ee_pos, dtype=np.float32).reshape(3),
+                np.asarray(ee_quat, dtype=np.float32).reshape(4),
+            ],
+            dtype=np.float32,
+        )
         self.joint_buffer.append(copy.deepcopy(joint_pose))
+        self.robot_ee_pose_buffer.append(copy.deepcopy(ee_pose))
         self.hand_state_buffer.append(copy.deepcopy(self.env.hand_state))
         self.action_buffer.append(copy.deepcopy(self.env.current_action))
 

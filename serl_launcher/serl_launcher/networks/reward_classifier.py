@@ -49,7 +49,6 @@ def create_classifier(
     key: jnp.ndarray,
     sample: Dict,
     image_keys: List[str],
-    # image_key_weights: Dict[str, float] | None = None,
     n_way: int = 2,
 ):
     pretrained_encoder = resnetv1_configs["resnetv1-10-frozen"](
@@ -71,7 +70,6 @@ def create_classifier(
         use_proprio=False,
         enable_stacking=True,
         image_keys=image_keys,
-        # image_weights=image_key_weights,
     )
     if n_way == 2:
         classifier_def = BinaryClassifier(encoder_def=encoder_def)
@@ -141,7 +139,6 @@ def load_classifier_func(
     sample: Dict,
     image_keys: List[str],
     checkpoint_path: str,
-    # image_key_weights: Dict[str, float] | None = None,
     n_way: int = 2,
 ) -> Callable[[Dict], jnp.ndarray]:
     """

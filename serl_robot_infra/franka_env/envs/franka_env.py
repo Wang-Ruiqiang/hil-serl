@@ -30,8 +30,6 @@ from dmrobotics import Sensor as DMTacSensor
 from franka_env.gaze.display_markers import draw_gaze_display_markers, marker_points_for_size
 from franka_env.recording.episode_recorder import EpisodeDataRecorder
 
-# from examples.utils import read_utils
-
 
 class ImageDisplayer(threading.Thread):
     def __init__(self, queue, name):
@@ -53,7 +51,8 @@ class ImageDisplayer(threading.Thread):
             # cv2.waitKey(1)
             for k, v in img_array.items():
                 # img = cv2.resize(v, (320, 240))  # 每个窗口显示 320×240
-                img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
+                img = cv2.resize(v, (640, 480))  # 每个窗口显示 320×240
+                # img = cv2.resize(v, (1280, 960))  # 每个窗口显示 320×240
                 cv2.imshow(f"{self.name} - {k}", img)
 
             cv2.waitKey(1)
@@ -89,6 +88,7 @@ class DefaultEnvConfig:
     # GRASP_POSE: np.ndarray = np.zeros((6,))
     REWARD_THRESHOLD: np.ndarray = np.zeros((6,))
     ACTION_SCALE = np.zeros((3,))
+    CMD_POSE_RESYNC_THRESHOLD: float = 0.05
     DISPLAY_IMAGE: bool = True
     MAX_EPISODE_LENGTH: int = 200
     ENABLE_DATA_RECORDING: bool = False
@@ -338,6 +338,8 @@ class FrankaEnv(gym.Env):
             self.gaze_rs_save_width,
             self.gaze_rs_save_height,
         )
+        self.gaze_prediction_overlay = None
+        self.gaze_prediction_lock = threading.Lock()
         self.enable_data_recording = bool(
             getattr(config, "ENABLE_DATA_RECORDING", False)
         ) or self.enable_gaze_collection
@@ -348,6 +350,9 @@ class FrankaEnv(gym.Env):
         self.lastsent = time.time()
         self.hz = hz
         self.grip_loop = self.config.LOOP_CONTROL if hasattr(self.config, 'LOOP_CONTROL') else False
+        self.cmd_pose_resync_threshold = float(
+            getattr(config, "CMD_POSE_RESYNC_THRESHOLD", 0.05)
+        )
         self.current_action = np.zeros(7, dtype=np.float32)
 
         self.save_video = save_video
@@ -626,8 +631,15 @@ class FrankaEnv(gym.Env):
 
         self.curr_path_length += 1
         t = time.time()
-        self._update_cur_position(self.nextpos)
+        self._update_cur_position(self.nextpos, wait=False)
         _timing_log("step.update_cur_position", t)
+        tracking_error = float(np.linalg.norm(self.cmd_pose[:3] - self.cur_position))
+        if tracking_error > self.cmd_pose_resync_threshold:
+            print(
+                "[WARN] cmd_pose tracking error too large; "
+                f"resync cmd_pose position to robot topic. error={tracking_error:.4f}m"
+            )
+            self.cmd_pose[:3] = np.asarray(self.cur_position, dtype=np.float32).copy()
         # t_end = time.time()
         # print(f"[update_position End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("after publish arm action cur_position = ", self.cur_position)
@@ -1116,6 +1128,68 @@ class FrankaEnv(gym.Env):
         else:
             # print(f'Goal not reached, the difference is {delta}, the desired threshold is {self._REWARD_THRESHOLD}')
             return False
+
+    def set_gaze_prediction_overlay(
+        self,
+        image_key: str = "front_camera",
+        xy_norm: Tuple[float, float] | None = None,
+        conf: float | None = None,
+    ):
+        """Set the gaze prediction point drawn by the RGB display thread."""
+        with self.gaze_prediction_lock:
+            if xy_norm is None:
+                self.gaze_prediction_overlay = None
+                return
+            self.gaze_prediction_overlay = {
+                "image_key": image_key,
+                "xy_norm": (float(xy_norm[0]), float(xy_norm[1])),
+                "conf": None if conf is None else float(conf),
+            }
+
+    def _draw_gaze_prediction_overlay(self, image_bgr: np.ndarray, image_key: str):
+        with self.gaze_prediction_lock:
+            overlay = None if self.gaze_prediction_overlay is None else dict(self.gaze_prediction_overlay)
+        if overlay is None or overlay.get("image_key") != image_key:
+            return image_bgr
+
+        xy_norm = overlay.get("xy_norm")
+        if xy_norm is None:
+            return image_bgr
+
+        x_norm, y_norm = xy_norm
+        if not (np.isfinite(x_norm) and np.isfinite(y_norm)):
+            return image_bgr
+
+        image_bgr = image_bgr.copy()
+        height, width = image_bgr.shape[:2]
+        x = int(np.clip(round(x_norm * (width - 1)), 0, width - 1))
+        y = int(np.clip(round(y_norm * (height - 1)), 0, height - 1))
+
+        color = (0, 0, 255)
+        cv2.drawMarker(
+            image_bgr,
+            (x, y),
+            color,
+            markerType=cv2.MARKER_CROSS,
+            markerSize=32,
+            thickness=3,
+            line_type=cv2.LINE_AA,
+        )
+        cv2.circle(image_bgr, (x, y), 7, (0, 255, 0), 2, cv2.LINE_AA)
+        label = "gaze pred"
+        if overlay.get("conf") is not None:
+            label += f" conf={overlay['conf']:.2f}"
+        cv2.putText(
+            image_bgr,
+            label,
+            (min(x + 12, max(0, width - 220)), max(24, y - 12)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+        return image_bgr
     
 
     def get_im(self, return_full_images: bool = False) -> Dict[str, np.ndarray]:
@@ -1152,6 +1226,7 @@ class FrankaEnv(gym.Env):
                     and self.gaze_display_markers
                 ):
                     display_rgb = draw_gaze_display_markers(display_rgb)
+                display_rgb = self._draw_gaze_prediction_overlay(display_rgb, key)
                 display_images[key + "_full"] = display_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
                 _timing_log(f"get_im.{key}.process", t)
@@ -1224,6 +1299,7 @@ class FrankaEnv(gym.Env):
                     and self.gaze_display_markers
                 ):
                     display_rgb = draw_gaze_display_markers(display_rgb)
+                display_rgb = self._draw_gaze_prediction_overlay(display_rgb, key)
                 display_images[key + "_full"] = display_rgb
                 full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
                 _timing_log(f"get_rgb_and_dpth_im.{key}.process", t)
@@ -1438,7 +1514,7 @@ class FrankaEnv(gym.Env):
             time.sleep(step_time)
             
 
-    def _update_cur_position(self, arm_action, timeout=10.0, wait_threshold=0.05):
+    def _update_cur_position(self, arm_action=None, timeout=10.0, wait_threshold=0.05, wait=True):
         """
         Internal function to get the latest state of the robot and its gripper.
         """
@@ -1451,8 +1527,12 @@ class FrankaEnv(gym.Env):
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
         # print("in _update_cur_position curr_leap_hand_pos = ", self.curr_leap_hand_pos)
 
-        diff = np.asarray(arm_action[:3], dtype=np.float32) - np.asarray(self.cur_position, dtype=np.float32)
-        while np.max(np.abs(diff)) > wait_threshold:
+        if wait and arm_action is not None:
+            diff = np.asarray(arm_action[:3], dtype=np.float32) - np.asarray(self.cur_position, dtype=np.float32)
+        else:
+            diff = np.zeros(3, dtype=np.float32)
+
+        while wait and np.max(np.abs(diff)) > wait_threshold:
             if time.time() - start > timeout:
                 print("[WARN] 等待机械臂到位超时")
                 break
@@ -1462,7 +1542,7 @@ class FrankaEnv(gym.Env):
             # self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
             hand_joint_msg = self.ros_interface.get_current_leap_position()
             self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-            diff = np.linalg.norm(arm_action[:3] - self.cur_position)
+            diff = np.asarray(arm_action[:3], dtype=np.float32) - np.asarray(self.cur_position, dtype=np.float32)
         
         # if self.exp_name =="twist_bottle_cap":
         #     self.hand_state = self.gripper_unwrapped_phase
@@ -1520,8 +1600,9 @@ class FrankaEnv(gym.Env):
 
     def close(self):
         self.enable_gaze_collection = False
-        if self.data_recorder is not None:
-            self.data_recorder.close()
+        data_recorder = getattr(self, "data_recorder", None)
+        if data_recorder is not None:
+            data_recorder.close()
         if getattr(self, "enable_tactile", False):
             self.close_tac_processing()
         if hasattr(self, 'listener'):
@@ -1629,4 +1710,3 @@ class FrankaEnv(gym.Env):
         self._cur_ep_start = self.data_recorder.cur_ep_start
         self._episode_counter = self.data_recorder.episode_counter
         return start
-

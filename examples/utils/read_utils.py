@@ -9,13 +9,6 @@ import re
 from collections import deque
 from scipy.spatial.transform import Rotation as R
 
-palm_lower2denso_end_tf = np.array([
-    [1.00000000e+00, -3.26589794e-07, 0.00000000e+00, -6.00952496e-02],
-    [-3.26589379e-07, -9.99998732e-01, 1.59265292e-03, -3.39726879e-02],
-    [-5.20144187e-10, -1.59265292e-03, -9.99998732e-01, -1.69276725e-01],
-    [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
-])
-
 # IMAGE_CROP = {
 #     "front_camera": lambda img: img[60:340, 140:420],
 #     "wrist_camera": lambda img: img[0:480, 120:600],
@@ -42,7 +35,6 @@ TUBE_INSERTION_CLASSIFIER_IMAGE_CROP = {
 
 resize_dim = (128, 128)
 tactile_resize_dim = (128, 128)
-
 
 
 class ObsHistoryBuffer:
@@ -86,7 +78,33 @@ class ObsHistoryBuffer:
         return stacked_obs
     
 
-def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="tennis_ball_pick"):
+def _default_image_keys(exp_name, enable_tactile):
+    if exp_name in ("tube_insertion", "twist_bottle_cap", "lid_grip"):
+        image_keys = ["front_camera", "wrist_camera"]
+    else:
+        image_keys = ["front_camera"]
+    if enable_tactile:
+        image_keys.append("tactile_data")
+    return image_keys
+
+
+def _read_resized_rgb(image_path, crop_fn=None):
+    image = cv2.imread(image_path) if os.path.exists(image_path) else None
+    if image is None:
+        raise FileNotFoundError(f"Missing or unreadable RGB image: {image_path}")
+    if crop_fn is not None:
+        image = crop_fn(image)
+    image = cv2.resize(image, resize_dim)
+    return image[..., ::-1]
+
+
+def get_frame_data(
+    frame_path,
+    robot_urdf_path,
+    enable_tactile=False,
+    exp_name="tennis_ball_pick",
+    image_keys=None,
+):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
     index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
@@ -96,14 +114,17 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
-    color_image = cv2.imread(color_image_path) if os.path.exists(color_image_path) else None
-    color_image_wrist = cv2.imread(color_image_path_wrist) if os.path.exists(color_image_path_wrist) else None
+    image_keys = list(image_keys) if image_keys is not None else _default_image_keys(exp_name, enable_tactile)
     # color_image2 = cv2.imread(color_image_path2) if os.path.exists(color_image_path) else None
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
-    if enable_tactile:
+    if "tactile_data" in image_keys:
         index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
         thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
+        if index_heat_map_image is None:
+            raise FileNotFoundError(f"Missing or unreadable tactile image: {index_heat_map_path}")
+        if thumb_heat_map_image is None:
+            raise FileNotFoundError(f"Missing or unreadable tactile image: {thumb_heat_map_path}")
 
         index_heat_map_image = cv2.resize(index_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
         thumb_heat_map_image = cv2.resize(thumb_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
@@ -112,7 +133,9 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
     action_file_path = os.path.join(frame_path, "action.txt")
         
-    record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
+    record_success_failed_file = os.path.join(frame_path, "is_recorded_success.txt")
+    if not os.path.exists(record_success_failed_file):
+        record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
     is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
     
@@ -129,7 +152,6 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
             hand_joint = all_joint_values[6:]
     
     tcp_pos, tcp_ori = kinematics_utils.comupute_forward_kinematics(all_joint_values, robot_urdf_path)
-    tcp_pos, tcp_ori = kinematics_utils.apply_transformation(tcp_pos, tcp_ori, palm_lower2denso_end_tf)
 
     # if exp_name == "twist_bottle_cap":
     #     state_flattened = np.concatenate([
@@ -156,65 +178,30 @@ def get_frame_data(frame_path, robot_urdf_path, enable_tactile=False, exp_name="
     elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
         IMAGE_CROP = BOTTLE_TWIST_IMAGE_CROP
         CLASSIFIER_IMAGE_CROP = BOTTLE_TWIST_IMAGE_CROP
-        
-    cropped_front = IMAGE_CROP["front_camera"](color_image) if "front_camera" in IMAGE_CROP else color_image
-    cropped_wrist = IMAGE_CROP["wrist_camera"](color_image_wrist) if "wrist_camera" in IMAGE_CROP else color_image_wrist
 
-    cropped_front_classifier = CLASSIFIER_IMAGE_CROP["front_classifier"](color_image) if "front_classifier" in CLASSIFIER_IMAGE_CROP else color_image
-    # cropped_wrist_classifier = CLASSIFIER_IMAGE_CROP["wrist_classifier"](color_image_wrist) if "wrist_classifier" in CLASSIFIER_IMAGE_CROP else color_image_wrist
+    obs = {}
+    for image_key in image_keys:
+        if image_key == "front_camera":
+            obs[image_key] = _read_resized_rgb(
+                color_image_path,
+                IMAGE_CROP.get("front_camera"),
+            )
+        elif image_key == "wrist_camera":
+            obs[image_key] = _read_resized_rgb(
+                color_image_path_wrist,
+                IMAGE_CROP.get("wrist_camera"),
+            )
+        elif image_key == "front_classifier":
+            obs[image_key] = _read_resized_rgb(
+                color_image_path,
+                CLASSIFIER_IMAGE_CROP.get("front_classifier", IMAGE_CROP.get("front_camera")),
+            )
+        elif image_key == "tactile_data":
+            obs[image_key] = heatmap_canvas
+        else:
+            raise ValueError(f"Unsupported image key for recorded frame export: {image_key}")
 
-    resized_image = cv2.resize(cropped_front, resize_dim)
-    resized_image_wrist = cv2.resize(cropped_wrist, resize_dim)
-    
-    resized_image_front_classifier = cv2.resize(cropped_front_classifier, resize_dim)
-    # resized_image_wrist_classifier = cv2.resize(cropped_wrist_classifier, resize_dim)
-    
-    front_camera_image = resized_image[..., ::-1]
-    wrist_camera_image = resized_image_wrist[..., ::-1]
-    front_classifier_image = resized_image_front_classifier[..., ::-1]
-    # wrist_classifier_image = resized_image_wrist_classifier[..., ::-1]
-    
-    if not enable_tactile:
-        if exp_name == "tennis_ball_pick" or exp_name == "tennis_ball_place":
-            obs = {
-                "front_camera": front_camera_image,
-                "state": state_flattened
-            }
-        elif exp_name == "tube_insertion":
-            obs = {
-                "front_camera": front_camera_image,
-                "wrist_camera": wrist_camera_image,
-                # "front_classifier": front_classifier_image,
-                "state": state_flattened
-            }
-        elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
-            obs = {
-                "front_camera": front_camera_image,
-                "wrist_camera": wrist_camera_image,
-                "state": state_flattened
-            }
-    else:
-        if exp_name == "tennis_ball_pick" or exp_name == "tennis_ball_place":
-            obs = {
-                "front_camera": front_camera_image,
-                "tactile_data": heatmap_canvas,
-                "state": state_flattened
-            }
-        elif exp_name == "tube_insertion":
-            obs = {
-                "front_camera": front_camera_image,
-                "wrist_camera": wrist_camera_image,
-                # "front_classifier": front_classifier_image,
-                "tactile_data": heatmap_canvas,
-                "state": state_flattened
-            }
-        elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
-            obs = {
-                "front_camera": front_camera_image,
-                "wrist_camera": wrist_camera_image,
-                "tactile_data": heatmap_canvas,
-                "state": state_flattened
-            }
+    obs["state"] = state_flattened
     # debug_imshow(obs)
     # print("state_flattened = ", state_flattened)
     # cv2.imwrite("front_camera_image.jpg", front_camera_image)
