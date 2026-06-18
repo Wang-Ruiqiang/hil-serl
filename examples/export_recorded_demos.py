@@ -103,18 +103,21 @@ def _read_rgb(path: Path, size=(128, 128)):
     return image_bgr[..., ::-1].astype(np.uint8)
 
 
+def _read_tactile_depth(path: Path):
+    depth = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if depth is None:
+        raise FileNotFoundError(f"Missing or unreadable tactile depth image: {path}")
+    if depth.ndim == 2:
+        depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2BGR)
+    elif depth.ndim == 3 and depth.shape[-1] == 4:
+        depth = depth[..., :3]
+    return cv2.resize(depth.astype(np.uint8, copy=False), (128, 128), interpolation=cv2.INTER_LINEAR)
+
+
 def _read_tactile(frame_dir: Path):
-    thumb_path = frame_dir / "thumb_heat_map.jpg"
-    index_path = frame_dir / "index_heat_map.jpg"
-    thumb = cv2.imread(str(thumb_path))
-    index = cv2.imread(str(index_path))
-    if thumb is None:
-        raise FileNotFoundError(f"Missing or unreadable tactile image: {thumb_path}")
-    if index is None:
-        raise FileNotFoundError(f"Missing or unreadable tactile image: {index_path}")
-    thumb = cv2.resize(thumb, (128, 128), interpolation=cv2.INTER_LINEAR)
-    index = cv2.resize(index, (128, 128), interpolation=cv2.INTER_LINEAR)
-    return cv2.hconcat([thumb, index]).astype(np.uint8)
+    thumb = _read_tactile_depth(frame_dir / "thumb_depth_image.png")
+    index = _read_tactile_depth(frame_dir / "index_depth_image.png")
+    return np.concatenate([thumb, index], axis=1).astype(np.uint8)
 
 
 def _read_ee_pose(frame_dir: Path, robot_urdf_path: str):

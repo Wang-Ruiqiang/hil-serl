@@ -56,9 +56,9 @@ class EpisodeDataRecorder:
         self.rthumb_raw_buffer = []
         self.rindex_raw_buffer = []
         self.rmiddle_raw_buffer = []
-        self.rthumb_heatmap_buffer = []
-        self.rindex_heatmap_buffer = []
-        self.rmiddle_heatmap_buffer = []
+        self.rthumb_depth_buffer = []
+        self.rindex_depth_buffer = []
+        self.rmiddle_depth_buffer = []
         self.et_world_payload_buffer = []
         self.pupil_gaze_buffer = []
 
@@ -139,6 +139,13 @@ class EpisodeDataRecorder:
         finally:
             self.cur_ep_start = None
 
+    def _write_image(self, path, image):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        ok = cv2.imwrite(path, image)
+        if not ok:
+            print(f"[EpisodeDataRecorder][WARN] failed to write image: {path}")
+        return ok
+
     def save_frame(self, images=None, depth_images=None):
         frame_id = int(self.global_frame_id)
         t_total = time.time()
@@ -180,33 +187,33 @@ class EpisodeDataRecorder:
             os.makedirs(frame_dir, exist_ok=True)
 
             if len(self.front_color_buffer) > frame_id:
-                cv2.imwrite(os.path.join(frame_dir, "color_image.jpg"), self.front_color_buffer[frame_id])
+                self._write_image(os.path.join(frame_dir, "color_image.jpg"), self.front_color_buffer[frame_id])
                 if self.enable_gaze:
-                    cv2.imwrite(os.path.join(self.rs_mirror_dir, f"{frame_id}.jpg"), self.front_color_buffer[frame_id])
+                    self._write_image(os.path.join(self.rs_mirror_dir, f"{frame_id}.jpg"), self.front_color_buffer[frame_id])
                 if len(self.front_depth_buffer) > frame_id and self.front_depth_buffer[frame_id] is not None:
-                    cv2.imwrite(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
+                    self._write_image(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
             if len(self.side_color_buffer) > frame_id:
-                cv2.imwrite(os.path.join(frame_dir, "color_image3.jpg"), self.side_color_buffer[frame_id])
+                self._write_image(os.path.join(frame_dir, "color_image3.jpg"), self.side_color_buffer[frame_id])
                 if len(self.side_depth_buffer) > frame_id and self.side_depth_buffer[frame_id] is not None:
-                    cv2.imwrite(os.path.join(frame_dir, "depth_image3.png"), self.side_depth_buffer[frame_id])
+                    self._write_image(os.path.join(frame_dir, "depth_image3.png"), self.side_depth_buffer[frame_id])
             if len(self.wrist_color_buffer) > frame_id:
-                cv2.imwrite(os.path.join(frame_dir, "color_image2.jpg"), self.wrist_color_buffer[frame_id])
+                self._write_image(os.path.join(frame_dir, "color_image2.jpg"), self.wrist_color_buffer[frame_id])
                 if len(self.wrist_depth_buffer) > frame_id and self.wrist_depth_buffer[frame_id] is not None:
-                    cv2.imwrite(os.path.join(frame_dir, "depth_image2.png"), self.wrist_depth_buffer[frame_id])
+                    self._write_image(os.path.join(frame_dir, "depth_image2.png"), self.wrist_depth_buffer[frame_id])
 
             if self.env.enable_tactile:
                 if len(self.rthumb_raw_buffer) > frame_id:
-                    cv2.imwrite(os.path.join(frame_dir, "thumb_raw_image.jpg"), self.rthumb_raw_buffer[frame_id])
-                if len(self.rthumb_heatmap_buffer) > frame_id:
-                    cv2.imwrite(os.path.join(frame_dir, "thumb_heat_map.jpg"), self.rthumb_heatmap_buffer[frame_id])
+                    self._write_image(os.path.join(frame_dir, "thumb_raw_image.jpg"), self.rthumb_raw_buffer[frame_id])
+                if len(self.rthumb_depth_buffer) > frame_id:
+                    self._write_image(os.path.join(frame_dir, "thumb_depth_image.png"), self.rthumb_depth_buffer[frame_id])
                 if len(self.rindex_raw_buffer) > frame_id:
-                    cv2.imwrite(os.path.join(frame_dir, "index_raw_image.jpg"), self.rindex_raw_buffer[frame_id])
-                if len(self.rindex_heatmap_buffer) > frame_id:
-                    cv2.imwrite(os.path.join(frame_dir, "index_heat_map.jpg"), self.rindex_heatmap_buffer[frame_id])
+                    self._write_image(os.path.join(frame_dir, "index_raw_image.jpg"), self.rindex_raw_buffer[frame_id])
+                if len(self.rindex_depth_buffer) > frame_id:
+                    self._write_image(os.path.join(frame_dir, "index_depth_image.png"), self.rindex_depth_buffer[frame_id])
                 if getattr(self.env, "enable_dm_tac_middle", False) and len(self.rmiddle_raw_buffer) > frame_id:
-                    cv2.imwrite(os.path.join(frame_dir, "middle_raw_image.jpg"), self.rmiddle_raw_buffer[frame_id])
-                if getattr(self.env, "enable_dm_tac_middle", False) and len(self.rmiddle_heatmap_buffer) > frame_id:
-                    cv2.imwrite(os.path.join(frame_dir, "middle_heat_map.jpg"), self.rmiddle_heatmap_buffer[frame_id])
+                    self._write_image(os.path.join(frame_dir, "middle_raw_image.jpg"), self.rmiddle_raw_buffer[frame_id])
+                if getattr(self.env, "enable_dm_tac_middle", False) and len(self.rmiddle_depth_buffer) > frame_id:
+                    self._write_image(os.path.join(frame_dir, "middle_depth_image.png"), self.rmiddle_depth_buffer[frame_id])
 
             if len(self.joint_buffer) > frame_id:
                 np.savetxt(os.path.join(frame_dir, "right_arm_joint.txt"), self.joint_buffer[frame_id])
@@ -232,9 +239,9 @@ class EpisodeDataRecorder:
                 ):
                     et_img = self._decode_et_payload(self.et_world_payload_buffer[frame_id])
                     if et_img is not None:
-                        cv2.imwrite(os.path.join(self.et_mirror_dir, f"{frame_id}.jpg"), et_img)
+                        self._write_image(os.path.join(self.et_mirror_dir, f"{frame_id}.jpg"), et_img)
                         et_gaze = self._draw_gaze_point(et_img, gaze)
-                        cv2.imwrite(os.path.join(self.et_gaze_dir, f"{frame_id}.jpg"), et_gaze)
+                        self._write_image(os.path.join(self.et_gaze_dir, f"{frame_id}.jpg"), et_gaze)
                 if gaze is not None:
                     with open(os.path.join(frame_dir, "pupil_gaze.json"), "w") as f:
                         json.dump(gaze, f, indent=2)
@@ -409,11 +416,11 @@ class EpisodeDataRecorder:
             return
         self.rthumb_raw_buffer.append(copy.deepcopy(self.env.thumb_raw_img))
         self.rindex_raw_buffer.append(copy.deepcopy(self.env.index_raw_img))
-        self.rthumb_heatmap_buffer.append(copy.deepcopy(self.env.thumb_heat_map))
-        self.rindex_heatmap_buffer.append(copy.deepcopy(self.env.index_heat_map))
+        self.rthumb_depth_buffer.append(copy.deepcopy(self.env.thumb_depth_img))
+        self.rindex_depth_buffer.append(copy.deepcopy(self.env.index_depth_img))
         if getattr(self.env, "enable_dm_tac_middle", False):
             self.rmiddle_raw_buffer.append(copy.deepcopy(self.env.middle_raw_img))
-            self.rmiddle_heatmap_buffer.append(copy.deepcopy(self.env.middle_heat_map))
+            self.rmiddle_depth_buffer.append(copy.deepcopy(self.env.middle_depth_img))
 
     def _append_mirror_and_gaze_buffers(self, images):
         if not self.enable_gaze:

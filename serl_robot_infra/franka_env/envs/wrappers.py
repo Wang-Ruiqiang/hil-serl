@@ -255,6 +255,7 @@ class SpacemouseIntervention(gym.ActionWrapper):
         self.left = False
         self.right = False
         self.action_indices = action_indices
+        self.translation_deadband = 0.03
 
     def action(self, action: np.ndarray) -> tuple[np.ndarray, bool]:
         """
@@ -266,7 +267,8 @@ class SpacemouseIntervention(gym.ActionWrapper):
         expert_a, buttons = self.expert.get_action()
         self.left = bool(buttons[0]) if len(buttons) > 0 else False
         self.right = bool(buttons[1]) if len(buttons) > 1 else False
-        intervened = bool(np.linalg.norm(expert_a) > 0.001 or self.left or self.right)
+        translation_active = bool(np.linalg.norm(expert_a[:3]) > self.translation_deadband)
+        intervened = bool(translation_active or self.left or self.right)
 
         if not intervened:
             return action, False

@@ -103,6 +103,7 @@ class DefaultEnvConfig:
     DM_TAC_INDEX_SERIAL_ID = "2501130556"
     DM_TAC_MIDDLE_SERIAL_ID = "2501130530"
     ENABLE_DM_TAC_MIDDLE = False
+    DM_TAC_DEPTH_SCALE: float = 0.25
 
 
 ##############################################################################
@@ -446,21 +447,22 @@ class FrankaEnv(gym.Env):
                 self.middle_tactile_sensor = DMTacSensor(str(middle_serial))
 
             self.tactile_size = (128, 128)
+            self.tactile_depth_scale = float(getattr(config, "DM_TAC_DEPTH_SCALE", 0.25))
             self.thumb_raw_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
             self.index_raw_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
             self.middle_raw_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
 
-            self.thumb_heat_map = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
-            self.index_heat_map = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
-            self.middle_heat_map = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.thumb_depth_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.index_depth_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
+            self.middle_depth_img = np.zeros((*self.tactile_size, 3), dtype=np.uint8)
 
             self.rthumb_raw_buffer = []  # Right thumb raw tactile image
             self.rindex_raw_buffer = []  # Right index raw tactile image
             self.rmiddle_raw_buffer = []
 
-            self.rthumb_heatmap_buffer = []  # Right thumb heatmap tactile image
-            self.rindex_heatmap_buffer = []  # Right index heatmap tactile image
-            self.rmiddle_heatmap_buffer = []
+            self.rthumb_depth_buffer = []  # Right thumb depth tactile image
+            self.rindex_depth_buffer = []  # Right index depth tactile image
+            self.rmiddle_depth_buffer = []
 
             self.tac_thumb_lock = threading.Lock()
             self.tac_index_lock = threading.Lock()
@@ -619,7 +621,7 @@ class FrankaEnv(gym.Env):
 
         # print("target_hand_pos = ", target_hand_pos)
 
-        self.ros_interface.arm_interpolate_and_publish(self.cmd_pose, self.nextpos, 0.006, 10)
+        self.ros_interface.arm_interpolate_and_publish(self.cmd_pose, self.nextpos, 0.007, 10)
         # self.ros_interface.publish_arm_action(self.nextpos)
         self.cmd_pose = self.nextpos.copy()
 
@@ -1244,11 +1246,11 @@ class FrankaEnv(gym.Env):
         #             "wrist_camera": display_images["wrist_camera_full"],
         #         }
         if self.enable_tactile:
-            heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-            full_res_images["tactile_data"] = heat_map
-            video_images["tactile_data"] = heat_map
+            tactile_depth = np.concatenate([self.thumb_depth_img, self.index_depth_img], axis=1)
+            full_res_images["tactile_data"] = tactile_depth
+            video_images["tactile_data"] = tactile_depth
             with self.tac_index_lock:
-                display_images["heat_map"] = heat_map
+                display_images["tactile_depth"] = tactile_depth
         if self.display_image:
             t = time.time()
             self.img_queue.put(display_images)
@@ -1312,8 +1314,8 @@ class FrankaEnv(gym.Env):
                 return self.get_rgb_and_dpth_im(show_display=show_display)
 
         if show_display and self.enable_tactile:
-            heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-            display_images["heat_map"] = heat_map
+            tactile_depth = np.concatenate([self.thumb_depth_img, self.index_depth_img], axis=1)
+            display_images["tactile_depth"] = tactile_depth
 
         if show_display and self.display_image:
             t = time.time()
@@ -1327,25 +1329,28 @@ class FrankaEnv(gym.Env):
         depth = sensor.getDepth()
 
         raw_img = np.asarray(raw_img)
-        if raw_img.ndim == 2:
-            raw_img = cv2.cvtColor(raw_img, cv2.COLOR_GRAY2BGR)
-        elif raw_img.ndim == 3 and raw_img.shape[-1] == 4:
-            raw_img = raw_img[..., :3]
-        raw_img = cv2.resize(raw_img.astype(np.uint8, copy=False), img_size, interpolation=cv2.INTER_LINEAR)
+        raw_img = raw_img.astype(np.uint8, copy=False)
+        if raw_img.shape[:2] != img_size[::-1]:
+            raw_img = cv2.resize(raw_img, img_size, interpolation=cv2.INTER_LINEAR)
 
         depth = np.asarray(depth, dtype=np.float32)
-        heat_map_input = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
-        heat_map_input = np.uint8(np.nan_to_num(heat_map_input))
-        heat_map = cv2.applyColorMap(heat_map_input, cv2.COLORMAP_JET)
-        heat_map = cv2.resize(heat_map, img_size, interpolation=cv2.INTER_LINEAR)
+        depth_input = np.nan_to_num(
+            depth * self.tactile_depth_scale * 255.0,
+            nan=0.0,
+            posinf=255.0,
+            neginf=0.0,
+        )
+        depth_input = np.clip(depth_input, 0, 255).astype(np.uint8)
+        depth_img = cv2.applyColorMap(depth_input, cv2.COLORMAP_HOT)
+        depth_img = cv2.resize(depth_img, img_size, interpolation=cv2.INTER_LINEAR)
 
-        return raw_img, heat_map
+        return raw_img, depth_img
     
 
     def process_thumb_tactile(self):
         while getattr(self, "tac_running", True):
             try:
-                thumb_raw_img, thumb_heat_map = self.process_tactile_data(self.thumb_tactile_sensor, self.tactile_size)
+                thumb_raw_img, thumb_depth_img = self.process_tactile_data(self.thumb_tactile_sensor, self.tactile_size)
             except Exception as exc:
                 print(f"[DM-TAC][thumb] {exc}")
                 time.sleep(0.1)
@@ -1353,7 +1358,7 @@ class FrankaEnv(gym.Env):
 
             with self.tac_thumb_lock:
                 self.thumb_raw_img = thumb_raw_img
-                self.thumb_heat_map = thumb_heat_map
+                self.thumb_depth_img = thumb_depth_img
             time.sleep(0.01)
 
 
@@ -1361,7 +1366,7 @@ class FrankaEnv(gym.Env):
         # Process index tactile data
         while getattr(self, "tac_running", True):
             try:
-                index_raw_img, index_heat_map = self.process_tactile_data(self.index_tactile_sensor, self.tactile_size)
+                index_raw_img, index_depth_img = self.process_tactile_data(self.index_tactile_sensor, self.tactile_size)
             except Exception as exc:
                 print(f"[DM-TAC][index] {exc}")
                 time.sleep(0.1)
@@ -1369,7 +1374,7 @@ class FrankaEnv(gym.Env):
 
             with self.tac_index_lock:
                 self.index_raw_img = index_raw_img
-                self.index_heat_map = index_heat_map
+                self.index_depth_img = index_depth_img
             time.sleep(0.01)
     
 
@@ -1377,7 +1382,7 @@ class FrankaEnv(gym.Env):
         # Middle DM-TAC is kept off by default and is not included in tactile_data.
         while getattr(self, "tac_running", True):
             try:
-                middle_raw_img, middle_heat_map = self.process_tactile_data(self.middle_tactile_sensor, self.tactile_size)
+                middle_raw_img, middle_depth_img = self.process_tactile_data(self.middle_tactile_sensor, self.tactile_size)
             except Exception as exc:
                 print(f"[DM-TAC][middle] {exc}")
                 time.sleep(0.1)
@@ -1385,7 +1390,7 @@ class FrankaEnv(gym.Env):
 
             with self.tac_middle_lock:
                 self.middle_raw_img = middle_raw_img
-                self.middle_heat_map = middle_heat_map
+                self.middle_depth_img = middle_depth_img
             time.sleep(0.01)
     
 
@@ -1589,8 +1594,8 @@ class FrankaEnv(gym.Env):
             obs["images"][cam_key] = img
             
         if self.enable_tactile:
-            heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
-            obs["images"]["tactile_data"] = heatmap_canvas
+            depth_canvas = np.concatenate([self.thumb_depth_img, self.index_depth_img], axis=1)
+            obs["images"]["tactile_data"] = depth_canvas
                 
         obs = copy.deepcopy(obs)
         if return_record_images:

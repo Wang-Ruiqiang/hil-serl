@@ -75,7 +75,6 @@ class ReplayBuffer(Dataset):
             dataset_dict['robot_arm_penalty'] = np.empty((capacity,), dtype=np.float32)
         
         if include_gaze_aux:
-            dataset_dict['gaze_conf'] = np.empty((capacity,), dtype=np.float32)
             dataset_dict['gaze_heatmap'] = np.empty(
                 (capacity, *gaze_heatmap_shape),
                 dtype=np.float32,

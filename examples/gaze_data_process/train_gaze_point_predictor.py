@@ -47,7 +47,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_integer("image_width", 128, "Input image width.")
 flags.DEFINE_integer("image_height", 128, "Input image height.")
-flags.DEFINE_integer("num_epochs", 20, "Number of training epochs.")
+flags.DEFINE_integer("num_epochs", 30, "Number of training epochs.")
 flags.DEFINE_integer("steps_per_epoch", 100, "Training batches per epoch.")
 flags.DEFINE_integer("batch_size", 128, "Batch size.")
 flags.DEFINE_integer("seed", 42, "Random seed.")

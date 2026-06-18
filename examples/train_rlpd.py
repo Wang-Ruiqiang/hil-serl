@@ -24,6 +24,13 @@ from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSing
 from serl_launcher.agents.continuous.sac_hybrid_dual import SACAgentHybridDualArm
 from serl_launcher.utils.timer_utils import Timer
 from serl_launcher.utils.train_utils import concat_batches
+from serl_launcher.utils.gaze_utils import (
+    add_or_compute_gaze_transition_fields,
+    compute_gaze_heatmap_fields,
+    ensure_optional_transition_fields,
+    infer_heatmap_shape,
+    load_gaze_predictor,
+)
 
 from agentlace.trainer import TrainerServer, TrainerClient
 from agentlace.data.data_store import QueuedDataStore
@@ -49,19 +56,19 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 30000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean(
-    "use_gaze_relevance",
+    "use_gaze_cgl",
     True,
-    "Use the gaze-relevance critic variant. False keeps the original HIL-RL/SAC logic.",
+    "Use the gaze-CGL critic variant. False keeps the original HIL-RL/SAC logic.",
 )
 flags.DEFINE_float(
     "gaze_regularization_weight",
     0.2,
-    "Weight for the gaze auxiliary critic loss when use_gaze_relevance=True.",
+    "Weight for the CGL gaze auxiliary critic loss when use_gaze_cgl=True.",
 )
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
@@ -83,6 +90,25 @@ def print_green(x):
 
 def print_red(x):
     return print("\033[91m {}\033[00m".format(x))
+
+def _find_info_value(info, target_key):
+    if isinstance(info, dict):
+        if target_key in info:
+            return info[target_key]
+        for value in info.values():
+            found = _find_info_value(value, target_key)
+            if found is not None:
+                return found
+    return None
+
+def _info_scalar(info, target_key):
+    value = _find_info_value(info, target_key)
+    if value is None:
+        return None
+    array = np.asarray(jax.device_get(value))
+    if array.size == 0:
+        return None
+    return float(np.mean(array))
 
 class KeyReader(threading.Thread):
     def __init__(self):
@@ -110,356 +136,6 @@ class KeyReader(threading.Thread):
 
     def stop(self):
         self._stop.set()
-##############################################################################
-
-
-def _latest_gaze_image(obs, image_key):
-    if image_key not in obs:
-        return None
-    image = np.asarray(obs[image_key])
-    if image.ndim == 4:
-        image = image[-1]
-    if image.ndim != 3:
-        return None
-    if image.shape[-1] > 3:
-        image = image[..., -3:]
-    return image
-
-
-def _select_gaze_predictor_image_key(obs):
-    for image_key in getattr(config, "image_keys", ()):
-        if "tactile" in image_key:
-            continue
-        if _latest_gaze_image(obs, image_key) is not None:
-            return image_key
-    return None
-
-
-def _infer_gaze_heatmap_shape(obs):
-    image_key = _select_gaze_predictor_image_key(obs)
-    if image_key is None:
-        if FLAGS.use_gaze_relevance:
-            raise ValueError(
-                "use_gaze_relevance=True but no RGB camera image was found in "
-                f"config.image_keys={getattr(config, 'image_keys', None)}."
-            )
-        return (1, 1)
-    image = _latest_gaze_image(obs, image_key)
-    return int(image.shape[0]), int(image.shape[1])
-
-
-def _load_gaze_predictor_if_needed(obs):
-    if not FLAGS.use_gaze_relevance or not FLAGS.gaze_predictor_checkpoint_path:
-        return None
-
-    image_key = _select_gaze_predictor_image_key(obs)
-    if image_key is None:
-        print_red(
-            "Could not load gaze predictor: no RGB camera image was found in "
-            f"config.image_keys={getattr(config, 'image_keys', None)}."
-        )
-        return None
-
-    image = _latest_gaze_image(obs, image_key)
-    from serl_launcher.networks.gaze_point_predictor import load_gaze_point_predictor_func
-
-    sample_observations = {
-        image_key: np.zeros(
-            (1, image.shape[0], image.shape[1], image.shape[2]),
-            dtype=np.float32,
-        )
-    }
-    print_green(
-        "Loading frozen gaze predictor "
-        f"checkpoint={FLAGS.gaze_predictor_checkpoint_path} "
-        f"image_key={image_key} "
-        "encoder=resnetv1-10"
-    )
-    predictor_func = load_gaze_point_predictor_func(
-        key=np.asarray([0, 0], dtype=np.uint32),
-        sample_observations=sample_observations,
-        image_keys=[image_key],
-        checkpoint_path=os.path.abspath(FLAGS.gaze_predictor_checkpoint_path),
-        encoder_variant="resnetv1-10",
-    )
-    return predictor_func, image_key
-
-
-def _compute_gaze_transition_fields(obs, gaze_predictor, gaze_heatmap_shape):
-    if not FLAGS.use_gaze_relevance:
-        return {}
-
-    gaze_conf = 0.0
-    gaze_heatmap = np.zeros(gaze_heatmap_shape, dtype=np.float32)
-    if gaze_predictor is not None:
-        gaze_predictor_func, image_key = gaze_predictor
-        image = _latest_gaze_image(obs, image_key)
-        if image is not None:
-            outputs = gaze_predictor_func(
-                {image_key: image[None].astype(np.float32)}
-            )
-            gaze_conf = float(np.asarray(outputs["gaze_conf"])[0])
-            gaze_heatmap = np.asarray(outputs["gaze_heat"][0], dtype=np.float32)
-            if gaze_heatmap.shape != gaze_heatmap_shape:
-                gaze_heatmap = np.asarray(
-                    jax.image.resize(
-                        jnp.asarray(gaze_heatmap)[None, ..., None],
-                        (1, *gaze_heatmap_shape, 1),
-                        method="bilinear",
-                    )[0, ..., 0],
-                    dtype=np.float32,
-                )
-
-    return {
-        "gaze_conf": np.float32(gaze_conf),
-        "gaze_heatmap": gaze_heatmap,
-    }
-
-
-def _gaze_xy_from_heatmap(gaze_heatmap):
-    gaze_heatmap = np.asarray(gaze_heatmap)
-    while gaze_heatmap.ndim > 2:
-        gaze_heatmap = gaze_heatmap[0]
-    if gaze_heatmap.ndim != 2 or gaze_heatmap.size == 0:
-        return None
-    if not np.isfinite(gaze_heatmap).all() or float(np.max(gaze_heatmap)) <= 0.0:
-        return None
-
-    y, x = np.unravel_index(int(np.argmax(gaze_heatmap)), gaze_heatmap.shape)
-    height, width = gaze_heatmap.shape
-    x_norm = 0.0 if width <= 1 else float(x) / float(width - 1)
-    y_norm = 0.0 if height <= 1 else float(y) / float(height - 1)
-    return x_norm, y_norm
-
-
-def _update_env_gaze_prediction_overlay(env, gaze_fields, gaze_predictor):
-    try:
-        set_overlay = env.unwrapped.set_gaze_prediction_overlay
-    except Exception:
-        return
-
-    if not FLAGS.use_gaze_relevance or gaze_predictor is None:
-        set_overlay(xy_norm=None)
-        return
-
-    _, image_key = gaze_predictor
-    xy_norm = _gaze_xy_from_heatmap(gaze_fields.get("gaze_heatmap"))
-    if xy_norm is None:
-        set_overlay(image_key=image_key, xy_norm=None)
-        return
-    set_overlay(
-        image_key=image_key,
-        xy_norm=xy_norm,
-        conf=float(gaze_fields.get("gaze_conf", 0.0)),
-    )
-
-
-def _ensure_gaze_transition_fields(transition, gaze_heatmap_shape):
-    if not FLAGS.use_gaze_relevance:
-        return transition
-    transition = dict(transition)
-    transition.setdefault("gaze_conf", np.float32(0.0))
-    transition.setdefault("gaze_heatmap", np.zeros(gaze_heatmap_shape, dtype=np.float32))
-    return transition
-
-
-def _ensure_optional_transition_fields(transition):
-    transition = dict(transition)
-    transition.setdefault("grasp_penalty", np.float32(0.0))
-    transition.setdefault("robot_arm_penalty", np.float32(0.0))
-    return transition
-
-
-def _add_or_compute_gaze_transition_fields(transition, gaze_predictor, gaze_heatmap_shape):
-    transition = _ensure_optional_transition_fields(transition)
-    if not FLAGS.use_gaze_relevance:
-        return transition
-    if "gaze_conf" not in transition or "gaze_heatmap" not in transition:
-        transition.update(
-            _compute_gaze_transition_fields(
-                transition["observations"],
-                gaze_predictor,
-                gaze_heatmap_shape,
-            )
-        )
-    return _ensure_gaze_transition_fields(transition, gaze_heatmap_shape)
-
-
-def _pause_env_display_for_gaze_eval(env):
-    try:
-        env.unwrapped.pause_display()
-    except Exception as exc:
-        print_red(f"Could not pause env display before gaze attention viewer: {exc}")
-
-
-def _normalise_heatmap_np(heatmap):
-    heatmap = np.asarray(heatmap, dtype=np.float32)
-    while heatmap.ndim > 2:
-        heatmap = heatmap[0]
-    heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=0.0, neginf=0.0)
-    heatmap = heatmap - np.min(heatmap)
-    denom = np.max(heatmap)
-    if denom > 1e-8:
-        heatmap = heatmap / denom
-    return heatmap
-
-
-def _image_for_gaze_view(obs, image_key):
-    image = _latest_gaze_image(obs, image_key)
-    if image is None:
-        return None
-    image = np.asarray(image)
-    if image.dtype != np.uint8:
-        image = np.clip(image, 0.0, 255.0)
-        if image.max() <= 1.0:
-            image = image * 255.0
-        image = image.astype(np.uint8)
-    return image
-
-
-def _overlay_heatmap(image_rgb, heatmap, label, value_text=None):
-    import cv2
-
-    heatmap = _normalise_heatmap_np(heatmap)
-    heatmap = cv2.resize(
-        heatmap,
-        (image_rgb.shape[1], image_rgb.shape[0]),
-        interpolation=cv2.INTER_LINEAR,
-    )
-    heatmap_color = cv2.applyColorMap((255.0 * heatmap).astype(np.uint8), cv2.COLORMAP_JET)
-    image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-    overlay = cv2.addWeighted(image_bgr, 0.65, heatmap_color, 0.35, 0.0)
-    cv2.putText(
-        overlay,
-        label,
-        (8, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-    if value_text:
-        cv2.putText(
-            overlay,
-            value_text,
-            (8, image_rgb.shape[0] - 12),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 255),
-            2,
-            cv2.LINE_AA,
-        )
-    return overlay
-
-
-def _tactile_panel_for_gaze_view(obs, target_width):
-    import cv2
-
-    if "tactile_data" not in obs:
-        return None
-    tactile = np.asarray(obs["tactile_data"])
-    while tactile.ndim > 3:
-        tactile = tactile[0]
-    if tactile.ndim == 2:
-        tactile = cv2.applyColorMap(
-            np.clip(tactile, 0, 255).astype(np.uint8),
-            cv2.COLORMAP_JET,
-        )
-    elif tactile.ndim == 3:
-        if tactile.shape[-1] > 3:
-            tactile = tactile[..., -3:]
-        if tactile.dtype != np.uint8:
-            tactile = np.clip(tactile, 0.0, 255.0)
-            if tactile.max() <= 1.0:
-                tactile = tactile * 255.0
-            tactile = tactile.astype(np.uint8)
-        tactile = cv2.cvtColor(tactile, cv2.COLOR_RGB2BGR)
-    else:
-        return None
-
-    panel = tactile.copy()
-    cv2.putText(
-        panel,
-        "tactile heatmap",
-        (8, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-
-    if panel.shape[1] != target_width:
-        scale = target_width / float(panel.shape[1])
-        panel = cv2.resize(
-            panel,
-            (target_width, max(1, int(panel.shape[0] * scale))),
-            interpolation=cv2.INTER_LINEAR,
-        )
-    return panel
-
-
-def _show_eval_gaze_attention(agent, obs, actions, gaze_predictor):
-    if not FLAGS.use_gaze_relevance or gaze_predictor is None:
-        return
-
-    import cv2
-
-    gaze_predictor_func, image_key = gaze_predictor
-    image_rgb = _image_for_gaze_view(obs, image_key)
-    if image_rgb is None:
-        return
-
-    outputs = gaze_predictor_func({image_key: image_rgb[None].astype(np.float32)})
-    gaze_heatmap = np.asarray(jax.device_get(outputs["gaze_heat"]))[0]
-    gaze_conf = float(np.asarray(jax.device_get(outputs["gaze_conf"]))[0])
-
-    critic_actions = np.asarray(actions)
-    if critic_actions.ndim == 1:
-        critic_actions = critic_actions[None]
-    critic_actions = critic_actions[..., :-1]
-    gaze_relevance, attention_map = agent.forward_gaze_relevance_and_attention(
-        jax.device_put(obs),
-        jax.device_put(critic_actions),
-        rng=None,
-        train=False,
-    )
-    gaze_relevance = float(np.asarray(jax.device_get(gaze_relevance)).reshape(-1)[0])
-    attention_map = np.asarray(jax.device_get(attention_map))
-    attention_map = attention_map.reshape((-1, *attention_map.shape[-2:]))[0]
-
-    gaze_panel = _overlay_heatmap(
-        image_rgb,
-        gaze_heatmap,
-        "gaze predictor",
-        f"gaze_conf={gaze_conf:.3f}",
-    )
-    attention_panel = _overlay_heatmap(
-        image_rgb,
-        attention_map,
-        "critic attention",
-        f"gaze_relevance={gaze_relevance:.3f}",
-    )
-    top_row = np.concatenate([gaze_panel, attention_panel], axis=1)
-    tactile_panel = _tactile_panel_for_gaze_view(obs, top_row.shape[1])
-    if tactile_panel is not None:
-        canvas = np.concatenate([top_row, tactile_panel], axis=0)
-    else:
-        canvas = top_row
-    cv2.imshow("eval gaze attention", canvas)
-    cv2.waitKey(1)
-
-
-def _close_eval_gaze_attention_window():
-    try:
-        import cv2
-
-        cv2.destroyWindow("eval gaze attention")
-    except Exception:
-        pass
-
-
 def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=None):
     """
     This is the actor loop, which runs when "--actor" is set to True.
@@ -490,14 +166,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 agent_pick = agent.replace(state=ckpt_pick)
             
             obs, _ = env.reset()
-            eval_gaze_predictor = _load_gaze_predictor_if_needed(obs)
-            show_eval_gaze_attention = (
-                FLAGS.use_gaze_relevance
-                and eval_gaze_predictor is not None
-                and hasattr(agent, "forward_gaze_relevance_and_attention")
-            )
-            if show_eval_gaze_attention:
-                _pause_env_display_for_gaze_eval(env)
+            print_green("Eval policy execution enabled.")
             key_reader = KeyReader()
             key_reader.start()
             ckpt_step = FLAGS.eval_checkpoint_step
@@ -525,14 +194,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                             seed=key
                         )
                         actions = np.asarray(jax.device_get(actions)).copy()
-                        if show_eval_gaze_attention:
-                            _show_eval_gaze_attention(
-                                agent_pick,
-                                obs,
-                                actions,
-                                eval_gaze_predictor,
-                            )
-
                         next_obs, reward, done, truncated, info = env.step(actions)
                         obs = next_obs
                         if "is_pick" in info:
@@ -556,15 +217,13 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                     # print_green(f"obs[state] =  {obs['state']}")
                     actions = agent.sample_actions(
                         observations=jax.device_put(obs),
-                        argmax=False,
+                        argmax=True,
                         seed=key
                     )
                     
                     # actions = np.asarray(jax.device_get(actions))
                     actions = np.asarray(jax.device_get(actions)).copy()
                     actions[..., 3:6] = 0.0
-                    if show_eval_gaze_attention:
-                        _show_eval_gaze_attention(agent, obs, actions, eval_gaze_predictor)
 
                     print("actions = ", actions)
 
@@ -613,11 +272,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
         except KeyboardInterrupt:
             pass
         finally:
-            _close_eval_gaze_attention_window()
             # env.save_all_data_on_exit()
             # env.close()
             return
-        
+
         
         
     start_step = 0
@@ -660,8 +318,17 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     transitions = []
     demo_transitions = []
     obs, _ = env.reset()
-    gaze_heatmap_shape = _infer_gaze_heatmap_shape(obs)
-    gaze_predictor = _load_gaze_predictor_if_needed(obs)
+    gaze_heatmap_shape = infer_heatmap_shape(obs, config.image_keys)
+    gaze_predictor = (
+        load_gaze_predictor(
+            obs,
+            config.image_keys,
+            FLAGS.gaze_predictor_checkpoint_path,
+            log_fn=print_green,
+        )
+        if FLAGS.use_gaze_cgl
+        else None
+    )
     done = False
 
     # training loop
@@ -747,15 +414,10 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             # if actions[..., 6] < 0.0:
             #     random_action = np.random.uniform(0.0, 0.30)
             #     actions[..., 6] = random_action
-            gaze_fields = _compute_gaze_transition_fields(
-                obs,
-                gaze_predictor,
-                gaze_heatmap_shape,
-            )
-            _update_env_gaze_prediction_overlay(
-                env,
-                gaze_fields,
-                gaze_predictor,
+            gaze_fields = (
+                compute_gaze_heatmap_fields(obs, gaze_predictor, gaze_heatmap_shape)
+                if FLAGS.use_gaze_cgl
+                else {}
             )
             
         # Step environment
@@ -846,19 +508,18 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             stats = {"timer": timer.get_average_times()}
             client.request("send-stats", stats)
 
-
 ##############################################################################
 
 def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     """
     The learner loop, which runs when "--learner" is set to True.
     """
-    start_step = (
-        int(os.path.basename(checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path)))[11:])
-        + 1
+    latest_ckpt = (
+        checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path))
         if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-        else 0
+        else None
     )
+    start_step = int(os.path.basename(latest_ckpt)[11:]) + 1 if latest_ckpt else 0
 
     # start_step = 0
     step = start_step
@@ -985,26 +646,29 @@ def main(_):
     )
     env = RecordEpisodeStatistics(env)
     sample_obs = env.observation_space.sample()
-    gaze_heatmap_shape = _infer_gaze_heatmap_shape(sample_obs)
+    gaze_heatmap_shape = infer_heatmap_shape(sample_obs, config.image_keys)
 
     agent_factory = (
         make_gaze_sac_pixel_agent_hybrid_single_arm
-        if FLAGS.use_gaze_relevance
+        if FLAGS.use_gaze_cgl
         else make_sac_pixel_agent_hybrid_single_arm
     )
     gaze_agent_kwargs = {}
-    if FLAGS.use_gaze_relevance:
+    if FLAGS.use_gaze_cgl:
         gaze_agent_kwargs = {
             "gaze_regularization_weight": FLAGS.gaze_regularization_weight,
             "gaze_heatmap_size": gaze_heatmap_shape,
+            # TODO: If gaze labels are generated from another camera later,
+            # make this configurable in the task config.
+            "gaze_attention_image_key": "front_camera",
         }
         print_green(
-            "Using gaze relevance agent "
+            "Using gaze CGL agent "
             f"(weight={FLAGS.gaze_regularization_weight}, "
             f"heatmap_size={gaze_heatmap_shape})."
         )
     else:
-        print_green("Using original HIL-RL/SAC agent without gaze relevance.")
+        print_green("Using original HIL-RL/SAC agent without gaze CGL.")
 
     agent: SACAgent = agent_factory(
         seed=FLAGS.seed,
@@ -1099,12 +763,12 @@ def main(_):
             image_keys=config.image_keys,
             include_grasp_penalty=include_grasp_penalty,
             include_robot_arm_penalty=include_robot_arm_penalty,
-            include_gaze_aux=FLAGS.use_gaze_relevance,
+            include_gaze_aux=FLAGS.use_gaze_cgl,
             gaze_heatmap_shape=gaze_heatmap_shape,
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-6-15",
+            project="tennis_ball_pick-6-16",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -1121,12 +785,28 @@ def main(_):
             image_keys=config.image_keys,
             include_grasp_penalty=include_grasp_penalty,
             include_robot_arm_penalty=include_robot_arm_penalty,
-            include_gaze_aux=FLAGS.use_gaze_relevance,
+            include_gaze_aux=FLAGS.use_gaze_cgl,
             gaze_heatmap_shape=gaze_heatmap_shape,
         )
-        learner_gaze_predictor = _load_gaze_predictor_if_needed(
-            sample_obs
+        learner_gaze_predictor = (
+            load_gaze_predictor(
+                sample_obs,
+                config.image_keys,
+                FLAGS.gaze_predictor_checkpoint_path,
+                log_fn=print_green,
+            )
+            if FLAGS.use_gaze_cgl
+            else None
         )
+
+        def prepare_replay_transition(transition):
+            if FLAGS.use_gaze_cgl:
+                return add_or_compute_gaze_transition_fields(
+                    transition,
+                    learner_gaze_predictor,
+                    gaze_heatmap_shape,
+                )
+            return ensure_optional_transition_fields(transition)
 
         assert FLAGS.demo_path is not None
         for path in FLAGS.demo_path:
@@ -1143,13 +823,7 @@ def main(_):
                     #     transition['grasp_penalty'] = transition['infos']['grasp_penalty']
                     # if 'infos' in transition and 'robot_arm_penalty' in transition['infos']:
                     #     transition['robot_arm_penalty'] = transition['infos']['robot_arm_penalty']
-                    demo_buffer.insert(
-                        _add_or_compute_gaze_transition_fields(
-                            transition,
-                            learner_gaze_predictor,
-                            gaze_heatmap_shape,
-                        )
-                    )
+                    demo_buffer.insert(prepare_replay_transition(transition))
         print_green(f"demo buffer size: {len(demo_buffer)}")
         print_green(f"online buffer size: {len(replay_buffer)}")
 
@@ -1160,13 +834,7 @@ def main(_):
                 with open(file, "rb") as f:
                     transitions = pkl.load(f)
                     for transition in transitions:
-                        replay_buffer.insert(
-                            _add_or_compute_gaze_transition_fields(
-                                transition,
-                                learner_gaze_predictor,
-                                gaze_heatmap_shape,
-                            )
-                        )
+                        replay_buffer.insert(prepare_replay_transition(transition))
             print_green(
                 f"Loaded previous buffer data. Replay buffer size: {len(replay_buffer)}"
             )
@@ -1180,13 +848,7 @@ def main(_):
                 with open(file, "rb") as f:
                     transitions = pkl.load(f)
                     for transition in transitions:
-                        demo_buffer.insert(
-                            _add_or_compute_gaze_transition_fields(
-                                transition,
-                                learner_gaze_predictor,
-                                gaze_heatmap_shape,
-                            )
-                        )
+                        demo_buffer.insert(prepare_replay_transition(transition))
             print_green(
                 f"Loaded previous demo buffer data. Demo buffer size: {len(demo_buffer)}"
             )

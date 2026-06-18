@@ -44,12 +44,20 @@ class EnvConfig(DefaultEnvConfig):
         #     "exposure": 40000,
         #     "depth": True,
         # },
+
+        #franka
         "front_camera": {
             "serial_number": "151422254571",
             "dim": (640, 480),
             "exposure": 40000,
             "depth": True,
         },
+        # "front_camera": {
+        #     "serial_number": "234222300515",
+        #     "dim": (640, 480),
+        #     "exposure": 40000,
+        #     "depth": True,
+        # },
     }
     # EXTRA_REALSENSE_CAMERAS = {
     #     #denso
@@ -77,7 +85,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
     # ACTION_SCALE = (0.03, 0.03, 0.03)
-    ACTION_SCALE = (0.005, 0.005, 0.005)
+    ACTION_SCALE = (0.007, 0.007, 0.007)
     CMD_POSE_RESYNC_THRESHOLD = 0.05
     DISPLAY_IMAGE = True
     GAZE_DISPLAY_MARKERS = True
@@ -118,9 +126,10 @@ class EnvConfig(DefaultEnvConfig):
     ENABLE_TACTILE = True
     # TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
+    DM_TAC_DEPTH_SCALE = 2
     USE_SPACEMOUSE = True
     EXP_NAME = "tennis_ball_pick"
-    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-15-0"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -171,17 +180,28 @@ class TrainConfig(DefaultTrainingConfig):
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
+            sample = env.observation_space.sample()
+            print("[debug] classifier image keys:", self.classifier_keys)
+            for image_key in self.classifier_keys:
+                image_sample = sample.get(image_key)
+                if image_sample is None:
+                    print(f"[debug] sample[{image_key}] is missing")
+                    continue
+                print(
+                    f"[debug] sample[{image_key}] "
+                    f"shape={image_sample.shape}, dtype={image_sample.dtype}"
+                )
             if enable_tactile:
                 reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
-                    sample=env.observation_space.sample(),
+                    sample=sample,
                     image_keys=self.classifier_keys,
                     checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
                 )
             else:
                 reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
-                    sample=env.observation_space.sample(),
+                    sample=sample,
                     image_keys=self.classifier_keys,
                     checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick_no_tactile"),
                 )
@@ -193,7 +213,7 @@ class TrainConfig(DefaultTrainingConfig):
                 print("sigmoid(reward_classifier(obs)) = ", prob)
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
-                return int(prob > 0.95)
+                return int(prob > 1)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

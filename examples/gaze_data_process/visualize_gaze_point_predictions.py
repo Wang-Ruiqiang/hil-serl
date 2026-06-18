@@ -24,7 +24,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
     "frame_root",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-5-27-0",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
     "Recording root with frame_*/color_image.jpg. If empty, samples are loaded from --data_dir.",
 )
 flags.DEFINE_string(

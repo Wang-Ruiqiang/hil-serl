@@ -9,20 +9,20 @@ import jax.numpy as jnp
 from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSingleArm
 from serl_launcher.common.typing import Batch, Params, PRNGKey
 from serl_launcher.networks.actor_critic_nets import Critic, Policy, ensemblize
-from serl_launcher.networks.gaze_relevance import GazeRegularizedCritic
+from serl_launcher.networks.gaze_attention import GazeAttentionCritic
 from serl_launcher.networks.lagrange import GeqLagrangeMultiplier
 from serl_launcher.networks.mlp import MLP
 
 
 class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
-    """Hybrid SAC agent with a critic-side gaze relevance gate.
+    """Hybrid SAC agent with critic-side CGL attention supervision.
 
     This class keeps the base SAC update structure intact. The only behavioral
-    change is inside critic_loss_fn, where an optional gaze auxiliary loss can
-    be gated by a learned gaze_relevance value.
+    change is inside critic_loss_fn, where an optional gaze auxiliary loss
+    encourages front-camera critic attention to cover the gaze heatmap.
     """
 
-    def forward_gaze_relevance(
+    def forward_gaze_attention(
         self,
         observations,
         actions: jax.Array,
@@ -33,45 +33,16 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
     ):
         if train:
             assert rng is not None, "Must specify rng when training"
-        _, gaze_relevance_logit = self.state.apply_fn(
+        _, attention_map = self.state.apply_fn(
             {"params": grad_params or self.state.params},
             observations,
             actions,
             name="critic",
             rngs={"dropout": rng} if train else {},
             train=train,
-            return_gaze_relevance=True,
-        )
-        gaze_relevance = jax.nn.sigmoid(gaze_relevance_logit)
-        min_relevance = self.config["gaze_relevance_min"]
-        gaze_relevance_eff = min_relevance + (1.0 - min_relevance) * gaze_relevance
-        return gaze_relevance_eff
-
-    def forward_gaze_relevance_and_attention(
-        self,
-        observations,
-        actions: jax.Array,
-        rng: PRNGKey,
-        *,
-        grad_params: Optional[Params] = None,
-        train: bool = True,
-    ):
-        if train:
-            assert rng is not None, "Must specify rng when training"
-        _, gaze_relevance_logit, attention_map = self.state.apply_fn(
-            {"params": grad_params or self.state.params},
-            observations,
-            actions,
-            name="critic",
-            rngs={"dropout": rng} if train else {},
-            train=train,
-            return_gaze_relevance=True,
             return_attention=True,
         )
-        gaze_relevance = jax.nn.sigmoid(gaze_relevance_logit)
-        min_relevance = self.config["gaze_relevance_min"]
-        gaze_relevance_eff = min_relevance + (1.0 - min_relevance) * gaze_relevance
-        return gaze_relevance_eff, attention_map
+        return attention_map
 
     def _gaze_heatmap_per_sample(self, batch: Batch):
         key = self.config["gaze_heatmap_key"]
@@ -81,14 +52,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             return batch["observations"][key], True
         height, width = self.config["gaze_heatmap_size"]
         return jnp.zeros((batch["rewards"].shape[0], height, width)), False
-
-    def _gaze_conf_per_sample(self, batch: Batch):
-        key = self.config["gaze_conf_key"]
-        if key in batch:
-            return batch[key], True
-        if key in batch["observations"]:
-            return batch["observations"][key], True
-        return jnp.ones_like(batch["rewards"]), False
 
     def _cgl_coverage_kl(self, gaze_heatmap, attention_map):
         batch_size, gaze_h, gaze_w = gaze_heatmap.shape
@@ -174,35 +137,27 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             gaze_heatmap,
             (batch_size, *self.config["gaze_heatmap_size"]),
         )
-        gaze_conf, has_gaze_conf = self._gaze_conf_per_sample(batch)
-        gaze_conf = jnp.reshape(gaze_conf, (batch_size,))
-        gaze_conf = jnp.clip(gaze_conf, 0.0, 1.0)
-        gaze_relevance, attention_map = self.forward_gaze_relevance_and_attention(
+        attention_map = self.forward_gaze_attention(
             batch["observations"],
             actions,
             rng=rng,
             grad_params=params,
         )
-        chex.assert_shape(gaze_relevance, (batch_size,))
 
         gaze_weight = self.config["gaze_regularization_weight"]
         cgl_loss_per_sample, valid_gaze = self._cgl_coverage_kl(gaze_heatmap, attention_map)
         valid_gaze_count = jnp.maximum(jnp.sum(valid_gaze), 1.0)
         has_active_gaze_aux = has_gaze_heatmap and gaze_weight > 0.0
         gaze_aux_loss = (
-            jnp.sum(gaze_relevance * gaze_conf * cgl_loss_per_sample * valid_gaze)
+            jnp.sum(cgl_loss_per_sample * valid_gaze)
             / valid_gaze_count
         )
         if not has_active_gaze_aux:
             gaze_aux_loss = jnp.asarray(0.0, dtype=td_loss.dtype)
 
-        relevance_reg = -self.config["gaze_relevance_regularizer_weight"] * (
-            jnp.sum(jnp.log(gaze_relevance + 1e-6) * valid_gaze) / valid_gaze_count
-        )
-        if not has_active_gaze_aux:
-            relevance_reg = jnp.asarray(0.0, dtype=td_loss.dtype)
-
-        critic_loss = td_loss + gaze_weight * gaze_aux_loss + relevance_reg
+        weighted_gaze_aux_loss = gaze_weight * gaze_aux_loss
+        gaze_to_td_ratio = weighted_gaze_aux_loss / (td_loss + 1e-8)
+        critic_loss = td_loss + weighted_gaze_aux_loss
 
         info = {
             "critic_loss": critic_loss,
@@ -211,16 +166,12 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             "target_qs": jnp.mean(target_qs),
             "rewards": batch["rewards"].mean(),
             "gaze_aux_available": jnp.asarray(float(has_active_gaze_aux)),
-            "gaze_conf_available": jnp.asarray(float(has_gaze_conf)),
-            "gaze_conf_mean": jnp.mean(gaze_conf),
-            "gaze_conf_weight_mean": jnp.mean(gaze_conf),
             "gaze_aux_loss": gaze_aux_loss,
+            "gaze_weight": jnp.asarray(gaze_weight, dtype=td_loss.dtype),
+            "weighted_gaze_aux_loss": weighted_gaze_aux_loss,
+            "gaze_to_td_ratio": gaze_to_td_ratio,
             "gaze_cgl_kl": jnp.sum(cgl_loss_per_sample * valid_gaze) / valid_gaze_count,
             "gaze_valid_fraction": jnp.mean(valid_gaze),
-            "gaze_relevance_mean": jnp.mean(gaze_relevance),
-            "gaze_relevance_min": jnp.min(gaze_relevance),
-            "gaze_relevance_max": jnp.max(gaze_relevance),
-            "gaze_relevance_reg": relevance_reg,
         }
 
         return critic_loss, info
@@ -252,12 +203,10 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         image_keys: Iterable[str] = ("image",),
         augmentation_function: Optional[callable] = None,
         gaze_regularization_weight: float = 0.0,
-        gaze_relevance_min: float = 0.2,
-        gaze_relevance_regularizer_weight: float = 1e-3,
         gaze_heatmap_key: str = "gaze_heatmap",
         gaze_heatmap_size: tuple = (128, 128),
         gaze_cgl_threshold: float = 1e-4,
-        gaze_conf_key: str = "gaze_conf",
+        gaze_attention_image_key: str = "front_camera",
         **kwargs,
     ):
         policy_network_kwargs["activate_final"] = True
@@ -305,6 +254,9 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             use_proprio=use_proprio,
             enable_stacking=True,
             image_keys=image_keys,
+            # TODO: If gaze is collected on a different camera in a future task,
+            # pass that camera key through the launcher/config instead of front_camera.
+            attention_image_key=gaze_attention_image_key,
         )
 
         encoders = {
@@ -318,7 +270,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             name="critic_ensemble"
         )
         critic_def = partial(
-            GazeRegularizedCritic,
+            GazeAttentionCritic,
             encoder=encoders["critic"],
             network=critic_backbone,
         )(name="critic")
@@ -356,12 +308,9 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             image_keys=image_keys,
             augmentation_function=augmentation_function,
             gaze_regularization_weight=gaze_regularization_weight,
-            gaze_relevance_min=gaze_relevance_min,
-            gaze_relevance_regularizer_weight=gaze_relevance_regularizer_weight,
             gaze_heatmap_key=gaze_heatmap_key,
             gaze_heatmap_size=gaze_heatmap_size,
             gaze_cgl_threshold=gaze_cgl_threshold,
-            gaze_conf_key=gaze_conf_key,
             **kwargs,
         )
 

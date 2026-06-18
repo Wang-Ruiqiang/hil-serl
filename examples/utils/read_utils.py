@@ -98,6 +98,17 @@ def _read_resized_rgb(image_path, crop_fn=None):
     return image[..., ::-1]
 
 
+def _read_tactile_depth(depth_path):
+    depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_path) else None
+    if depth is None:
+        raise FileNotFoundError(f"Missing or unreadable tactile depth image: {depth_path}")
+    if depth.ndim == 2:
+        depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2BGR)
+    elif depth.ndim == 3 and depth.shape[-1] == 4:
+        depth = depth[..., :3]
+    return cv2.resize(depth.astype(np.uint8, copy=False), tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
+
+
 def get_frame_data(
     frame_path,
     robot_urdf_path,
@@ -107,10 +118,8 @@ def get_frame_data(
 ):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
-    index_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
-    thumb_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
-    # index_heat_map_path = os.path.join(frame_path, "thumb_heat_map.jpg")
-    # thumb_heat_map_path = os.path.join(frame_path, "index_heat_map.jpg")
+    index_depth_path = os.path.join(frame_path, "index_depth_image.png")
+    thumb_depth_path = os.path.join(frame_path, "thumb_depth_image.png")
     # color_image_path2 = os.path.join(frame_path, "color_image2.jpg")
     # depth_image_path = os.path.join(frame_path, "depth_image.png")
     # depth_image_path2 = os.path.join(frame_path, "depth_image2.png")
@@ -119,16 +128,9 @@ def get_frame_data(
     # depth_image = cv2.imread(depth_image_path, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     # depth_image2 = cv2.imread(depth_image_path2, cv2.IMREAD_UNCHANGED) if os.path.exists(depth_image_path) else None
     if "tactile_data" in image_keys:
-        index_heat_map_image = cv2.imread(index_heat_map_path) if os.path.exists(index_heat_map_path) else None
-        thumb_heat_map_image = cv2.imread(thumb_heat_map_path) if os.path.exists(thumb_heat_map_path) else None
-        if index_heat_map_image is None:
-            raise FileNotFoundError(f"Missing or unreadable tactile image: {index_heat_map_path}")
-        if thumb_heat_map_image is None:
-            raise FileNotFoundError(f"Missing or unreadable tactile image: {thumb_heat_map_path}")
-
-        index_heat_map_image = cv2.resize(index_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-        thumb_heat_map_image = cv2.resize(thumb_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-        heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
+        index_depth = _read_tactile_depth(index_depth_path)
+        thumb_depth = _read_tactile_depth(thumb_depth_path)
+        tactile_depth_canvas = np.concatenate([thumb_depth, index_depth], axis=1).astype(np.uint8)
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
     action_file_path = os.path.join(frame_path, "action.txt")
@@ -197,7 +199,7 @@ def get_frame_data(
                 CLASSIFIER_IMAGE_CROP.get("front_classifier", IMAGE_CROP.get("front_camera")),
             )
         elif image_key == "tactile_data":
-            obs[image_key] = heatmap_canvas
+            obs[image_key] = tactile_depth_canvas
         else:
             raise ValueError(f"Unsupported image key for recorded frame export: {image_key}")
 

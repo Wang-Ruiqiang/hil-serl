@@ -22,6 +22,7 @@ class EncodingWrapper(nn.Module):
     proprio_latent_dim: int = 64
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
+    attention_image_key: Optional[str] = "front_camera"
     # state_weights: Optional[Iterable[float]] = None
 
     @nn.compact
@@ -36,6 +37,7 @@ class EncodingWrapper(nn.Module):
         # encode images with encoder
         encoded = []
         attention_maps = []
+        selected_attention_map = None
         for image_key in self.image_keys:
             image = observations[image_key]
             if not is_encoded:
@@ -52,7 +54,10 @@ class EncodingWrapper(nn.Module):
                     encode=not is_encoded,
                     return_spatial=True,
                 )
-                attention_maps.append(jnp.mean(jnp.square(spatial_features), axis=-1))
+                attention_map = jnp.mean(jnp.square(spatial_features), axis=-1)
+                attention_maps.append(attention_map)
+                if image_key == self.attention_image_key:
+                    selected_attention_map = attention_map
             else:
                 image = self.encoder[image_key](image, train=train, encode=not is_encoded)
 
@@ -91,7 +96,11 @@ class EncodingWrapper(nn.Module):
             encoded = jnp.concatenate([encoded, state], axis=-1)
 
         if return_attention:
-            attention_map = jnp.mean(jnp.stack(attention_maps, axis=0), axis=0)
+            attention_map = selected_attention_map
+            if attention_map is None:
+                # TODO: For future multi-camera tasks, explicitly pass the gaze camera
+                # key instead of falling back to averaged attention.
+                attention_map = jnp.mean(jnp.stack(attention_maps, axis=0), axis=0)
             return encoded, attention_map
 
         return encoded

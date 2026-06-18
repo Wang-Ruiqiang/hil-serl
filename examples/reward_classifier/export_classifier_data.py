@@ -28,8 +28,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-11-0",
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-12-0",
+        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
     ],
     "Recorded data root(s) containing frame_xxx folders.",
 )

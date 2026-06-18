@@ -22,10 +22,10 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("successes_needed", 10, "Number of successful demos to collect.")
+flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean("record_data", True, "Save robot/camera/tactile frame data while recording demos.")
-flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames while recording demos.")
+flags.DEFINE_boolean("record_gaze", True, "Collect Pupil gaze/world frames while recording demos.")
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
 
 
@@ -107,6 +107,22 @@ def _collect_episode_range(env):
     if isinstance(rng, (list, tuple)) and len(rng) >= 2:
         return int(rng[0]), int(rng[1])
     return None
+
+
+def _append_episode_record(episode_records, rng, success=False, interrupted=False):
+    if rng is None:
+        return False
+    episode_records.append(
+        {
+            "episode_index": len(episode_records),
+            "start_frame": int(rng[0]),
+            "end_frame": int(rng[1]),
+            "success": bool(success),
+            "interrupted": bool(interrupted),
+            "num_frames": int(rng[1] - rng[0] + 1),
+        }
+    )
+    return True
 
 
 def _write_recording_metadata(env, exp_name, successes_needed, success_count, episode_records):
@@ -238,16 +254,12 @@ def main(_):
                 if FLAGS.record_data or collect_gaze:
                     try:
                         rng = _collect_episode_range(env)
-                        if rng is not None:
-                            episode_records.append(
-                                {
-                                    "episode_index": len(episode_records),
-                                    "start_frame": int(rng[0]),
-                                    "end_frame": int(rng[1]),
-                                    "success": bool(info.get("succeed", False)),
-                                    "num_frames": int(rng[1] - rng[0] + 1),
-                                }
-                            )
+                        if _append_episode_record(
+                            episode_records,
+                            rng,
+                            success=bool(info.get("succeed", False)),
+                            interrupted=False,
+                        ):
                             print(
                                 f"[record_demos][recording] collected episode range: {rng}"
                             )
@@ -269,6 +281,20 @@ def main(_):
                     _mark_episode_start(env, "reset")
     finally:
         root_env = _get_unwrapped_env(env)
+        if FLAGS.record_data or collect_gaze:
+            try:
+                rng = _collect_episode_range(env)
+                if _append_episode_record(
+                    episode_records,
+                    rng,
+                    success=False,
+                    interrupted=True,
+                ):
+                    print(
+                        f"[record_demos][recording] collected unfinished episode range on exit: {rng}"
+                    )
+            except Exception as exc:
+                print(f"[record_demos][WARN] final end_episode_and_collect failed: {exc}")
         save_owner = env if hasattr(env, "save_all_data_on_exit") else root_env
         if (FLAGS.record_data or collect_gaze) and hasattr(save_owner, "save_all_data_on_exit"):
             try:
