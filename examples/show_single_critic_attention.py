@@ -21,17 +21,20 @@ for path in (
 
 DEFAULT_FRAME_ROOT = (
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-6-11-0"
+    "tennis_ball_pick-6-17-0"
 )
 DEFAULT_CHECKPOINT_PATH = str(
     REPO_ROOT
     / "examples"
     / "experiments"
     / "tennis_ball_pick"
-    / "2026-6-16_0_ball_pick_rl_run"
+    / "2026-6-19_0_ball_pick_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
+)
+DEFAULT_GAZE_PREDICTOR_CHECKPOINT_PATH = str(
+    REPO_ROOT / "examples" / "gaze_data_process" / "gaze_heatmap_ckpt"
 )
 
 import cv2
@@ -46,6 +49,11 @@ from serl_launcher.utils.launcher import (
     make_gaze_sac_pixel_agent_hybrid_single_arm,
     make_sac_pixel_agent_hybrid_single_arm,
 )
+from serl_launcher.utils.gaze_utils import (
+    compute_gaze_heatmap_fields,
+    gaze_xy_norm_from_heatmap,
+    load_gaze_predictor,
+)
 
 
 FLAGS = flags.FLAGS
@@ -54,7 +62,12 @@ flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("frame_root", DEFAULT_FRAME_ROOT, "Recorded frame root.")
 flags.DEFINE_string("checkpoint_path", DEFAULT_CHECKPOINT_PATH, "Checkpoint directory.")
-flags.DEFINE_integer("checkpoint_step", 30000, "Checkpoint step to load.")
+flags.DEFINE_integer("checkpoint_step", 11000, "Checkpoint step to load.")
+flags.DEFINE_string(
+    "gaze_predictor_checkpoint_path",
+    DEFAULT_GAZE_PREDICTOR_CHECKPOINT_PATH,
+    "Frozen gaze predictor checkpoint directory. Empty string disables gaze overlay.",
+)
 flags.DEFINE_string("robot_urdf_path", DEFAULT_ROBOT_URDF_PATH, "Robot URDF path.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile input.")
 flags.DEFINE_boolean("use_gaze_cgl", True, "Use gaze-CGL critic agent.")
@@ -265,8 +278,19 @@ def draw_text_panel(image, lines):
         y += line_gap
 
 
-def render_attention(image_rgb, attention_map, fid):
-    heatmap = normalize_heatmap(attention_map)
+def heatmap_peak_xy(heatmap):
+    xy_norm = gaze_xy_norm_from_heatmap(heatmap)
+    if xy_norm is None:
+        return None
+    heatmap = np.asarray(heatmap)
+    while heatmap.ndim > 2:
+        heatmap = heatmap[0]
+    y, x = np.unravel_index(int(np.argmax(heatmap)), heatmap.shape)
+    return int(x), int(y), float(np.max(heatmap)), xy_norm
+
+
+def render_heatmap_overlay(image_rgb, heatmap, title, lines=()):
+    heatmap = normalize_heatmap(heatmap)
     heatmap = cv2.resize(
         heatmap,
         (image_rgb.shape[1], image_rgb.shape[0]),
@@ -289,12 +313,32 @@ def render_attention(image_rgb, attention_map, fid):
         )
     draw_text_panel(
         overlay,
-        [
-            f"frame={fid}",
-            f"attn_shape={tuple(np.asarray(attention_map).shape)}",
-        ],
+        [title, *lines],
     )
     return overlay
+
+
+def render_attention(image_rgb, attention_map, fid):
+    return render_heatmap_overlay(
+        image_rgb,
+        attention_map,
+        f"frame={fid} critic attention",
+        [f"attn_shape={tuple(np.asarray(attention_map).shape)}"],
+    )
+
+
+def render_gaze_prediction(image_rgb, gaze_heatmap, fid):
+    lines = [f"gaze_shape={tuple(np.asarray(gaze_heatmap).shape)}"]
+    peak = heatmap_peak_xy(gaze_heatmap)
+    if peak is not None:
+        peak_x, peak_y, peak_value, _ = peak
+        lines.append(f"peak=({peak_x},{peak_y}) val={peak_value:.3f}")
+    return render_heatmap_overlay(
+        image_rgb,
+        gaze_heatmap,
+        f"frame={fid} gaze predictor",
+        lines,
+    )
 
 
 def create_agent(config, sample_obs):
@@ -357,6 +401,17 @@ def main(_):
     print_green(f"frames={len(frame_dirs)} image_keys={config.image_keys}")
 
     sample_obs, _ = read_frame_observation_and_action(frame_dirs[0], config.image_keys)
+    gaze_predictor = None
+    if FLAGS.gaze_predictor_checkpoint_path:
+        gaze_predictor = timed(
+            "load gaze predictor",
+            lambda: load_gaze_predictor(
+                sample_obs,
+                config.image_keys,
+                FLAGS.gaze_predictor_checkpoint_path,
+                log_fn=print_green,
+            ),
+        )
     devices = jax.local_devices()
     sharding = jax.sharding.PositionalSharding(devices)
     agent = timed("create agent", lambda: create_agent(config, sample_obs))
@@ -380,29 +435,53 @@ def main(_):
     summary_path = output_dir / "attention_summary.txt"
     with summary_path.open("w") as summary_file:
         summary_file.write(
-            "frame_id,attention_shape,action\n"
+            "frame_id,attention_shape,gaze_shape,gaze_peak,action\n"
         )
         for index, frame_dir in enumerate(frame_dirs, start=1):
             fid = frame_id(frame_dir)
             try:
                 obs, action = read_frame_observation_and_action(frame_dir, config.image_keys)
                 attention_map = critic_attention_for_frame(agent, obs, action)
-                overlay = render_attention(
+                critic_overlay = render_attention(
                     obs["front_camera"],
                     attention_map,
                     fid,
                 )
-                out_path = output_dir / f"frame_{fid:06d}_critic_attention.jpg"
-                if not cv2.imwrite(str(out_path), overlay):
-                    raise RuntimeError(f"cv2.imwrite failed: {out_path}")
+
+                gaze_shape = ""
+                gaze_peak = ""
+                saved_path = None
+                if gaze_predictor is not None:
+                    gaze_heatmap = compute_gaze_heatmap_fields(
+                        obs,
+                        gaze_predictor,
+                        obs["front_camera"].shape[:2],
+                    )["gaze_heatmap"]
+                    gaze_shape = tuple(np.asarray(gaze_heatmap).shape)
+                    peak = heatmap_peak_xy(gaze_heatmap)
+                    if peak is not None:
+                        peak_x, peak_y, peak_value, _ = peak
+                        gaze_peak = f"({peak_x},{peak_y},{peak_value:.6f})"
+                    gaze_overlay = render_gaze_prediction(
+                        obs["front_camera"],
+                        gaze_heatmap,
+                        fid,
+                    )
+
+                    comparison = np.concatenate([critic_overlay, gaze_overlay], axis=1)
+                    comparison_path = output_dir / f"frame_{fid:06d}_attention_vs_gaze.jpg"
+                    if not cv2.imwrite(str(comparison_path), comparison):
+                        raise RuntimeError(f"cv2.imwrite failed: {comparison_path}")
+                    saved_path = comparison_path
                 summary_file.write(
-                    f"{fid},{tuple(attention_map.shape)},"
+                    f"{fid},{tuple(attention_map.shape)},{gaze_shape},{gaze_peak},"
                     f"{np.array2string(action, precision=5, separator=' ')}\n"
                 )
                 if index == 1 or index % 25 == 0:
-                    print_green(
-                        f"[{index}/{len(frame_dirs)}] saved {out_path.name}"
-                    )
+                    if saved_path is not None:
+                        print_green(
+                            f"[{index}/{len(frame_dirs)}] saved {saved_path.name}"
+                        )
             except Exception as exc:
                 print_red(f"[skip] frame={fid}: {exc}")
 

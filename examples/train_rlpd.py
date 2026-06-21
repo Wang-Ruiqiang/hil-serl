@@ -30,6 +30,7 @@ from serl_launcher.utils.gaze_utils import (
     ensure_optional_transition_fields,
     infer_heatmap_shape,
     load_gaze_predictor,
+    update_env_gaze_prediction_overlay,
 )
 
 from agentlace.trainer import TrainerServer, TrainerClient
@@ -56,7 +57,7 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 30000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
@@ -67,7 +68,7 @@ flags.DEFINE_boolean(
 )
 flags.DEFINE_float(
     "gaze_regularization_weight",
-    0.2,
+    0.01,
     "Weight for the CGL gaze auxiliary critic loss when use_gaze_cgl=True.",
 )
 flags.DEFINE_string(
@@ -109,6 +110,33 @@ def _info_scalar(info, target_key):
     if array.size == 0:
         return None
     return float(np.mean(array))
+
+def _gaze_loss_log_line(info):
+    keys = (
+        "critic_td_loss",
+        "gaze_aux_loss",
+        "weighted_gaze_aux_loss",
+        "gaze_to_td_ratio",
+        "gaze_cgl_kl",
+        "gaze_valid_fraction",
+        "gaze_weight",
+    )
+    values = {
+        key: _info_scalar(info, key)
+        for key in keys
+    }
+    if values["gaze_aux_loss"] is None:
+        return None
+    return (
+        "gaze CGL: "
+        f"td={values['critic_td_loss']:.4g} "
+        f"aux={values['gaze_aux_loss']:.4g} "
+        f"weighted={values['weighted_gaze_aux_loss']:.4g} "
+        f"ratio={values['gaze_to_td_ratio']:.4g} "
+        f"kl={values['gaze_cgl_kl']:.4g} "
+        f"valid={values['gaze_valid_fraction']:.3f} "
+        f"weight={values['gaze_weight']:.4g}"
+    )
 
 class KeyReader(threading.Thread):
     def __init__(self):
@@ -419,6 +447,12 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 if FLAGS.use_gaze_cgl
                 else {}
             )
+            if FLAGS.use_gaze_cgl:
+                update_env_gaze_prediction_overlay(
+                    env,
+                    gaze_fields.get("gaze_heatmap"),
+                    gaze_predictor,
+                )
             
         # Step environment
         with timer.context("step_env"):
@@ -612,9 +646,13 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
             agent = jax.block_until_ready(agent)
             server.publish_network(agent.state.params)
 
-        if step % config.log_period == 0 and wandb_logger:
-            wandb_logger.log(update_info, step=step)
-            wandb_logger.log({"timer": timer.get_average_times()}, step=step)
+        if step % config.log_period == 0:
+            if wandb_logger:
+                wandb_logger.log(update_info, step=step)
+                wandb_logger.log({"timer": timer.get_average_times()}, step=step)
+            gaze_log_line = _gaze_loss_log_line(update_info)
+            if gaze_log_line is not None:
+                print_green(f"[learner step {step}] {gaze_log_line}")
 
         if (
             step > 0
@@ -768,7 +806,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-6-16",
+            project="tennis_ball_pick-6-19",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

@@ -46,18 +46,18 @@ class EnvConfig(DefaultEnvConfig):
         # },
 
         #franka
-        "front_camera": {
-            "serial_number": "151422254571",
-            "dim": (640, 480),
-            "exposure": 40000,
-            "depth": True,
-        },
         # "front_camera": {
-        #     "serial_number": "234222300515",
+        #     "serial_number": "151422254571",
         #     "dim": (640, 480),
         #     "exposure": 40000,
         #     "depth": True,
         # },
+        "front_camera": {
+            "serial_number": "234222300515",
+            "dim": (640, 480),
+            "exposure": 40000,
+            "depth": True,
+        },
     }
     # EXTRA_REALSENSE_CAMERAS = {
     #     #denso
@@ -129,7 +129,7 @@ class EnvConfig(DefaultEnvConfig):
     DM_TAC_DEPTH_SCALE = 2
     USE_SPACEMOUSE = True
     EXP_NAME = "tennis_ball_pick"
-    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0"
+    GAZE_FRAME_SAVE_PATH = "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-19-1"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -213,7 +213,7 @@ class TrainConfig(DefaultTrainingConfig):
                 print("sigmoid(reward_classifier(obs)) = ", prob)
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
-                return int(prob > 1)
+                return int(prob > 0.85)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

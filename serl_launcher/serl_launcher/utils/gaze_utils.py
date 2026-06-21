@@ -111,6 +111,41 @@ def compute_gaze_heatmap_fields(obs, gaze_predictor, gaze_heatmap_shape):
     return {"gaze_heatmap": gaze_heatmap}
 
 
+def gaze_xy_norm_from_heatmap(gaze_heatmap):
+    gaze_heatmap = np.asarray(gaze_heatmap)
+    while gaze_heatmap.ndim > 2:
+        gaze_heatmap = gaze_heatmap[0]
+    if gaze_heatmap.ndim != 2 or gaze_heatmap.size == 0:
+        return None
+    if not np.isfinite(gaze_heatmap).all() or float(np.max(gaze_heatmap)) <= 0.0:
+        return None
+
+    y, x = np.unravel_index(int(np.argmax(gaze_heatmap)), gaze_heatmap.shape)
+    height, width = gaze_heatmap.shape
+    x_norm = 0.0 if width <= 1 else float(x) / float(width - 1)
+    y_norm = 0.0 if height <= 1 else float(y) / float(height - 1)
+    return x_norm, y_norm
+
+
+def update_env_gaze_prediction_overlay(env, gaze_heatmap, gaze_predictor):
+    """Draw the frozen gaze predictor peak on the env RGB display, if supported."""
+    try:
+        set_overlay = env.unwrapped.set_gaze_prediction_overlay
+    except Exception:
+        return
+
+    if gaze_predictor is None:
+        set_overlay(xy_norm=None)
+        return
+
+    _, image_key = gaze_predictor
+    xy_norm = gaze_xy_norm_from_heatmap(gaze_heatmap)
+    if xy_norm is None:
+        set_overlay(image_key=image_key, xy_norm=None)
+        return
+    set_overlay(image_key=image_key, xy_norm=xy_norm)
+
+
 def ensure_optional_transition_fields(transition):
     transition = dict(transition)
     transition.setdefault("grasp_penalty", np.float32(0.0))

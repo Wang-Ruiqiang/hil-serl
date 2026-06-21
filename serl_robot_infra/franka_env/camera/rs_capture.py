@@ -9,7 +9,13 @@ class RSCapture:
 
     def __init__(self, name, serial_number, dim=(640, 480), fps=15, depth=False, exposure=40000):
         self.name = name
-        assert serial_number in self.get_device_serial_numbers()
+        available_serial_numbers = self.get_device_serial_numbers()
+        if serial_number not in available_serial_numbers:
+            raise RuntimeError(
+                f"RealSense camera '{name}' serial_number={serial_number} was not found. "
+                f"Available serial numbers: {available_serial_numbers}. "
+                "Check the camera USB/power cable and config.REALSENSE_CAMERAS."
+            )
         self.serial_number = serial_number
         self.depth = depth
         self.pipe = rs.pipeline()

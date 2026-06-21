@@ -17,7 +17,7 @@ class DefaultTrainingConfig:
     training_starts: int = 100
     steps_per_update: int = 50
 
-    log_period: int = 10
+    log_period: int = 1000
     eval_period: int = 2000
 
     # "resnet" for ResNet10 from scratch and "resnet-pretrained" for frozen ResNet10 with pretrained weights

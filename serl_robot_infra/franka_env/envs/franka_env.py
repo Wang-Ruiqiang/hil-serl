@@ -422,6 +422,8 @@ class FrankaEnv(gym.Env):
         if fake_env:
             return
         
+        self.cap = None
+
         if self.enable_tactile:
             if DMTacSensor is None:
                 raise ImportError(
@@ -472,9 +474,13 @@ class FrankaEnv(gym.Env):
 
             # Start threads for each tactile sensor
             self.start_tac_processing()
-        
-        self.cap = None
-        self.init_cameras(self.config.REALSENSE_CAMERAS)
+
+        try:
+            self.init_cameras(self.config.REALSENSE_CAMERAS)
+        except Exception:
+            if getattr(self, "enable_tactile", False):
+                self.close_tac_processing()
+            raise
         if self.display_image:
             self.img_queue = queue.Queue()
             self.displayer = ImageDisplayer(self.img_queue, self.url)
