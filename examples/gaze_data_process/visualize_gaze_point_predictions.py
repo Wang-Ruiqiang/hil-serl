@@ -24,7 +24,8 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
     "frame_root",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-0",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-1",
     "Recording root with frame_*/color_image.jpg. If empty, samples are loaded from --data_dir.",
 )
 flags.DEFINE_string(
@@ -43,7 +44,7 @@ flags.DEFINE_string(
     "Directory for rendered prediction images.",
 )
 flags.DEFINE_string("image_key", "front_camera", "Observation image key in pkl samples.")
-flags.DEFINE_integer("num_samples", 100, "Number of random frames/samples to visualize.")
+flags.DEFINE_integer("num_samples", 200, "Number of random frames/samples to visualize.")
 flags.DEFINE_integer("seed", 0, "Random seed for selecting frames/samples.")
 flags.DEFINE_integer("batch_size", 64, "Prediction batch size.")
 flags.DEFINE_integer("image_width", 128, "Model input image width.")

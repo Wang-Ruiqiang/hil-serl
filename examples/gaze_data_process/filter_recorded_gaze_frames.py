@@ -14,7 +14,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
     "root",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
     "Recording root containing frame_* folders and recording_metadata.json.",
 )
 flags.DEFINE_string(

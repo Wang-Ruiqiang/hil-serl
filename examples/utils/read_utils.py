@@ -115,6 +115,7 @@ def get_frame_data(
     enable_tactile=False,
     exp_name="tennis_ball_pick",
     image_keys=None,
+    disable_image_crop=False,
 ):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
@@ -180,6 +181,13 @@ def get_frame_data(
     elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
         IMAGE_CROP = BOTTLE_TWIST_IMAGE_CROP
         CLASSIFIER_IMAGE_CROP = BOTTLE_TWIST_IMAGE_CROP
+    else:
+        IMAGE_CROP = {}
+        CLASSIFIER_IMAGE_CROP = {}
+
+    if disable_image_crop:
+        IMAGE_CROP = {}
+        CLASSIFIER_IMAGE_CROP = {}
 
     obs = {}
     for image_key in image_keys:

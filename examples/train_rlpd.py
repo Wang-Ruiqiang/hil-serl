@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os, sys, threading, queue, termios, tty, select
+import inspect
 import glob
 import time
 import jax
@@ -24,20 +25,12 @@ from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSing
 from serl_launcher.agents.continuous.sac_hybrid_dual import SACAgentHybridDualArm
 from serl_launcher.utils.timer_utils import Timer
 from serl_launcher.utils.train_utils import concat_batches
-from serl_launcher.utils.gaze_utils import (
-    add_or_compute_gaze_transition_fields,
-    compute_gaze_heatmap_fields,
-    ensure_optional_transition_fields,
-    infer_heatmap_shape,
-    load_gaze_predictor,
-    update_env_gaze_prediction_overlay,
-)
+from serl_launcher.utils.gaze_utils import ensure_optional_transition_fields
 
 from agentlace.trainer import TrainerServer, TrainerClient
 from agentlace.data.data_store import QueuedDataStore
 
 from serl_launcher.utils.launcher import (
-    make_gaze_sac_pixel_agent_hybrid_single_arm,
     make_sac_pixel_agent,
     make_sac_pixel_agent_hybrid_single_arm,
     make_trainer_config,
@@ -62,19 +55,24 @@ flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean(
-    "use_gaze_cgl",
+    "use_gaze_target_mask",
     True,
-    "Use the gaze-CGL critic variant. False keeps the original HIL-RL/SAC logic.",
-)
-flags.DEFINE_float(
-    "gaze_regularization_weight",
-    0.01,
-    "Weight for the CGL gaze auxiliary critic loss when use_gaze_cgl=True.",
+    "Add the gaze-selected predicted object mask as a visual observation modality.",
 )
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
     "examples/gaze_data_process/gaze_heatmap_ckpt",
     "Checkpoint directory for the frozen gaze heatmap predictor used by the actor.",
+)
+flags.DEFINE_string(
+    "mask_predictor_checkpoint_path",
+    "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt",
+    "Checkpoint file for the frozen RGB mask predictor used by gaze_target_mask.",
+)
+flags.DEFINE_integer(
+    "gaze_target_mask_dilation",
+    8,
+    "Dilation radius in mask-predictor pixels when checking whether gaze hits a mask.",
 )
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -91,52 +89,6 @@ def print_green(x):
 
 def print_red(x):
     return print("\033[91m {}\033[00m".format(x))
-
-def _find_info_value(info, target_key):
-    if isinstance(info, dict):
-        if target_key in info:
-            return info[target_key]
-        for value in info.values():
-            found = _find_info_value(value, target_key)
-            if found is not None:
-                return found
-    return None
-
-def _info_scalar(info, target_key):
-    value = _find_info_value(info, target_key)
-    if value is None:
-        return None
-    array = np.asarray(jax.device_get(value))
-    if array.size == 0:
-        return None
-    return float(np.mean(array))
-
-def _gaze_loss_log_line(info):
-    keys = (
-        "critic_td_loss",
-        "gaze_aux_loss",
-        "weighted_gaze_aux_loss",
-        "gaze_to_td_ratio",
-        "gaze_cgl_kl",
-        "gaze_valid_fraction",
-        "gaze_weight",
-    )
-    values = {
-        key: _info_scalar(info, key)
-        for key in keys
-    }
-    if values["gaze_aux_loss"] is None:
-        return None
-    return (
-        "gaze CGL: "
-        f"td={values['critic_td_loss']:.4g} "
-        f"aux={values['gaze_aux_loss']:.4g} "
-        f"weighted={values['weighted_gaze_aux_loss']:.4g} "
-        f"ratio={values['gaze_to_td_ratio']:.4g} "
-        f"kl={values['gaze_cgl_kl']:.4g} "
-        f"valid={values['gaze_valid_fraction']:.3f} "
-        f"weight={values['gaze_weight']:.4g}"
-    )
 
 class KeyReader(threading.Thread):
     def __init__(self):
@@ -346,17 +298,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     transitions = []
     demo_transitions = []
     obs, _ = env.reset()
-    gaze_heatmap_shape = infer_heatmap_shape(obs, config.image_keys)
-    gaze_predictor = (
-        load_gaze_predictor(
-            obs,
-            config.image_keys,
-            FLAGS.gaze_predictor_checkpoint_path,
-            log_fn=print_green,
-        )
-        if FLAGS.use_gaze_cgl
-        else None
-    )
     done = False
 
     # training loop
@@ -442,17 +383,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
             # if actions[..., 6] < 0.0:
             #     random_action = np.random.uniform(0.0, 0.30)
             #     actions[..., 6] = random_action
-            gaze_fields = (
-                compute_gaze_heatmap_fields(obs, gaze_predictor, gaze_heatmap_shape)
-                if FLAGS.use_gaze_cgl
-                else {}
-            )
-            if FLAGS.use_gaze_cgl:
-                update_env_gaze_prediction_overlay(
-                    env,
-                    gaze_fields.get("gaze_heatmap"),
-                    gaze_predictor,
-                )
             
         # Step environment
         with timer.context("step_env"):
@@ -495,7 +425,6 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                 masks=1.0 - done,
                 dones=done,
             )
-            transition.update(gaze_fields)
             transition["grasp_penalty"] = np.float32(info.get("grasp_penalty", 0.0))
             transition["robot_arm_penalty"] = np.float32(info.get("robot_arm_penalty", 0.0))
             
@@ -572,19 +501,24 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     server.start(threaded=True)
     print_green(f"online buffer size: {len(replay_buffer)}")
 
-    # Loop to wait until replay_buffer is filled
-    pbar = tqdm.tqdm(
-        total=config.training_starts,
-        initial=len(replay_buffer),
-        desc="Filling up replay buffer",
-        position=0,
-        leave=True,
+    # Loop to wait until replay_buffer is filled. Keep this as simple prints
+    # instead of tqdm because actor logs can break tqdm's carriage-return refresh.
+    print_green(
+        f"Filling up replay buffer: {len(replay_buffer)}/{config.training_starts}"
     )
+    last_buffer_size = len(replay_buffer)
     while len(replay_buffer) < config.training_starts:
-        pbar.update(len(replay_buffer) - pbar.n)  # Update progress bar
+        current_buffer_size = len(replay_buffer)
+        if current_buffer_size != last_buffer_size:
+            print_green(
+                f"Filling up replay buffer: "
+                f"{current_buffer_size}/{config.training_starts}"
+            )
+            last_buffer_size = current_buffer_size
         time.sleep(1)
-    pbar.update(len(replay_buffer) - pbar.n)  # Update progress bar
-    pbar.close()
+    print_green(
+        f"Replay buffer ready: {len(replay_buffer)}/{config.training_starts}"
+    )
 
     # send the initial network to the actor
     server.publish_network(agent.state.params)
@@ -650,9 +584,6 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
             if wandb_logger:
                 wandb_logger.log(update_info, step=step)
                 wandb_logger.log({"timer": timer.get_average_times()}, step=step)
-            gaze_log_line = _gaze_loss_log_line(update_info)
-            if gaze_log_line is not None:
-                print_green(f"[learner step {step}] {gaze_log_line}")
 
         if (
             step > 0
@@ -676,37 +607,26 @@ def main(_):
     rng, sampling_rng = jax.random.split(rng)
 
     assert FLAGS.exp_name in NEW_MAPPING, "Experiment folder not found."
-    env = config.get_environment(
+    env_kwargs = dict(
         fake_env=FLAGS.learner,
         save_video=FLAGS.save_video,
         classifier=True,
-        enable_tactile=FLAGS.enable_tactile
+        enable_tactile=FLAGS.enable_tactile,
     )
+    if "use_gaze_target_mask" in inspect.signature(config.get_environment).parameters:
+        env_kwargs["use_gaze_target_mask"] = FLAGS.use_gaze_target_mask
+    env_signature = inspect.signature(config.get_environment).parameters
+    if "gaze_predictor_checkpoint_path" in env_signature:
+        env_kwargs["gaze_predictor_checkpoint_path"] = FLAGS.gaze_predictor_checkpoint_path
+    if "mask_predictor_checkpoint_path" in env_signature:
+        env_kwargs["mask_predictor_checkpoint_path"] = FLAGS.mask_predictor_checkpoint_path
+    if "gaze_target_mask_dilation" in env_signature:
+        env_kwargs["gaze_target_mask_dilation"] = FLAGS.gaze_target_mask_dilation
+    env = config.get_environment(**env_kwargs)
     env = RecordEpisodeStatistics(env)
     sample_obs = env.observation_space.sample()
-    gaze_heatmap_shape = infer_heatmap_shape(sample_obs, config.image_keys)
-
-    agent_factory = (
-        make_gaze_sac_pixel_agent_hybrid_single_arm
-        if FLAGS.use_gaze_cgl
-        else make_sac_pixel_agent_hybrid_single_arm
-    )
-    gaze_agent_kwargs = {}
-    if FLAGS.use_gaze_cgl:
-        gaze_agent_kwargs = {
-            "gaze_regularization_weight": FLAGS.gaze_regularization_weight,
-            "gaze_heatmap_size": gaze_heatmap_shape,
-            # TODO: If gaze labels are generated from another camera later,
-            # make this configurable in the task config.
-            "gaze_attention_image_key": "front_camera",
-        }
-        print_green(
-            "Using gaze CGL agent "
-            f"(weight={FLAGS.gaze_regularization_weight}, "
-            f"heatmap_size={gaze_heatmap_shape})."
-        )
-    else:
-        print_green("Using original HIL-RL/SAC agent without gaze CGL.")
+    state_dim = sample_obs["state"].shape[-1]
+    agent_factory = make_sac_pixel_agent_hybrid_single_arm
 
     agent: SACAgent = agent_factory(
         seed=FLAGS.seed,
@@ -715,23 +635,10 @@ def main(_):
         image_keys=config.image_keys,
         encoder_type=config.encoder_type,
         discount=config.discount,
-        # state_weights=config.state_weights,
-        **gaze_agent_kwargs,
     )
     include_robot_arm_penalty = True
     include_grasp_penalty = True
 
-    # agent: SACAgent = make_sac_pixel_agent(
-    #     seed=FLAGS.seed,
-    #     sample_obs=env.observation_space.sample(),
-    #     sample_action=env.action_space.sample(),
-    #     image_keys=config.image_keys,
-    #     encoder_type=config.encoder_type,
-    #     discount=config.discount,
-    #     # state_weights=config.state_weights,
-    # )
-    
-    
     # replicate agent across devices
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     agent = jax.device_put(
@@ -764,8 +671,6 @@ def main(_):
             image_keys=config.image_keys,
             encoder_type=config.encoder_type,
             discount=config.discount,
-            # state_weights=config.state_weights,
-            **gaze_agent_kwargs,
         )
         # replicate agent across devices
         # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
@@ -801,12 +706,10 @@ def main(_):
             image_keys=config.image_keys,
             include_grasp_penalty=include_grasp_penalty,
             include_robot_arm_penalty=include_robot_arm_penalty,
-            include_gaze_aux=FLAGS.use_gaze_cgl,
-            gaze_heatmap_shape=gaze_heatmap_shape,
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-6-19",
+            project="tennis_ball_pick-6-24",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -823,27 +726,39 @@ def main(_):
             image_keys=config.image_keys,
             include_grasp_penalty=include_grasp_penalty,
             include_robot_arm_penalty=include_robot_arm_penalty,
-            include_gaze_aux=FLAGS.use_gaze_cgl,
-            gaze_heatmap_shape=gaze_heatmap_shape,
         )
-        learner_gaze_predictor = (
-            load_gaze_predictor(
-                sample_obs,
-                config.image_keys,
-                FLAGS.gaze_predictor_checkpoint_path,
-                log_fn=print_green,
-            )
-            if FLAGS.use_gaze_cgl
-            else None
-        )
+        logged_demo_gaze_target_mask = False
 
         def prepare_replay_transition(transition):
-            if FLAGS.use_gaze_cgl:
-                return add_or_compute_gaze_transition_fields(
-                    transition,
-                    learner_gaze_predictor,
-                    gaze_heatmap_shape,
-                )
+            nonlocal logged_demo_gaze_target_mask
+            transition = dict(transition)
+            for obs_key in ("observations", "next_observations"):
+                obs_dict = dict(transition[obs_key])
+                state = np.asarray(obs_dict["state"], dtype=np.float32)
+                if state.shape[-1] > state_dim:
+                    obs_dict["state"] = state[..., :state_dim]
+                missing_image_keys = [
+                    image_key for image_key in config.image_keys if image_key not in obs_dict
+                ]
+                if missing_image_keys:
+                    raise KeyError(
+                        f"Demo transition {obs_key} is missing image keys "
+                        f"{missing_image_keys}. Re-export demos with the same "
+                        "image_keys used by training, or disable those modalities."
+                    )
+                if (
+                    not logged_demo_gaze_target_mask
+                    and obs_key == "observations"
+                    and "gaze_target_mask" in obs_dict
+                ):
+                    gaze_target_mask = np.asarray(obs_dict["gaze_target_mask"])
+                    print_green(
+                        "[demo gaze_target_mask obs] "
+                        f"shape={gaze_target_mask.shape} "
+                        f"active_pixels={int(np.count_nonzero(gaze_target_mask[..., 0]))}"
+                    )
+                    logged_demo_gaze_target_mask = True
+                transition[obs_key] = obs_dict
             return ensure_optional_transition_fields(transition)
 
         assert FLAGS.demo_path is not None

@@ -27,7 +27,7 @@ def select_gaze_image_key(obs, image_keys: Iterable[str], preferred_key="front_c
     # TODO: If a future task uses gaze on a camera other than front_camera,
     # pass that camera key explicitly instead of relying on this fallback.
     for image_key in image_keys:
-        if "tactile" in image_key:
+        if "tactile" in image_key or "gaze" in image_key:
             continue
         if latest_image(obs, image_key) is not None:
             return image_key
@@ -87,7 +87,7 @@ def load_gaze_predictor(
 
 
 def compute_gaze_heatmap_fields(obs, gaze_predictor, gaze_heatmap_shape):
-    """Generate the gaze heatmap stored in replay transitions for CGL training."""
+    """Generate the gaze heatmap used internally to locate the gaze peak."""
     gaze_heatmap = np.zeros(gaze_heatmap_shape, dtype=np.float32)
     if gaze_predictor is None:
         return {"gaze_heatmap": gaze_heatmap}
@@ -151,25 +151,3 @@ def ensure_optional_transition_fields(transition):
     transition.setdefault("grasp_penalty", np.float32(0.0))
     transition.setdefault("robot_arm_penalty", np.float32(0.0))
     return transition
-
-
-def ensure_gaze_transition_fields(transition, gaze_heatmap_shape):
-    transition = dict(transition)
-    transition.setdefault(
-        "gaze_heatmap",
-        np.zeros(gaze_heatmap_shape, dtype=np.float32),
-    )
-    return transition
-
-
-def add_or_compute_gaze_transition_fields(transition, gaze_predictor, gaze_heatmap_shape):
-    transition = ensure_optional_transition_fields(transition)
-    if "gaze_heatmap" not in transition:
-        transition.update(
-            compute_gaze_heatmap_fields(
-                transition["observations"],
-                gaze_predictor,
-                gaze_heatmap_shape,
-            )
-        )
-    return ensure_gaze_transition_fields(transition, gaze_heatmap_shape)

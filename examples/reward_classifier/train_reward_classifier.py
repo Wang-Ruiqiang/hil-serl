@@ -1,10 +1,13 @@
 import glob
 import os, sys
 import pickle as pkl
+from collections import OrderedDict
+
 import jax
 from jax import numpy as jnp
 import flax.linen as nn
 from flax.training import checkpoints
+import gymnasium as gym
 import numpy as np
 import optax
 from tqdm import tqdm
@@ -24,9 +27,6 @@ from serl_launcher.vision.data_augmentations import batched_random_crop
 from serl_launcher.networks.reward_classifier import create_classifier
 
 
-from experiments.mappings import NEW_MAPPING
-
-
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
@@ -35,6 +35,11 @@ flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
 flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")
+flags.DEFINE_multi_string(
+    "image_key",
+    None,
+    "Image keys used by the classifier. Defaults to keys found in the pkl.",
+)
 flags.DEFINE_string(
     "data_dir",
     "",
@@ -85,26 +90,79 @@ def _resolve_script_relative_path(path, default_name):
     return os.path.join(SCRIPT_DIR, default_name)
 
 
-def main(_):
-    assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
-    config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=True, save_video=False, classifier=False, enable_tactile=FLAGS.enable_tactile)
+def _load_pickle_stream(path):
+    data = []
+    with open(path, "rb") as f:
+        while True:
+            try:
+                data.extend(pkl.load(f))
+            except EOFError:
+                break
+    return data
 
+
+def _infer_image_keys(observation):
+    if FLAGS.image_key:
+        return list(FLAGS.image_key)
+    preferred_order = ("front_camera", "wrist_camera", "tactile_data", "front_classifier")
+    image_keys = [key for key in preferred_order if key in observation]
+    image_keys.extend(
+        key
+        for key in observation
+        if key not in image_keys
+        and key != "state"
+        and getattr(observation[key], "ndim", 0) >= 3
+    )
+    if not image_keys:
+        raise ValueError(
+            f"Could not infer image keys from observation keys: {list(observation.keys())}"
+        )
+    return image_keys
+
+
+def _print_observation_summary(name, observation):
+    print(f"[shape] {name} observation keys={list(observation.keys())}")
+    for key, value in observation.items():
+        print(f"[shape] {key}: shape={np.asarray(value).shape} dtype={np.asarray(value).dtype}")
+
+
+def _space_from_array(value, *, add_history_dim=False):
+    value = np.asarray(value)
+    shape = value.shape
+    if add_history_dim:
+        shape = (1, *shape)
+
+    if value.dtype == np.uint8:
+        low = np.zeros(shape, dtype=np.uint8)
+        high = np.full(shape, 255, dtype=np.uint8)
+        return gym.spaces.Box(low=low, high=high, dtype=np.uint8)
+
+    dtype = np.float32 if np.issubdtype(value.dtype, np.floating) else value.dtype
+    low = np.full(shape, -np.inf, dtype=dtype)
+    high = np.full(shape, np.inf, dtype=dtype)
+    return gym.spaces.Box(low=low, high=high, dtype=dtype)
+
+
+def _make_spaces_from_transition(transition):
+    obs_spaces = OrderedDict()
+    for key, value in transition["observations"].items():
+        value = np.asarray(value)
+        add_history_dim = value.ndim in (1, 3)
+        obs_spaces[key] = _space_from_array(value, add_history_dim=add_history_dim)
+
+    action = np.asarray(transition["actions"], dtype=np.float32)
+    action_space = gym.spaces.Box(
+        low=np.full(action.shape, -np.inf, dtype=np.float32),
+        high=np.full(action.shape, np.inf, dtype=np.float32),
+        dtype=np.float32,
+    )
+    return gym.spaces.Dict(obs_spaces), action_space
+
+
+def main(_):
     devices = jax.local_devices()
     sharding = jax.sharding.PositionalSharding(devices)
-    
-    # stack_observation_space = space_stack(observation_space, 1)
-    
-    # Create buffer for positive transitions
-    # print("env.action_space shape= ", env.action_space.shape)
-    # print("env.observation_space shape= ", env.observation_space["state"].shape)
-    pos_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
-        capacity=10000,
-        include_label=True,
-    )
-    
+
     data_dir = _resolve_script_relative_path(FLAGS.data_dir, _task_data_dir_name())
     success_paths = glob.glob(os.path.join(data_dir, "*success*.pkl"))
     failure_paths = glob.glob(os.path.join(data_dir, "*failure*.pkl"))
@@ -115,21 +173,34 @@ def main(_):
     if not failure_paths:
         raise FileNotFoundError(f"No failure pkl files found in {data_dir}")
 
+    success_data = []
     for path in success_paths:
-        success_data = []
-        with open(path, "rb") as f:
-            while True:
-                try:
-                    success_data.extend(pkl.load(f))
-                except EOFError:  # 读取完毕
-                        break
-            
-            for trans in success_data:
-                trans["labels"] = 1
-                # print("trans keys= ",trans["observations"].keys())
-                # print("trans tactile_data shape=", trans["observations"]["tactile_data"].shape)
-                pos_buffer.insert(trans)
-            
+        success_data.extend(_load_pickle_stream(path))
+    failure_data = []
+    for path in failure_paths:
+        failure_data.extend(_load_pickle_stream(path))
+
+    if not success_data:
+        raise ValueError(f"No success transitions loaded from {data_dir}")
+    if not failure_data:
+        raise ValueError(f"No failure transitions loaded from {data_dir}")
+
+    image_keys = _infer_image_keys(success_data[0]["observations"])
+    _print_observation_summary("sample", success_data[0]["observations"])
+    observation_space, action_space = _make_spaces_from_transition(success_data[0])
+    print(f"[source] image_keys={image_keys}")
+    print(f"[source] replay_state_shape={observation_space['state'].shape}")
+
+    pos_buffer = ReplayBuffer(
+        observation_space=observation_space,
+        action_space=action_space,
+        capacity=max(len(success_data), 1),
+        include_label=True,
+    )
+    for trans in success_data:
+        trans["labels"] = 1
+        pos_buffer.insert(trans)
+
     pos_iterator = pos_buffer.get_iterator(
         sample_args={
             "batch_size": FLAGS.batch_size // 2,
@@ -139,23 +210,15 @@ def main(_):
     
     # Create buffer for negative transitions
     neg_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
-        capacity=10000,
+        observation_space=observation_space,
+        action_space=action_space,
+        capacity=max(len(failure_data), 1),
         include_label=True,
     )
 
-    for path in failure_paths:
-         failure_data = []
-         with open(path, "rb") as f:
-            while True:
-                try:
-                    failure_data.extend(pkl.load(f))
-                except EOFError:  # 读取完毕
-                    break
-            for trans in failure_data:
-                trans["labels"] = 0
-                neg_buffer.insert(trans)
+    for trans in failure_data:
+        trans["labels"] = 0
+        neg_buffer.insert(trans)
             
     neg_iterator = neg_buffer.get_iterator(
         sample_args={
@@ -172,20 +235,23 @@ def main(_):
     pos_sample = next(pos_iterator)
     neg_sample = next(neg_iterator)
     sample = concat_batches(pos_sample, neg_sample, axis=0)
-    print("config.classifier_keys = ", config.classifier_keys)
 
     rng, key = jax.random.split(rng)
     classifier = create_classifier(key, 
                                    sample["observations"], 
-                                   config.classifier_keys,
+                                   image_keys,
                                    )
 
     def data_augmentation_fn(rng, observations):
-        for pixel_key in config.classifier_keys:
+        for pixel_key in image_keys:
+            num_batch_dims = 2 if observations[pixel_key].ndim == 5 else 1
             observations = observations.copy(
                 add_or_replace={
                     pixel_key: batched_random_crop(
-                        observations[pixel_key], rng, padding=4, num_batch_dims=2
+                        observations[pixel_key],
+                        rng,
+                        padding=4,
+                        num_batch_dims=num_batch_dims,
                     )
                 }
             )

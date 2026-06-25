@@ -8,7 +8,7 @@ from serl_launcher.common.common import default_init
 
 
 class GazeAttentionCritic(nn.Module):
-    """Critic that can expose encoder spatial attention for CGL supervision."""
+    """Critic that can expose encoder spatial attention for gaze supervision."""
 
     encoder: Optional[nn.Module]
     network: nn.Module

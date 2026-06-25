@@ -5,6 +5,7 @@ import numpy as np
 import copy
 import pickle as pkl
 import datetime
+import inspect
 from absl import app, flags
 import time
 import sys, threading, queue, termios, tty, select
@@ -27,6 +28,11 @@ flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean("record_data", True, "Save robot/camera/tactile frame data while recording demos.")
 flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames while recording demos.")
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
+flags.DEFINE_string(
+    "frame_save_path",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-1",
+    "Directory used by the environment when --record_data or --record_gaze is enabled.",
+)
 
 
 # def _stdin_key_pressed(target_char="1"):
@@ -159,7 +165,7 @@ def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     collect_gaze = bool(FLAGS.record_gaze)
     config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(
+    env_kwargs = dict(
         fake_env=False,
         save_video=False,
         classifier=FLAGS.classifier,
@@ -167,6 +173,9 @@ def main(_):
         record_data=FLAGS.record_data or collect_gaze,
         record_gaze=collect_gaze,
     )
+    if "frame_save_path" in inspect.signature(config.get_environment).parameters:
+        env_kwargs["frame_save_path"] = FLAGS.frame_save_path
+    env = config.get_environment(**env_kwargs)
     
     fd = sys.stdin.fileno()
     old_term_settings = termios.tcgetattr(fd)

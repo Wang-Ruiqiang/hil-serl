@@ -1,5 +1,5 @@
 import collections
-from typing import Any, Iterator, Optional, Sequence, Tuple, Union
+from typing import Any, Iterator, Optional, Sequence, Union
 
 import gymnasium as gym
 import jax
@@ -44,8 +44,6 @@ class ReplayBuffer(Dataset):
         include_label: Optional[bool] = False,
         include_grasp_penalty: Optional[bool] = False,
         include_robot_arm_penalty: Optional[bool] = False,
-        include_gaze_aux: Optional[bool] = False,
-        gaze_heatmap_shape: Tuple[int, int] = (128, 128),
     ):
         if next_observation_space is None:
             next_observation_space = observation_space
@@ -74,12 +72,6 @@ class ReplayBuffer(Dataset):
         if include_robot_arm_penalty:
             dataset_dict['robot_arm_penalty'] = np.empty((capacity,), dtype=np.float32)
         
-        if include_gaze_aux:
-            dataset_dict['gaze_heatmap'] = np.empty(
-                (capacity, *gaze_heatmap_shape),
-                dtype=np.float32,
-            )
-
         super().__init__(dataset_dict)
 
         self._size = 0

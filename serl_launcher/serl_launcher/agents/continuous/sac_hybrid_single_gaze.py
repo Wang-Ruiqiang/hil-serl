@@ -15,11 +15,11 @@ from serl_launcher.networks.mlp import MLP
 
 
 class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
-    """Hybrid SAC agent with critic-side CGL attention supervision.
+    """Hybrid SAC agent with critic-side gaze-region attention supervision.
 
     This class keeps the base SAC update structure intact. The only behavioral
     change is inside critic_loss_fn, where an optional gaze auxiliary loss
-    encourages front-camera critic attention to cover the gaze heatmap.
+    encourages front-camera critic attention to cover the gaze peak region.
     """
 
     def forward_gaze_attention(
@@ -49,38 +49,58 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         if key in batch:
             return batch[key], True
         if key in batch["observations"]:
-            return batch["observations"][key], True
+            gaze_heatmap = batch["observations"][key]
+            if gaze_heatmap.ndim == 5:
+                gaze_heatmap = gaze_heatmap[:, -1, ..., 0]
+            elif gaze_heatmap.ndim == 4:
+                gaze_heatmap = gaze_heatmap[..., 0]
+            gaze_heatmap = gaze_heatmap.astype(jnp.float32)
+            gaze_heatmap = jnp.where(
+                jnp.max(gaze_heatmap) > 1.0,
+                gaze_heatmap / 255.0,
+                gaze_heatmap,
+            )
+            return gaze_heatmap, True
         height, width = self.config["gaze_heatmap_size"]
         return jnp.zeros((batch["rewards"].shape[0], height, width)), False
 
-    def _cgl_coverage_kl(self, gaze_heatmap, attention_map):
+    def _gaze_region_tracking_loss(self, gaze_heatmap, attention_map):
         batch_size, gaze_h, gaze_w = gaze_heatmap.shape
-        attention_map = jax.image.resize(
-            attention_map[..., None],
-            (batch_size, gaze_h, gaze_w, 1),
-            method="bilinear",
-        )[..., 0]
+        _, attention_h, attention_w = attention_map.shape
         attention_probs = jax.nn.softmax(
             attention_map.reshape(batch_size, -1),
             axis=-1,
         )
 
         gaze_heatmap = jnp.maximum(gaze_heatmap, 0.0)
-        gaze_max = jnp.max(gaze_heatmap.reshape(batch_size, -1), axis=-1, keepdims=True)
         gaze_flat = gaze_heatmap.reshape(batch_size, -1)
-        gaze_flat = jnp.where(
-            gaze_flat >= self.config["gaze_cgl_threshold"] * (gaze_max + 1e-8),
-            gaze_flat,
-            0.0,
+        gaze_max = jnp.max(gaze_flat, axis=-1)
+        gaze_peak = jnp.argmax(gaze_flat, axis=-1)
+        gaze_y = gaze_peak // gaze_w
+        gaze_x = gaze_peak % gaze_w
+
+        scale_y = 0.0 if gaze_h <= 1 else (attention_h - 1) / float(gaze_h - 1)
+        scale_x = 0.0 if gaze_w <= 1 else (attention_w - 1) / float(gaze_w - 1)
+        attention_y = jnp.rint(gaze_y.astype(jnp.float32) * scale_y).astype(jnp.int32)
+        attention_x = jnp.rint(gaze_x.astype(jnp.float32) * scale_x).astype(jnp.int32)
+
+        radius = self.config["gaze_region_radius"]
+        grid_y = jnp.arange(attention_h)[None, :, None]
+        grid_x = jnp.arange(attention_w)[None, None, :]
+        region_mask = (
+            (jnp.abs(grid_y - attention_y[:, None, None]) <= radius)
+            & (jnp.abs(grid_x - attention_x[:, None, None]) <= radius)
         )
-        gaze_sum = jnp.sum(gaze_flat, axis=-1, keepdims=True)
-        gaze_probs = gaze_flat / (gaze_sum + 1e-8)
-        kl = jnp.sum(
-            gaze_probs * (jnp.log(gaze_probs + 1e-8) - jnp.log(attention_probs + 1e-8)),
-            axis=-1,
+        region_mask = region_mask.reshape(batch_size, -1).astype(attention_probs.dtype)
+        region_coverage = jnp.sum(attention_probs * region_mask, axis=-1)
+        region_loss = -jnp.log(region_coverage + 1e-8)
+
+        has_gaze = gaze_max > self.config["gaze_valid_threshold"]
+        return (
+            jnp.where(has_gaze, region_loss, 0.0),
+            jnp.where(has_gaze, region_coverage, 0.0),
+            has_gaze.astype(jnp.float32),
         )
-        has_gaze = jnp.squeeze(gaze_sum > 1e-8, axis=-1)
-        return jnp.where(has_gaze, kl, 0.0), has_gaze.astype(jnp.float32)
 
     def critic_loss_fn(self, batch, params: Params, rng: PRNGKey):
         batch_size = batch["rewards"].shape[0]
@@ -145,11 +165,13 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         )
 
         gaze_weight = self.config["gaze_regularization_weight"]
-        cgl_loss_per_sample, valid_gaze = self._cgl_coverage_kl(gaze_heatmap, attention_map)
+        gaze_loss_per_sample, gaze_region_coverage, valid_gaze = (
+            self._gaze_region_tracking_loss(gaze_heatmap, attention_map)
+        )
         valid_gaze_count = jnp.maximum(jnp.sum(valid_gaze), 1.0)
         has_active_gaze_aux = has_gaze_heatmap and gaze_weight > 0.0
         gaze_aux_loss = (
-            jnp.sum(cgl_loss_per_sample * valid_gaze)
+            jnp.sum(gaze_loss_per_sample * valid_gaze)
             / valid_gaze_count
         )
         if not has_active_gaze_aux:
@@ -170,7 +192,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             "gaze_weight": jnp.asarray(gaze_weight, dtype=td_loss.dtype),
             "weighted_gaze_aux_loss": weighted_gaze_aux_loss,
             "gaze_to_td_ratio": gaze_to_td_ratio,
-            "gaze_cgl_kl": jnp.sum(cgl_loss_per_sample * valid_gaze) / valid_gaze_count,
+            "gaze_region_coverage": jnp.sum(gaze_region_coverage) / valid_gaze_count,
             "gaze_valid_fraction": jnp.mean(valid_gaze),
         }
 
@@ -205,7 +227,8 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         gaze_regularization_weight: float = 0.0,
         gaze_heatmap_key: str = "gaze_heatmap",
         gaze_heatmap_size: tuple = (128, 128),
-        gaze_cgl_threshold: float = 1e-4,
+        gaze_valid_threshold: float = 1e-8,
+        gaze_region_radius: int = 1,
         gaze_attention_image_key: str = "front_camera",
         **kwargs,
     ):
@@ -310,7 +333,8 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             gaze_regularization_weight=gaze_regularization_weight,
             gaze_heatmap_key=gaze_heatmap_key,
             gaze_heatmap_size=gaze_heatmap_size,
-            gaze_cgl_threshold=gaze_cgl_threshold,
+            gaze_valid_threshold=gaze_valid_threshold,
+            gaze_region_radius=gaze_region_radius,
             **kwargs,
         )
 

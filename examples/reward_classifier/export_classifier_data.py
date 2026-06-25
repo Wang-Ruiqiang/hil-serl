@@ -3,6 +3,7 @@
 import copy
 import datetime
 import importlib
+import inspect
 import os
 import pickle as pkl
 import re
@@ -36,6 +37,11 @@ flags.DEFINE_multi_string(
 )
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")
+flags.DEFINE_boolean(
+    "disable_image_crop",
+    True,
+    "Export full-frame classifier images and normalize gaze in full-frame coordinates.",
+)
 flags.DEFINE_string(
     "config_module",
     "",
@@ -130,6 +136,7 @@ def _transition_from_frames(current_frame: Path, next_frame: Path, robot_urdf_pa
         bool(FLAGS.enable_tactile),
         FLAGS.exp_name,
         image_keys=image_keys,
+        disable_image_crop=FLAGS.disable_image_crop,
     )
     next_obs, _, _ = read_utils.get_frame_data(
         str(next_frame),
@@ -137,6 +144,7 @@ def _transition_from_frames(current_frame: Path, next_frame: Path, robot_urdf_pa
         bool(FLAGS.enable_tactile),
         FLAGS.exp_name,
         image_keys=image_keys,
+        disable_image_crop=FLAGS.disable_image_crop,
     )
     action = np.asarray(frame_action, dtype=np.float32).copy()
     return copy.deepcopy(
@@ -171,6 +179,7 @@ def main(_):
     print(f"[source] config_module={FLAGS.config_module or f'experiments.{FLAGS.exp_name}.config'}")
     print(f"[source] classifier_image_keys={image_keys}")
     print(f"[source] robot_urdf={robot_urdf_path}")
+    print(f"[source] disable_image_crop={FLAGS.disable_image_crop}")
 
     roots = [Path(root).expanduser() for root in FLAGS.frame_root]
     for root in roots:

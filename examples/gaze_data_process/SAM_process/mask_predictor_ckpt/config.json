@@ -1,0 +1,20 @@
+{
+  "data_roots": [
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1"
+  ],
+  "output_dir": "/home/user/workspaces/DexTactHIL/hil-serl/examples/gaze_data_process/SAM_process/mask_predictor_ckpt",
+  "image_size": 128,
+  "batch_size": 32,
+  "num_epochs": 40,
+  "learning_rate": 0.0001,
+  "weight_decay": 1e-05,
+  "val_ratio": 0.15,
+  "seed": 42,
+  "num_workers": 4,
+  "mask_bce_weight": 1.0,
+  "mask_dice_weight": 1.0,
+  "base_channels": 32,
+  "min_mask_pixels": 8,
+  "max_samples": null
+}

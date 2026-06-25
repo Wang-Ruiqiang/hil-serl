@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import csv
 from pathlib import Path
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -28,7 +29,7 @@ DEFAULT_CHECKPOINT_PATH = str(
     / "examples"
     / "experiments"
     / "tennis_ball_pick"
-    / "2026-6-19_0_ball_pick_rl_run"
+    / "2026-6-22_0_ball_pick_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
@@ -62,7 +63,7 @@ flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("frame_root", DEFAULT_FRAME_ROOT, "Recorded frame root.")
 flags.DEFINE_string("checkpoint_path", DEFAULT_CHECKPOINT_PATH, "Checkpoint directory.")
-flags.DEFINE_integer("checkpoint_step", 11000, "Checkpoint step to load.")
+flags.DEFINE_integer("checkpoint_step", 26000, "Checkpoint step to load.")
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
     DEFAULT_GAZE_PREDICTOR_CHECKPOINT_PATH,
@@ -70,8 +71,13 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string("robot_urdf_path", DEFAULT_ROBOT_URDF_PATH, "Robot URDF path.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile input.")
-flags.DEFINE_boolean("use_gaze_cgl", True, "Use gaze-CGL critic agent.")
+flags.DEFINE_boolean("use_gaze_aux", True, "Use gaze auxiliary critic agent.")
 flags.DEFINE_float("gaze_regularization_weight", 0.2, "Gaze auxiliary loss weight.")
+flags.DEFINE_integer(
+    "gaze_region_radius",
+    0,
+    "Radius, in critic attention cells, used to report gaze attention coverage.",
+)
 flags.DEFINE_integer("image_size", 128, "Network RGB image size.")
 flags.DEFINE_integer("max_frames", 200, "Max frames to process. Use 0 for all frames.")
 flags.DEFINE_integer("frame_stride", 1, "Process every Nth frame.")
@@ -289,6 +295,83 @@ def heatmap_peak_xy(heatmap):
     return int(x), int(y), float(np.max(heatmap)), xy_norm
 
 
+def softmax_flat(values):
+    values = np.asarray(values, dtype=np.float32).reshape(-1)
+    values = values - np.max(values)
+    probs = np.exp(values)
+    return probs / max(float(np.sum(probs)), 1e-8)
+
+
+def gaze_attention_metrics(attention_map, gaze_heatmap, radius):
+    if gaze_heatmap is None:
+        return {}
+
+    attention_map = np.asarray(attention_map, dtype=np.float32)
+    while attention_map.ndim > 2:
+        attention_map = attention_map[0]
+
+    gaze_heatmap = np.asarray(gaze_heatmap, dtype=np.float32)
+    while gaze_heatmap.ndim > 2:
+        gaze_heatmap = gaze_heatmap[0]
+
+    gaze_peak = heatmap_peak_xy(gaze_heatmap)
+    if gaze_peak is None:
+        return {}
+
+    gaze_x, gaze_y, gaze_peak_value, _ = gaze_peak
+    attention_h, attention_w = attention_map.shape
+    gaze_h, gaze_w = gaze_heatmap.shape
+    attention_y = int(round(gaze_y * (attention_h - 1) / max(gaze_h - 1, 1)))
+    attention_x = int(round(gaze_x * (attention_w - 1) / max(gaze_w - 1, 1)))
+
+    grid_y, grid_x = np.ogrid[:attention_h, :attention_w]
+    region_mask = (
+        (np.abs(grid_y - attention_y) <= radius)
+        & (np.abs(grid_x - attention_x) <= radius)
+    )
+    attention_probs = softmax_flat(attention_map).reshape(attention_h, attention_w)
+    coverage = float(np.sum(attention_probs[region_mask]))
+    aux_loss = float(-np.log(max(coverage, 1e-8)))
+    region_cells = int(np.sum(region_mask))
+    random_baseline = region_cells / float(attention_h * attention_w)
+    peak_y, peak_x = np.unravel_index(int(np.argmax(attention_probs)), attention_probs.shape)
+
+    return {
+        "gaze_peak": (int(gaze_x), int(gaze_y), float(gaze_peak_value)),
+        "gaze_attention_cell": (int(attention_x), int(attention_y)),
+        "attention_peak_cell": (int(peak_x), int(peak_y)),
+        "attention_peak_prob": float(attention_probs[peak_y, peak_x]),
+        "gaze_coverage": coverage,
+        "gaze_aux_loss": aux_loss,
+        "gaze_random_baseline": random_baseline,
+        "gaze_region_cells": region_cells,
+        "gaze_region_radius": int(radius),
+    }
+
+
+def metric_text_lines(metrics):
+    if not metrics:
+        return []
+    return [
+        (
+            "gaze_cov="
+            f"{metrics['gaze_coverage']:.3f} "
+            f"base={metrics['gaze_random_baseline']:.3f}"
+        ),
+        (
+            "aux="
+            f"{metrics['gaze_aux_loss']:.3f} "
+            f"cell={metrics['gaze_attention_cell']} "
+            f"r={metrics['gaze_region_radius']}"
+        ),
+        (
+            "attn_peak="
+            f"{metrics['attention_peak_cell']} "
+            f"p={metrics['attention_peak_prob']:.3f}"
+        ),
+    ]
+
+
 def render_heatmap_overlay(image_rgb, heatmap, title, lines=()):
     heatmap = normalize_heatmap(heatmap)
     heatmap = cv2.resize(
@@ -318,12 +401,12 @@ def render_heatmap_overlay(image_rgb, heatmap, title, lines=()):
     return overlay
 
 
-def render_attention(image_rgb, attention_map, fid):
+def render_attention(image_rgb, attention_map, fid, lines=()):
     return render_heatmap_overlay(
         image_rgb,
         attention_map,
         f"frame={fid} critic attention",
-        [f"attn_shape={tuple(np.asarray(attention_map).shape)}"],
+        [f"attn_shape={tuple(np.asarray(attention_map).shape)}", *lines],
     )
 
 
@@ -344,14 +427,16 @@ def render_gaze_prediction(image_rgb, gaze_heatmap, fid):
 def create_agent(config, sample_obs):
     agent_factory = (
         make_gaze_sac_pixel_agent_hybrid_single_arm
-        if FLAGS.use_gaze_cgl
+        if FLAGS.use_gaze_aux
         else make_sac_pixel_agent_hybrid_single_arm
     )
     agent_kwargs = {}
-    if FLAGS.use_gaze_cgl:
+    if FLAGS.use_gaze_aux:
         agent_kwargs = {
             "gaze_regularization_weight": FLAGS.gaze_regularization_weight,
             "gaze_heatmap_size": sample_obs["front_camera"].shape[:2],
+            "gaze_region_radius": FLAGS.gaze_region_radius,
+            "gaze_attention_image_key": "front_camera",
         }
     return agent_factory(
         seed=FLAGS.seed,
@@ -434,29 +519,69 @@ def main(_):
 
     summary_path = output_dir / "attention_summary.txt"
     with summary_path.open("w") as summary_file:
-        summary_file.write(
-            "frame_id,attention_shape,gaze_shape,gaze_peak,action\n"
+        summary_writer = csv.writer(summary_file)
+        summary_writer.writerow(
+            [
+                "frame_id",
+                "attention_shape",
+                "gaze_shape",
+                "gaze_peak",
+                "gaze_attention_cell",
+                "attention_peak_cell",
+                "attention_peak_prob",
+                "gaze_coverage",
+                "gaze_aux_loss",
+                "gaze_random_baseline",
+                "gaze_region_cells",
+                "gaze_region_radius",
+                "action",
+            ]
         )
         for index, frame_dir in enumerate(frame_dirs, start=1):
             fid = frame_id(frame_dir)
             try:
                 obs, action = read_frame_observation_and_action(frame_dir, config.image_keys)
-                attention_map = critic_attention_for_frame(agent, obs, action)
-                critic_overlay = render_attention(
-                    obs["front_camera"],
-                    attention_map,
-                    fid,
-                )
-
-                gaze_shape = ""
-                gaze_peak = ""
-                saved_path = None
+                gaze_heatmap = None
                 if gaze_predictor is not None:
                     gaze_heatmap = compute_gaze_heatmap_fields(
                         obs,
                         gaze_predictor,
                         obs["front_camera"].shape[:2],
                     )["gaze_heatmap"]
+                attention_map = critic_attention_for_frame(agent, obs, action)
+                metrics = gaze_attention_metrics(
+                    attention_map,
+                    gaze_heatmap,
+                    FLAGS.gaze_region_radius,
+                )
+                critic_overlay = render_attention(
+                    obs["front_camera"],
+                    attention_map,
+                    fid,
+                    metric_text_lines(metrics),
+                )
+
+                gaze_shape = ""
+                gaze_peak = ""
+                gaze_attention_cell = ""
+                attention_peak_cell = ""
+                attention_peak_prob = ""
+                gaze_coverage = ""
+                gaze_aux_loss = ""
+                gaze_random_baseline = ""
+                gaze_region_cells = ""
+                gaze_region_radius = ""
+                if metrics:
+                    gaze_attention_cell = metrics["gaze_attention_cell"]
+                    attention_peak_cell = metrics["attention_peak_cell"]
+                    attention_peak_prob = f"{metrics['attention_peak_prob']:.8f}"
+                    gaze_coverage = f"{metrics['gaze_coverage']:.8f}"
+                    gaze_aux_loss = f"{metrics['gaze_aux_loss']:.8f}"
+                    gaze_random_baseline = f"{metrics['gaze_random_baseline']:.8f}"
+                    gaze_region_cells = str(metrics["gaze_region_cells"])
+                    gaze_region_radius = str(metrics["gaze_region_radius"])
+                saved_path = None
+                if gaze_predictor is not None:
                     gaze_shape = tuple(np.asarray(gaze_heatmap).shape)
                     peak = heatmap_peak_xy(gaze_heatmap)
                     if peak is not None:
@@ -473,14 +598,29 @@ def main(_):
                     if not cv2.imwrite(str(comparison_path), comparison):
                         raise RuntimeError(f"cv2.imwrite failed: {comparison_path}")
                     saved_path = comparison_path
-                summary_file.write(
-                    f"{fid},{tuple(attention_map.shape)},{gaze_shape},{gaze_peak},"
-                    f"{np.array2string(action, precision=5, separator=' ')}\n"
+                summary_writer.writerow(
+                    [
+                        fid,
+                        tuple(attention_map.shape),
+                        gaze_shape,
+                        gaze_peak,
+                        gaze_attention_cell,
+                        attention_peak_cell,
+                        attention_peak_prob,
+                        gaze_coverage,
+                        gaze_aux_loss,
+                        gaze_random_baseline,
+                        gaze_region_cells,
+                        gaze_region_radius,
+                        np.array2string(action, precision=5, separator=" "),
+                    ]
                 )
                 if index == 1 or index % 25 == 0:
                     if saved_path is not None:
                         print_green(
-                            f"[{index}/{len(frame_dirs)}] saved {saved_path.name}"
+                            f"[{index}/{len(frame_dirs)}] saved {saved_path.name} "
+                            f"gaze_cov={gaze_coverage} aux={gaze_aux_loss} "
+                            f"base={gaze_random_baseline}"
                         )
             except Exception as exc:
                 print_red(f"[skip] frame={fid}: {exc}")

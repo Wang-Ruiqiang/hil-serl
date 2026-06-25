@@ -3,6 +3,7 @@
 import copy
 import datetime
 import importlib
+import inspect
 import json
 import os
 import pickle as pkl
@@ -23,18 +24,32 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ROBOT_INFRA_DIR))
 
-
 FLAGS = flags.FLAGS
 
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
+        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
     ],
     "Recorded data root(s) containing frame_xxx folders and recording_metadata.json.",
 )
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")
+flags.DEFINE_string(
+    "gaze_json_name",
+    "gaze_contact.json",
+    "JSON file inside each frame folder that stores realsense gaze coordinates.",
+)
+flags.DEFINE_boolean(
+    "require_gaze_hit",
+    False,
+    "Skip frames whose gaze JSON has hit=false.",
+)
+flags.DEFINE_boolean(
+    "disable_image_crop",
+    True,
+    "Export full-frame RGB images and normalize gaze in full-frame coordinates.",
+)
 flags.DEFINE_string(
     "config_module",
     "",
@@ -70,6 +85,21 @@ flags.DEFINE_integer(
     0,
     "Optional debug limit. 0 means export all transitions.",
 )
+flags.DEFINE_boolean(
+    "use_gaze_target_mask",
+    True,
+    "Add gaze-selected mask image to exported observations.",
+)
+flags.DEFINE_string(
+    "gaze_target_mask_key",
+    "gaze_target_mask",
+    "Observation key for the gaze-selected mask image.",
+)
+flags.DEFINE_integer(
+    "gaze_target_mask_dilation",
+    8,
+    "Dilation radius in exported 128x128 mask pixels when checking gaze hits.",
+)
 
 
 def _frame_number(path: Path) -> int:
@@ -94,12 +124,141 @@ def _read_numeric_file(path: Path, default=None, dtype=np.float32):
     return np.asarray(values, dtype=dtype).reshape(-1)
 
 
+def _read_recorded_success(frame_dir: Path) -> bool:
+    label_path = frame_dir / "is_recorded_success.txt"
+    if not label_path.exists():
+        label_path = frame_dir / "is_record_success.txt"
+    if not label_path.exists():
+        return False
+    return label_path.read_text().strip() == "1"
+
+
 def _read_rgb(path: Path, size=(128, 128)):
     image_bgr = cv2.imread(str(path))
     if image_bgr is None:
         raise FileNotFoundError(f"Missing or unreadable RGB image: {path}")
     image_bgr = cv2.resize(image_bgr, size, interpolation=cv2.INTER_LINEAR)
     return image_bgr[..., ::-1].astype(np.uint8)
+
+
+def _read_mask(mask_path: Path, target_shape=(128, 128)):
+    if not mask_path.exists():
+        return np.zeros(target_shape, dtype=bool)
+    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        return np.zeros(target_shape, dtype=bool)
+    mask = cv2.resize(
+        mask,
+        (int(target_shape[1]), int(target_shape[0])),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    return mask > 0
+
+
+def _mask_paths(frame_dir: Path):
+    frame_id = _frame_number(frame_dir)
+    central_names = {
+        "mask1": f"frame_{frame_id:06d}_mask1.png",
+        "mask2": f"frame_{frame_id:06d}_mask2.png",
+    }
+    root = frame_dir.parent
+    return {
+        "mask1": [
+            frame_dir / "mask1.png",
+            frame_dir / "rs_mask_obj0.png",
+            root / "sam_masks" / central_names["mask1"],
+            root / "sam_masks" / "propagated" / central_names["mask1"],
+        ],
+        "mask2": [
+            frame_dir / "mask2.png",
+            frame_dir / "rs_mask_obj1.png",
+            root / "sam_masks" / central_names["mask2"],
+            root / "sam_masks" / "propagated" / central_names["mask2"],
+        ],
+    }
+
+
+def _first_existing_mask(frame_dir: Path, slot: str, target_shape=(128, 128)):
+    for mask_path in _mask_paths(frame_dir)[slot]:
+        if mask_path.exists():
+            return _read_mask(mask_path, target_shape)
+    return np.zeros(target_shape, dtype=bool)
+
+
+def _dilate_mask(mask, radius: int):
+    if radius <= 0:
+        return mask
+    kernel_size = int(radius) * 2 + 1
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_size, kernel_size),
+    )
+    return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
+
+
+def _mask_bbox(mask):
+    ys, xs = np.where(np.asarray(mask, dtype=bool))
+    if xs.size == 0 or ys.size == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+
+def _mask_bbox_inside(inner_mask, outer_mask, margin_px: int = 2):
+    inner_bbox = _mask_bbox(inner_mask)
+    outer_bbox = _mask_bbox(outer_mask)
+    if inner_bbox is None or outer_bbox is None:
+        return False
+    ix0, iy0, ix1, iy1 = inner_bbox
+    ox0, oy0, ox1, oy1 = outer_bbox
+    margin_px = int(margin_px)
+    return (
+        ix0 >= ox0 - margin_px
+        and iy0 >= oy0 - margin_px
+        and ix1 <= ox1 + margin_px
+        and iy1 <= oy1 + margin_px
+    )
+
+
+def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
+    try:
+        gaze_xy = _read_recorded_gaze_xy(frame_dir)
+    except Exception:
+        return np.zeros((*target_shape, 3), dtype=np.uint8)
+
+    mask1 = _first_existing_mask(frame_dir, "mask1", target_shape)
+    mask2 = _first_existing_mask(frame_dir, "mask2", target_shape)
+    masks = [mask1, mask2]
+
+    height, width = target_shape
+    gaze_x = int(round(float(np.clip(gaze_xy[0], 0.0, 1.0)) * (width - 1)))
+    gaze_y = int(round(float(np.clip(gaze_xy[1], 0.0, 1.0)) * (height - 1)))
+
+    search_masks = [
+        _dilate_mask(mask, FLAGS.gaze_target_mask_dilation) for mask in masks
+    ]
+    candidate_indices = [
+        index
+        for index, mask in enumerate(search_masks)
+        if bool(mask[gaze_y, gaze_x])
+    ]
+    if not candidate_indices:
+        selected = np.zeros(target_shape, dtype=bool)
+    elif len(candidate_indices) == 1:
+        selected = masks[candidate_indices[0]]
+    elif 0 in candidate_indices and 1 in candidate_indices and _mask_bbox_inside(
+        masks[0],
+        masks[1],
+    ):
+        selected = masks[1]
+    else:
+        selected_index = max(
+            candidate_indices,
+            key=lambda index: int(masks[index].sum()),
+        )
+        selected = masks[selected_index]
+
+    mask_image = (selected.astype(np.uint8) * 255)[..., None]
+    return np.repeat(mask_image, 3, axis=-1)
 
 
 def _read_tactile_depth(path: Path):
@@ -117,6 +276,37 @@ def _read_tactile(frame_dir: Path):
     thumb = _read_tactile_depth(frame_dir / "thumb_depth_image.png")
     index = _read_tactile_depth(frame_dir / "index_depth_image.png")
     return np.concatenate([thumb, index], axis=1).astype(np.uint8)
+
+
+def _front_camera_bounds(exp_name: str, realsense_size):
+    width, height = int(realsense_size[0]), int(realsense_size[1])
+    return 0.0, 0.0, float(width), float(height)
+
+
+def _read_recorded_gaze_xy(frame_dir: Path):
+    gaze_path = frame_dir / FLAGS.gaze_json_name
+    if not gaze_path.exists():
+        raise FileNotFoundError(f"Missing gaze json: {gaze_path}")
+
+    gaze_data = json.loads(gaze_path.read_text())
+    if FLAGS.require_gaze_hit and not bool(gaze_data.get("hit", False)):
+        raise ValueError(f"Invalid gaze hit in {gaze_path}")
+
+    gaze_uv = gaze_data.get("gaze_uv_in_realsense")
+    realsense_size = gaze_data.get("realsense_size")
+    if gaze_uv is None or realsense_size is None:
+        raise ValueError(
+            f"{gaze_path} must contain gaze_uv_in_realsense and realsense_size"
+        )
+
+    x, y = float(gaze_uv[0]), float(gaze_uv[1])
+    x0, y0, x1, y1 = _front_camera_bounds(FLAGS.exp_name, realsense_size)
+    x_norm = (x - x0) / max(x1 - x0, 1e-6)
+    y_norm = (y - y0) / max(y1 - y0, 1e-6)
+    return np.asarray(
+        [np.clip(x_norm, 0.0, 1.0), np.clip(y_norm, 0.0, 1.0)],
+        dtype=np.float32,
+    )
 
 
 def _read_ee_pose(frame_dir: Path, robot_urdf_path: str):
@@ -143,6 +333,8 @@ def _read_frame_data(frame_dir: Path, robot_urdf_path: str, image_keys):
             obs[image_key] = _read_rgb(frame_dir / "color_image.jpg")
         elif image_key == "tactile_data":
             obs[image_key] = _read_tactile(frame_dir)
+        elif image_key == FLAGS.gaze_target_mask_key:
+            obs[image_key] = _read_gaze_target_mask(frame_dir)
         else:
             raise ValueError(f"Unsupported image key for RL demo export: {image_key}")
 
@@ -160,7 +352,6 @@ def _read_frame_data(frame_dir: Path, robot_urdf_path: str, image_keys):
         ],
         axis=0,
     ).astype(np.float32)
-
     action = _read_numeric_file(
         frame_dir / "action.txt",
         default=np.zeros(7, dtype=np.float32),
@@ -227,9 +418,19 @@ def _image_keys_from_config():
         config_module = importlib.import_module(module_name)
         config = config_module.TrainConfig()
         if hasattr(config, "get_image_keys"):
-            return list(config.get_image_keys(bool(FLAGS.enable_tactile)))
+            signature = inspect.signature(config.get_image_keys)
+            kwargs = {"enable_tactile": bool(FLAGS.enable_tactile)}
+            if "use_gaze_target_mask" in signature.parameters:
+                kwargs["use_gaze_target_mask"] = bool(FLAGS.use_gaze_target_mask)
+            image_keys = list(config.get_image_keys(**kwargs))
+            if FLAGS.use_gaze_target_mask and FLAGS.gaze_target_mask_key not in image_keys:
+                image_keys.append(FLAGS.gaze_target_mask_key)
+            return image_keys
         if hasattr(config, "image_keys"):
-            return list(config.image_keys)
+            image_keys = list(config.image_keys)
+            if FLAGS.use_gaze_target_mask and FLAGS.gaze_target_mask_key not in image_keys:
+                image_keys.append(FLAGS.gaze_target_mask_key)
+            return image_keys
     except Exception as exc:
         print(
             f"[info] could not import {module_name} only for image_keys ({exc}); "
@@ -239,6 +440,8 @@ def _image_keys_from_config():
     image_keys = ["front_camera"]
     if FLAGS.enable_tactile:
         image_keys.append("tactile_data")
+    if FLAGS.use_gaze_target_mask:
+        image_keys.append(FLAGS.gaze_target_mask_key)
     return image_keys
 
 
@@ -268,19 +471,18 @@ def _transition_from_frames(
         "grasp_penalty": 0.0,
         "robot_arm_penalty": 0.0,
     }
-    return copy.deepcopy(
-        dict(
-            observations=_stack_obs_horizon_one(obs),
-            actions=action,
-            next_observations=_stack_obs_horizon_one(next_obs),
-            rewards=np.float32(reward),
-            masks=np.float32(1.0 - float(done)),
-            dones=bool(done),
-            infos=info,
-            grasp_penalty=np.float32(0.0),
-            robot_arm_penalty=np.float32(0.0),
-        )
+    transition = dict(
+        observations=_stack_obs_horizon_one(obs),
+        actions=action,
+        next_observations=_stack_obs_horizon_one(next_obs),
+        rewards=np.float32(reward),
+        masks=np.float32(1.0 - float(done)),
+        dones=bool(done),
+        infos=info,
+        grasp_penalty=np.float32(0.0),
+        robot_arm_penalty=np.float32(0.0),
     )
+    return copy.deepcopy(transition)
 
 
 def _iter_episode_pairs(root: Path, episode):
@@ -291,8 +493,7 @@ def _iter_episode_pairs(root: Path, episode):
         return
 
     episode_index = int(episode.get("episode_index", 0))
-    last_range_index = len(kept_ranges) - 1
-    for range_index, frame_range in enumerate(kept_ranges):
+    for frame_range in kept_ranges:
         start = int(frame_range["start_frame"])
         end = int(frame_range["end_frame"])
         if end <= start:
@@ -302,12 +503,13 @@ def _iter_episode_pairs(root: Path, episode):
             next_frame = _frame_dir(root, frame_id + 1)
             if not current_frame.exists() or not next_frame.exists():
                 continue
-            is_last_transition = (
-                range_index == last_range_index
-                and frame_id == end - 1
-                and bool(episode.get("success", False))
+            is_success_transition = bool(episode.get("success", False)) and (
+                _read_recorded_success(current_frame)
+                or _read_recorded_success(next_frame)
             )
-            yield current_frame, next_frame, episode_index, is_last_transition
+            yield current_frame, next_frame, episode_index, is_success_transition
+            if is_success_transition:
+                return
 
 
 def main(_):
@@ -328,6 +530,7 @@ def main(_):
     print(f"[source] image_keys={image_keys}")
     print(f"[source] robot_urdf={robot_urdf_path}")
     print(f"[source] use_filtered_ranges={FLAGS.use_filtered_ranges}")
+    print(f"[source] disable_image_crop={FLAGS.disable_image_crop}")
 
     transitions = []
     episode_count = 0

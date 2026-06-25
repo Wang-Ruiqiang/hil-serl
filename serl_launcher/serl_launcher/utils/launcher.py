@@ -162,7 +162,8 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
     gaze_regularization_weight=0.0,
     gaze_heatmap_key="gaze_heatmap",
     gaze_heatmap_size=(128, 128),
-    gaze_cgl_threshold=1e-4,
+    gaze_valid_threshold=1e-8,
+    gaze_region_radius=1,
     gaze_attention_image_key="front_camera",
 ):
     agent = SACAgentHybridSingleArmGaze.create_pixels(
@@ -204,7 +205,8 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
         gaze_regularization_weight=gaze_regularization_weight,
         gaze_heatmap_key=gaze_heatmap_key,
         gaze_heatmap_size=gaze_heatmap_size,
-        gaze_cgl_threshold=gaze_cgl_threshold,
+        gaze_valid_threshold=gaze_valid_threshold,
+        gaze_region_radius=gaze_region_radius,
         gaze_attention_image_key=gaze_attention_image_key,
     )
     return agent

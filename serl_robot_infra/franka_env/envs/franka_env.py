@@ -73,19 +73,10 @@ class DefaultEnvConfig:
     """Default configuration for FrankaEnv. Fill in the values below."""
 
     REALSENSE_CAMERAS: Dict = {
-        #denso
-        # "front_camera": "242422303461",
-        #franka
         "front_camera": "151422254571",
-        # "wrist_camera": "218622271185",
     }
-    # EXTRA_REALSENSE_CAMERAS: Dict = {
-    #     # "front_camera": "242422303461",
-    #     "side_camera": "234222300515",
-    # }
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((7,))
-    # GRASP_POSE: np.ndarray = np.zeros((6,))
     REWARD_THRESHOLD: np.ndarray = np.zeros((6,))
     ACTION_SCALE = np.zeros((3,))
     CMD_POSE_RESYNC_THRESHOLD: float = 0.05
@@ -597,8 +588,8 @@ class FrankaEnv(gym.Env):
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
         if self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
-            if self.nextpos[2] < 0.20:
-                self.nextpos[2] = 0.20
+            if self.nextpos[2] < 0.19:
+                self.nextpos[2] = 0.19
         elif self.exp_name == "tube_insertion":
             if self.nextpos[2] < 0.20:
                 self.nextpos[2] = 0.20

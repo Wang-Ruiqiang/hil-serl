@@ -6,7 +6,9 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false && \
 export XLA_PYTHON_CLIENT_MEM_FRACTION=.7 && \
 python "$ROOT/examples/train_rlpd.py" "$@" \
     --exp_name=tennis_ball_pick \
-    --checkpoint_path="$SCRIPT_DIR/2026-6-19_0_ball_pick_rl_run" \
-    --demo_path="$ROOT/examples/demo_data/tennis_ball_pick_20_demos_2026-06-19_15-11-07.pkl" \
+    --checkpoint_path="$SCRIPT_DIR/2026-6-24_0_ball_pick_rl_run" \
+    --demo_path="$ROOT/examples/demo_data/tennis_ball_pick_20_demos_2026-06-24_16-48-30.pkl" \
     --gaze_predictor_checkpoint_path="$ROOT/examples/gaze_data_process/gaze_heatmap_ckpt" \
-    --learner \
+    --mask_predictor_checkpoint_path="$ROOT/examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt" \
+    --use_gaze_target_mask=True \
+    --learner
