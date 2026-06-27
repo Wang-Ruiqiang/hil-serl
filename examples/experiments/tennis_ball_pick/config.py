@@ -97,6 +97,7 @@ class EnvConfig(DefaultEnvConfig):
 class TrainConfig(DefaultTrainingConfig):
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     batch_size = 128
+    log_period = 10
     buffer_period = 1000
     checkpoint_period = 1000
     steps_per_update = 100
@@ -112,7 +113,7 @@ class TrainConfig(DefaultTrainingConfig):
         if enable_tactile:
             image_keys.append("tactile_data")
         if use_gaze_target_mask:
-            image_keys.append("gaze_target_mask")
+            image_keys.append("front_camera_masked")
         return image_keys
 
     def get_classifier_keys(self, enable_tactile=True):
@@ -134,6 +135,9 @@ class TrainConfig(DefaultTrainingConfig):
         mask_predictor_checkpoint_path=(
             "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
         ),
+        mask_selection_mode="gaze",
+        pick_classifier_checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
+        pick_classifier_threshold=0.95,
         gaze_target_mask_dilation=2,
         frame_save_path=None,
     ):
@@ -170,6 +174,9 @@ class TrainConfig(DefaultTrainingConfig):
                 use_gaze_target_mask=use_gaze_target_mask,
                 gaze_predictor_checkpoint_path=gaze_predictor_checkpoint_path,
                 mask_predictor_checkpoint_path=mask_predictor_checkpoint_path,
+                mask_selection_mode=mask_selection_mode,
+                pick_classifier_checkpoint_path=pick_classifier_checkpoint_path,
+                pick_classifier_threshold=pick_classifier_threshold,
                 gaze_target_mask_dilation=gaze_target_mask_dilation,
                 log_fn=print,
             )
@@ -191,14 +198,14 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=sample,
                     image_keys=self.classifier_keys,
-                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
+                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_place"),
                 )
             else:
                 reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=sample,
                     image_keys=self.classifier_keys,
-                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick_no_tactile"),
+                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_place_no_tactile"),
                 )
             
             # input("debug")

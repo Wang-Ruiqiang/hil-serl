@@ -57,7 +57,7 @@ flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_boolean(
     "use_gaze_target_mask",
     True,
-    "Add the gaze-selected predicted object mask as a visual observation modality.",
+    "Add gaze-selected masked RGB plus phase one-hot to observations.",
 )
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
@@ -67,11 +67,27 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     "mask_predictor_checkpoint_path",
     "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt",
-    "Checkpoint file for the frozen RGB mask predictor used by gaze_target_mask.",
+    "Checkpoint file for the frozen RGB mask predictor used by front_camera_masked.",
+)
+flags.DEFINE_enum(
+    "mask_selection_mode",
+    "pick_classifier",
+    ["gaze", "pick_classifier"],
+    "How front_camera_masked chooses mask1/mask2.",
+)
+flags.DEFINE_string(
+    "pick_classifier_checkpoint_path",
+    "examples/reward_classifier/classifier_ckpt_ball_pick",
+    "Checkpoint directory for pick classifier mask selection.",
+)
+flags.DEFINE_float(
+    "pick_classifier_threshold",
+    0.95,
+    "Pick classifier probability threshold. Below uses mask1; above uses mask2.",
 )
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
-    8,
+    6,
     "Dilation radius in mask-predictor pixels when checking whether gaze hits a mask.",
 )
 flags.DEFINE_boolean(
@@ -620,6 +636,12 @@ def main(_):
         env_kwargs["gaze_predictor_checkpoint_path"] = FLAGS.gaze_predictor_checkpoint_path
     if "mask_predictor_checkpoint_path" in env_signature:
         env_kwargs["mask_predictor_checkpoint_path"] = FLAGS.mask_predictor_checkpoint_path
+    if "mask_selection_mode" in env_signature:
+        env_kwargs["mask_selection_mode"] = FLAGS.mask_selection_mode
+    if "pick_classifier_checkpoint_path" in env_signature:
+        env_kwargs["pick_classifier_checkpoint_path"] = FLAGS.pick_classifier_checkpoint_path
+    if "pick_classifier_threshold" in env_signature:
+        env_kwargs["pick_classifier_threshold"] = FLAGS.pick_classifier_threshold
     if "gaze_target_mask_dilation" in env_signature:
         env_kwargs["gaze_target_mask_dilation"] = FLAGS.gaze_target_mask_dilation
     env = config.get_environment(**env_kwargs)
@@ -709,7 +731,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-6-24",
+            project="tennis_ball_pick-6-26",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -727,10 +749,10 @@ def main(_):
             include_grasp_penalty=include_grasp_penalty,
             include_robot_arm_penalty=include_robot_arm_penalty,
         )
-        logged_demo_gaze_target_mask = False
+        logged_demo_front_camera_masked = False
 
         def prepare_replay_transition(transition):
-            nonlocal logged_demo_gaze_target_mask
+            nonlocal logged_demo_front_camera_masked
             transition = dict(transition)
             for obs_key in ("observations", "next_observations"):
                 obs_dict = dict(transition[obs_key])
@@ -747,17 +769,19 @@ def main(_):
                         "image_keys used by training, or disable those modalities."
                     )
                 if (
-                    not logged_demo_gaze_target_mask
+                    not logged_demo_front_camera_masked
                     and obs_key == "observations"
-                    and "gaze_target_mask" in obs_dict
+                    and "front_camera_masked" in obs_dict
                 ):
-                    gaze_target_mask = np.asarray(obs_dict["gaze_target_mask"])
+                    front_camera_masked = np.asarray(obs_dict["front_camera_masked"])
+                    state = np.asarray(obs_dict["state"], dtype=np.float32)
                     print_green(
-                        "[demo gaze_target_mask obs] "
-                        f"shape={gaze_target_mask.shape} "
-                        f"active_pixels={int(np.count_nonzero(gaze_target_mask[..., 0]))}"
+                        "[demo front_camera_masked obs] "
+                        f"shape={front_camera_masked.shape} "
+                        f"active_pixels={int(np.count_nonzero(front_camera_masked))} "
+                        f"phase={state[..., -3:]}"
                     )
-                    logged_demo_gaze_target_mask = True
+                    logged_demo_front_camera_masked = True
                 transition[obs_key] = obs_dict
             return ensure_optional_transition_fields(transition)
 

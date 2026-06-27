@@ -17,11 +17,11 @@ from pathlib import Path
 
 DEFAULT_SOURCE_GAZE = (
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-6-23-1/frame_433/gaze_contact.json"
+    "tennis_ball_pick-6-23-1/frame_117/gaze_contact.json"
 )
 DEFAULT_TARGET_ROOT = (
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-6-25-1"
+    "tennis_ball_pick-6-25-2"
 )
 
 

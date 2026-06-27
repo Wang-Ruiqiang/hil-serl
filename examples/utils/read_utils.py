@@ -116,6 +116,7 @@ def get_frame_data(
     exp_name="tennis_ball_pick",
     image_keys=None,
     disable_image_crop=False,
+    label_name=None,
 ):
     color_image_path = os.path.join(frame_path, "color_image.jpg")
     color_image_path_wrist = os.path.join(frame_path, "color_image2.jpg")
@@ -136,11 +137,18 @@ def get_frame_data(
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
     action_file_path = os.path.join(frame_path, "action.txt")
         
-    record_success_failed_file = os.path.join(frame_path, "is_recorded_success.txt")
-    if not os.path.exists(record_success_failed_file):
-        record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
+    if label_name:
+        record_success_failed_file = os.path.join(frame_path, label_name)
+    else:
+        record_success_failed_file = os.path.join(frame_path, "is_recorded_success.txt")
+        if not os.path.exists(record_success_failed_file):
+            record_success_failed_file = os.path.join(frame_path, "is_record_success.txt")
     hand_joint = None
-    is_record_success = np.loadtxt(record_success_failed_file, dtype=int)
+    is_record_success = (
+        np.loadtxt(record_success_failed_file, dtype=int)
+        if os.path.exists(record_success_failed_file)
+        else 0
+    )
     
     hand_state = np.loadtxt(os.path.join(frame_path, "hand_state.txt"), dtype=float) if os.path.exists(os.path.join(frame_path, "hand_state.txt")) else 0.0
 

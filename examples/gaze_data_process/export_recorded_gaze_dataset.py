@@ -22,6 +22,7 @@ DEFAULT_TRAIN_ROOTS = [
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-0",
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-1",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-2",
 ]
 
 flags.DEFINE_string("metadata", DEFAULT_METADATA, "Path to recording_metadata.json.")

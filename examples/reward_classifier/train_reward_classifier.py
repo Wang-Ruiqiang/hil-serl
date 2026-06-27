@@ -31,8 +31,14 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
-flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
-flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
+flags.DEFINE_enum(
+    "classifier_task",
+    "pick",
+    ["pick", "place"],
+    "Reward classifier stage to train for tennis_ball_pick.",
+)
+flags.DEFINE_integer("is_pick_task", 1, "Deprecated. Use --classifier_task=pick.")
+flags.DEFINE_integer("is_place_task", 0, "Deprecated. Use --classifier_task=place.")
 flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")
 flags.DEFINE_multi_string(
@@ -52,6 +58,14 @@ flags.DEFINE_string(
 )
 
 
+def _tennis_ball_classifier_task():
+    if FLAGS.classifier_task:
+        return FLAGS.classifier_task
+    if FLAGS.is_place_task:
+        return "place"
+    return "pick"
+
+
 def _task_data_dir_name():
     if FLAGS.exp_name == "twist_bottle_cap":
         return "classifier_data_bottle_twist" if FLAGS.enable_tactile else "classifier_data_bottle_twist_no_tactile"
@@ -62,7 +76,7 @@ def _task_data_dir_name():
             return "classifier_data_tube_pick" if FLAGS.enable_tactile else "classifier_data_tube_pick_no_tactile"
         return "classifier_data_tube_insertion" if FLAGS.enable_tactile else "classifier_data_tube_insertion_no_tactile"
     if FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_place_task:
+        if _tennis_ball_classifier_task() == "place":
             return "classifier_data_place" if FLAGS.enable_tactile else "classifier_data_place_no_tactile"
         return "classifier_data_pick" if FLAGS.enable_tactile else "classifier_data_pick_no_tactile"
     raise ValueError(f"Unsupported exp_name: {FLAGS.exp_name}")
@@ -78,7 +92,7 @@ def _task_checkpoint_dir_name():
             return "classifier_ckpt_tube_pick" if FLAGS.enable_tactile else "classifier_ckpt_tube_pick_no_tactile"
         return "classifier_ckpt_tube_insertion" if FLAGS.enable_tactile else "classifier_ckpt_tube_insertion_no_tactile"
     if FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.is_place_task:
+        if _tennis_ball_classifier_task() == "place":
             return "classifier_ckpt_ball_place" if FLAGS.enable_tactile else "classifier_ckpt_ball_place_no_tactile"
         return "classifier_ckpt_ball_pick" if FLAGS.enable_tactile else "classifier_ckpt_ball_pick_no_tactile"
     raise ValueError(f"Unsupported exp_name: {FLAGS.exp_name}")
@@ -167,6 +181,8 @@ def main(_):
     success_paths = glob.glob(os.path.join(data_dir, "*success*.pkl"))
     failure_paths = glob.glob(os.path.join(data_dir, "*failure*.pkl"))
     print(f"[source] data_dir={data_dir}")
+    if FLAGS.exp_name == "tennis_ball_pick":
+        print(f"[source] classifier_task={_tennis_ball_classifier_task()}")
     print(f"[source] success_files={len(success_paths)} failure_files={len(failure_paths)}")
     if not success_paths:
         raise FileNotFoundError(f"No success pkl files found in {data_dir}")

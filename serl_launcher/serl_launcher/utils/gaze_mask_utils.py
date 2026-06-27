@@ -177,6 +177,17 @@ def _resize_2d(image, shape, method="nearest"):
     )
 
 
+def _dilate_binary_mask(mask, radius: int):
+    if radius <= 0:
+        return np.asarray(mask, dtype=bool)
+    kernel_size = int(radius) * 2 + 1
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_size, kernel_size),
+    )
+    return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
+
+
 def _mask_bbox(mask):
     ys, xs = np.where(np.asarray(mask, dtype=bool))
     if xs.size == 0 or ys.size == 0:
@@ -232,6 +243,75 @@ def mask_to_image(mask, reference_image=None, channels=3):
     return image
 
 
+def mask_rgb_image(obs, *, gaze_target_mask, image_key="front_camera"):
+    """Return RGB image with pixels outside gaze_target_mask set to zero."""
+    reference_image = latest_image(obs, image_key)
+    if reference_image is None:
+        raise KeyError(f"Could not find source image for masked RGB: {image_key}")
+
+    reference_image = np.asarray(reference_image)
+    mask_array = np.asarray(gaze_target_mask, dtype=np.float32)
+    while mask_array.ndim > 2:
+        mask_array = mask_array[0]
+    if mask_array.shape != reference_image.shape[:2]:
+        mask_array = _resize_2d(mask_array, reference_image.shape[:2], method="nearest")
+    mask_array = np.clip(mask_array, 0.0, 1.0)
+    return (reference_image.astype(np.float32) * mask_array[..., None]).astype(np.uint8)
+
+
+def gaze_phase_onehot(selected_mask_index):
+    """Encode selected gaze target as [mask1, mask2, none]."""
+    phase = np.zeros((3,), dtype=np.float32)
+    if selected_mask_index == 0:
+        phase[0] = 1.0
+    elif selected_mask_index == 1:
+        phase[1] = 1.0
+    else:
+        phase[2] = 1.0
+    return phase
+
+
+def append_gaze_phase_to_state(obs, selected_mask_index):
+    """Append gaze target phase one-hot to the proprioceptive state vector."""
+    obs = dict(obs)
+    state = np.asarray(obs["state"], dtype=np.float32)
+    phase = gaze_phase_onehot(selected_mask_index).astype(np.float32)
+    phase = np.broadcast_to(phase, (*state.shape[:-1], phase.shape[-1]))
+    obs["state"] = np.concatenate([state, phase], axis=-1).astype(np.float32)
+    return obs
+
+
+def add_gaze_masked_rgb_to_obs(
+    obs,
+    *,
+    gaze_target_mask,
+    image_key="front_camera_masked",
+    reference_key="front_camera",
+):
+    """Add RGB * selected_mask as a uint8 image modality."""
+    obs = dict(obs)
+    obs[image_key] = mask_rgb_image(
+        obs,
+        gaze_target_mask=gaze_target_mask,
+        image_key=reference_key,
+    )
+    return obs
+
+
+def dilate_gaze_target_mask_for_input(
+    gaze_target_mask,
+    selected_mask_index,
+    *,
+    mask1_dilation_px: int = 6,
+    mask2_dilation_px: int = 0,
+):
+    """Dilate the selected mask used for RGB masking, not for phase selection."""
+    radius = mask1_dilation_px if selected_mask_index == 0 else mask2_dilation_px
+    return _dilate_binary_mask(np.asarray(gaze_target_mask) > 0.5, int(radius)).astype(
+        np.float32
+    )
+
+
 def select_gaze_target_mask(
     mask_probs,
     gaze_heatmap,
@@ -265,14 +345,9 @@ def select_gaze_target_mask(
 
     search_masks = binary_masks.copy()
     if dilation_px > 0:
-        kernel_size = int(dilation_px) * 2 + 1
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE,
-            (kernel_size, kernel_size),
-        )
         search_masks = np.stack(
             [
-                cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
+                _dilate_binary_mask(mask, dilation_px)
                 for mask in search_masks
             ],
             axis=0,
@@ -283,9 +358,8 @@ def select_gaze_target_mask(
     ]
     info["candidate_mask_indices"] = candidate_indices
     if not candidate_indices:
-        return (target, info) if return_info else target
-
-    if len(candidate_indices) == 1:
+        selected_index = 0
+    elif len(candidate_indices) == 1:
         selected_index = candidate_indices[0]
     elif 0 in candidate_indices and 1 in candidate_indices and _mask_bbox_inside(
         binary_masks[0],
@@ -350,18 +424,52 @@ def compute_gaze_target_mask_fields(
     return gaze_fields
 
 
-def add_gaze_target_mask_image_to_obs(
+def compute_index_target_mask_fields(
     obs,
+    mask_predictor,
+    target_shape,
     *,
-    gaze_target_mask,
-    image_key="gaze_target_mask",
-    reference_key="front_camera",
+    selected_mask_index: int,
+    threshold: float = 0.5,
 ):
-    """Add the gaze-selected object mask as a uint8 image modality."""
-    obs = dict(obs)
-    reference_image = obs.get(reference_key)
-    obs[image_key] = mask_to_image(
-        gaze_target_mask,
-        reference_image=reference_image,
+    """Select mask1/mask2 directly by index, without using gaze."""
+    fields = {
+        "gaze_heatmap": None,
+        "gaze_target_mask": np.zeros(tuple(target_shape), dtype=np.float32),
+        "selected_mask_index": None,
+        "selected_mask_slot": "none",
+        "gaze_hit_mask": False,
+        "candidate_mask_indices": [],
+        "gaze_xy_norm": None,
+    }
+    if mask_predictor is None:
+        return fields
+
+    mask_probs = _predict_mask_probs(obs, mask_predictor)
+    if mask_probs is None:
+        return fields
+
+    mask_probs = np.asarray(mask_probs, dtype=np.float32)
+    selected_mask_index = int(selected_mask_index)
+    if (
+        mask_probs.ndim != 3
+        or selected_mask_index < 0
+        or selected_mask_index >= mask_probs.shape[0]
+    ):
+        return fields
+
+    selected_mask = (mask_probs[selected_mask_index] >= float(threshold)).astype(
+        np.float32
     )
-    return obs
+    selected_mask = _resize_2d(selected_mask, tuple(target_shape), method="nearest")
+    selected_slot = (
+        mask_predictor.mask_slots[selected_mask_index]
+        if selected_mask_index < len(mask_predictor.mask_slots)
+        else f"mask{selected_mask_index + 1}"
+    )
+    fields["gaze_target_mask"] = selected_mask.astype(np.float32)
+    fields["selected_mask_index"] = selected_mask_index
+    fields["selected_mask_slot"] = selected_slot
+    fields["gaze_hit_mask"] = True
+    fields["candidate_mask_indices"] = [selected_mask_index]
+    return fields

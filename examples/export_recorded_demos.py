@@ -88,20 +88,28 @@ flags.DEFINE_integer(
 flags.DEFINE_boolean(
     "use_gaze_target_mask",
     True,
-    "Add gaze-selected mask image to exported observations.",
+    "Add gaze-selected masked RGB image and phase one-hot to exported observations.",
 )
 flags.DEFINE_string(
     "gaze_target_mask_key",
-    "gaze_target_mask",
-    "Observation key for the gaze-selected mask image.",
+    "front_camera_masked",
+    "Observation key for RGB multiplied by the gaze-selected mask.",
 )
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
     8,
     "Dilation radius in exported 128x128 mask pixels when checking gaze hits.",
 )
-
-
+flags.DEFINE_integer(
+    "mask1_input_dilation",
+    6,
+    "Dilation radius applied to mask1 before building front_camera_masked.",
+)
+flags.DEFINE_integer(
+    "mask2_input_dilation",
+    0,
+    "Dilation radius applied to mask2 before building front_camera_masked.",
+)
 def _frame_number(path: Path) -> int:
     match = re.search(r"frame_(\d+)", path.name)
     return int(match.group(1)) if match else 10**12
@@ -219,11 +227,22 @@ def _mask_bbox_inside(inner_mask, outer_mask, margin_px: int = 2):
     )
 
 
+def _phase_onehot(selected_index):
+    phase = np.zeros((3,), dtype=np.float32)
+    if selected_index == 0:
+        phase[0] = 1.0
+    elif selected_index == 1:
+        phase[1] = 1.0
+    else:
+        phase[2] = 1.0
+    return phase
+
+
 def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
     try:
         gaze_xy = _read_recorded_gaze_xy(frame_dir)
     except Exception:
-        return np.zeros((*target_shape, 3), dtype=np.uint8)
+        return np.zeros(target_shape, dtype=bool), None
 
     mask1 = _first_existing_mask(frame_dir, "mask1", target_shape)
     mask2 = _first_existing_mask(frame_dir, "mask2", target_shape)
@@ -242,13 +261,16 @@ def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
         if bool(mask[gaze_y, gaze_x])
     ]
     if not candidate_indices:
-        selected = np.zeros(target_shape, dtype=bool)
+        selected_index = 0
+        selected = masks[selected_index]
     elif len(candidate_indices) == 1:
-        selected = masks[candidate_indices[0]]
+        selected_index = candidate_indices[0]
+        selected = masks[selected_index]
     elif 0 in candidate_indices and 1 in candidate_indices and _mask_bbox_inside(
         masks[0],
         masks[1],
     ):
+        selected_index = 1
         selected = masks[1]
     else:
         selected_index = max(
@@ -257,8 +279,25 @@ def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
         )
         selected = masks[selected_index]
 
-    mask_image = (selected.astype(np.uint8) * 255)[..., None]
-    return np.repeat(mask_image, 3, axis=-1)
+    return selected, selected_index
+
+
+def _read_front_camera_masked(
+    frame_dir: Path,
+    rgb_image,
+    target_shape=(128, 128),
+):
+    selected_mask, selected_index = _read_gaze_target_mask(frame_dir, target_shape)
+    input_dilation = (
+        FLAGS.mask1_input_dilation
+        if selected_index == 0
+        else FLAGS.mask2_input_dilation
+    )
+    selected_mask = _dilate_mask(selected_mask, input_dilation)
+    masked_rgb = (
+        rgb_image.astype(np.float32) * selected_mask.astype(np.float32)[..., None]
+    ).astype(np.uint8)
+    return masked_rgb, _phase_onehot(selected_index)
 
 
 def _read_tactile_depth(path: Path):
@@ -326,17 +365,36 @@ def _read_ee_pose(frame_dir: Path, robot_urdf_path: str):
     return np.asarray(tcp_pos, dtype=np.float32), np.asarray(tcp_ori, dtype=np.float32)
 
 
-def _read_frame_data(frame_dir: Path, robot_urdf_path: str, image_keys):
+def _read_frame_data(
+    frame_dir: Path,
+    robot_urdf_path: str,
+    image_keys,
+):
     obs = {}
+    rgb_image = None
+    gaze_phase = None
     for image_key in image_keys:
         if image_key == "front_camera":
-            obs[image_key] = _read_rgb(frame_dir / "color_image.jpg")
+            rgb_image = _read_rgb(frame_dir / "color_image.jpg")
+            obs[image_key] = rgb_image
         elif image_key == "tactile_data":
             obs[image_key] = _read_tactile(frame_dir)
         elif image_key == FLAGS.gaze_target_mask_key:
-            obs[image_key] = _read_gaze_target_mask(frame_dir)
+            if rgb_image is None:
+                rgb_image = _read_rgb(frame_dir / "color_image.jpg")
+            obs[image_key], gaze_phase = _read_front_camera_masked(
+                frame_dir,
+                rgb_image,
+            )
         else:
             raise ValueError(f"Unsupported image key for RL demo export: {image_key}")
+    if FLAGS.gaze_target_mask_key in image_keys and gaze_phase is None:
+        if rgb_image is None:
+            rgb_image = _read_rgb(frame_dir / "color_image.jpg")
+        obs[FLAGS.gaze_target_mask_key], gaze_phase = _read_front_camera_masked(
+            frame_dir,
+            rgb_image,
+        )
 
     tcp_pos, tcp_ori = _read_ee_pose(frame_dir, robot_urdf_path)
     hand_state = _read_numeric_file(
@@ -344,14 +402,14 @@ def _read_frame_data(frame_dir: Path, robot_urdf_path: str, image_keys):
         default=[0.0],
         dtype=np.float32,
     )[:1]
-    obs["state"] = np.concatenate(
-        [
-            np.asarray(tcp_pos, dtype=np.float32).reshape(-1),
-            np.asarray(tcp_ori, dtype=np.float32).reshape(-1),
-            np.asarray(hand_state, dtype=np.float32).reshape(-1),
-        ],
-        axis=0,
-    ).astype(np.float32)
+    state_parts = [
+        np.asarray(tcp_pos, dtype=np.float32).reshape(-1),
+        np.asarray(tcp_ori, dtype=np.float32).reshape(-1),
+        np.asarray(hand_state, dtype=np.float32).reshape(-1),
+    ]
+    if gaze_phase is not None:
+        state_parts.append(gaze_phase)
+    obs["state"] = np.concatenate(state_parts, axis=0).astype(np.float32)
     action = _read_numeric_file(
         frame_dir / "action.txt",
         default=np.zeros(7, dtype=np.float32),
@@ -578,6 +636,20 @@ def main(_):
     output_path = output_dir / output_name
     with output_path.open("wb") as f:
         pkl.dump(transitions, f)
+
+    if transitions:
+        first_obs = transitions[0]["observations"]
+        first_state = np.asarray(first_obs["state"])
+        if FLAGS.gaze_target_mask_key in first_obs:
+            masked_rgb = np.asarray(first_obs[FLAGS.gaze_target_mask_key])
+            print(
+                f"[check] {FLAGS.gaze_target_mask_key} shape={masked_rgb.shape} "
+                f"active_pixels={int(np.count_nonzero(masked_rgb))}"
+            )
+        print(
+            f"[check] state_shape={first_state.shape} "
+            f"phase_onehot={first_state[..., -3:]}"
+        )
 
     done_count = sum(int(transition["dones"]) for transition in transitions)
     reward_sum = float(sum(float(transition["rewards"]) for transition in transitions))

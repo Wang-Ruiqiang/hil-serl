@@ -4,6 +4,7 @@ import copy
 import datetime
 import importlib
 import inspect
+import json
 import os
 import pickle as pkl
 import re
@@ -29,9 +30,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-17-0",
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-19-0",
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-19-1",
+        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/classifier_data/tennis_ball_pick-6-23-1",
     ],
     "Recorded data root(s) containing frame_xxx folders.",
 )
@@ -54,7 +53,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string(
     "label_name",
-    "is_recorded_success.txt",
+    "is_recorded_pick_success.txt",
     "Success label filename inside each frame_xxx folder.",
 )
 flags.DEFINE_string(
@@ -63,6 +62,12 @@ flags.DEFINE_string(
     "Output classifier data directory. Defaults to reward_classifier/classifier_data_pick(_no_tactile).",
 )
 flags.DEFINE_integer("batch_size", 500, "Number of transitions per pickle dump.")
+flags.DEFINE_string(
+    "range_name",
+    "pick_classifier_ranges.json",
+    "Optional range json inside each frame_root. If present, only current frames "
+    "inside its ranges are exported.",
+)
 
 
 def _frame_number(path: Path) -> int:
@@ -77,13 +82,32 @@ def _frame_dirs(root: Path):
         if frame_dir.is_dir()
         and frame_dir.name.startswith("frame_")
         and (frame_dir / "color_image.jpg").exists()
-        and (frame_dir / FLAGS.label_name).exists()
     ]
     return sorted(frames, key=_frame_number)
 
 
 def _read_success_label(frame_dir: Path) -> int:
     return 1 if (frame_dir / FLAGS.label_name).read_text().strip() == "1" else 0
+
+
+def _has_label(frame_dir: Path) -> bool:
+    return (frame_dir / FLAGS.label_name).exists()
+
+
+def _load_allowed_frame_ids(root: Path):
+    if not FLAGS.range_name:
+        return None
+    range_path = root / FLAGS.range_name
+    if not range_path.exists():
+        return None
+    data = json.loads(range_path.read_text())
+    allowed = set()
+    for item in data.get("ranges", []):
+        start = int(item["start_frame"])
+        end = int(item["end_frame"])
+        allowed.update(range(start, end + 1))
+    print(f"[source] range_filter={range_path} allowed_frames={len(allowed)}")
+    return allowed
 
 
 def _default_output_dir() -> Path:
@@ -137,6 +161,7 @@ def _transition_from_frames(current_frame: Path, next_frame: Path, robot_urdf_pa
         FLAGS.exp_name,
         image_keys=image_keys,
         disable_image_crop=FLAGS.disable_image_crop,
+        label_name=FLAGS.label_name,
     )
     next_obs, _, _ = read_utils.get_frame_data(
         str(next_frame),
@@ -145,6 +170,7 @@ def _transition_from_frames(current_frame: Path, next_frame: Path, robot_urdf_pa
         FLAGS.exp_name,
         image_keys=image_keys,
         disable_image_crop=FLAGS.disable_image_crop,
+        label_name=FLAGS.label_name,
     )
     action = np.asarray(frame_action, dtype=np.float32).copy()
     return copy.deepcopy(
@@ -187,7 +213,17 @@ def main(_):
             print(f"[warn] missing root: {root}")
             continue
         frames = _frame_dirs(root)
-        print(f"[source] {root} frames={len(frames)}")
+        allowed_frame_ids = _load_allowed_frame_ids(root)
+        exportable_count = sum(
+            1
+            for frame_dir in frames
+            if _has_label(frame_dir)
+            and (
+                allowed_frame_ids is None
+                or _frame_number(frame_dir) in allowed_frame_ids
+            )
+        )
+        print(f"[source] {root} frames={len(frames)} exportable_current_frames={exportable_count}")
         if len(frames) < 2:
             continue
 
@@ -195,6 +231,15 @@ def main(_):
             current_frame = frames[i]
             next_frame = frames[i + 1]
             if _frame_number(next_frame) <= _frame_number(current_frame):
+                skipped += 1
+                continue
+            if not _has_label(current_frame):
+                skipped += 1
+                continue
+            if (
+                allowed_frame_ids is not None
+                and _frame_number(current_frame) not in allowed_frame_ids
+            ):
                 skipped += 1
                 continue
             try:
