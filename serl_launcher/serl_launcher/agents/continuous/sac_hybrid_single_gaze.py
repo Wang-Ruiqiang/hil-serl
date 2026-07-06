@@ -365,6 +365,8 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         mask_feature_gate_alpha: float = 1.0,
         mask_feature_min_gate: float = 0.1,
         mask_feature_hidden_dim: int = 128,
+        use_modality_gate: bool = False,
+        modality_gate_hidden_dim: int = 128,
         return_raw_attention: bool = False,
         mask_grounding_weight: float = 0.0,
         mask_grounding_decay_step: int = 0,
@@ -437,6 +439,8 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             mask_feature_gate_alpha=mask_feature_gate_alpha,
             mask_feature_min_gate=mask_feature_min_gate,
             mask_feature_hidden_dim=mask_feature_hidden_dim,
+            use_modality_gate=use_modality_gate,
+            modality_gate_hidden_dim=modality_gate_hidden_dim,
             return_raw_attention=return_raw_attention,
         )
 

@@ -538,6 +538,8 @@ def main(_):
         agent_kwargs["mask_feature_gate_alpha"] = config.mask_feature_gate_alpha
         agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate
         agent_kwargs["mask_feature_hidden_dim"] = config.mask_feature_hidden_dim
+        agent_kwargs["use_modality_gate"] = config.use_modality_gate
+        agent_kwargs["modality_gate_hidden_dim"] = config.modality_gate_hidden_dim
         agent_kwargs["mask_grounding_weight"] = config.mask_grounding_weight
         agent_kwargs["mask_grounding_decay_step"] = config.mask_grounding_decay_step
         agent_kwargs["mask_grounding_decay_weight"] = config.mask_grounding_decay_weight

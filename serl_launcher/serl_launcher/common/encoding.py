@@ -31,6 +31,8 @@ class EncodingWrapper(nn.Module):
     mask_feature_gate_alpha: float = 1.0
     mask_feature_min_gate: float = 0.1
     return_raw_attention: bool = False
+    use_modality_gate: bool = False
+    modality_gate_hidden_dim: int = 128
     # state_weights: Optional[Iterable[float]] = None
 
     def _mask_for_spatial(self, mask: jnp.ndarray, spatial_features: jnp.ndarray):
@@ -90,6 +92,28 @@ class EncodingWrapper(nn.Module):
         fused = nn.Dense(output_dim, name=f"{name}_proj")(fused)
         fused = nn.LayerNorm(name=f"{name}_ln")(fused)
         return nn.tanh(fused)
+
+    def _apply_modality_gate(self, modality_features):
+        if len(modality_features) <= 1:
+            return jnp.concatenate(modality_features, axis=-1)
+        gate_input = jnp.concatenate(modality_features, axis=-1)
+        hidden = nn.Dense(
+            self.modality_gate_hidden_dim,
+            name="modality_gate_hidden",
+        )(gate_input)
+        hidden = nn.relu(hidden)
+        gate_logits = nn.Dense(
+            len(modality_features),
+            kernel_init=nn.initializers.zeros,
+            bias_init=nn.initializers.zeros,
+            name="modality_gate_logits",
+        )(hidden)
+        gate_weights = jax.nn.softmax(gate_logits, axis=-1) * len(modality_features)
+        gated_features = [
+            feature * gate_weights[..., index : index + 1]
+            for index, feature in enumerate(modality_features)
+        ]
+        return jnp.concatenate(gated_features, axis=-1)
 
     def _mask_feature_head_outputs(
         self,
@@ -263,9 +287,6 @@ class EncodingWrapper(nn.Module):
 
             encoded.append(image)
 
-        encoded = jnp.concatenate(encoded, axis=-1)
-        # print(f"Concatenated encoded shape: {encoded.shape}")
-
         if self.use_proprio:
             # project state to embeddings as well
             state = observations["state"]
@@ -274,7 +295,7 @@ class EncodingWrapper(nn.Module):
                 # Combine stacking and channels into a single dimension
                 if len(state.shape) == 2:
                     state = rearrange(state, "T C -> (T C)")
-                    encoded = encoded.reshape(-1)
+                    encoded = [feature.reshape(-1) for feature in encoded]
                 if len(state.shape) == 3:
                     state = rearrange(state, "B T C -> B (T C)")
             
@@ -290,7 +311,13 @@ class EncodingWrapper(nn.Module):
             )(state)
             state = nn.LayerNorm()(state)
             state = nn.tanh(state)
-            encoded = jnp.concatenate([encoded, state], axis=-1)
+            encoded.append(state)
+
+        if self.use_modality_gate:
+            encoded = self._apply_modality_gate(encoded)
+        else:
+            encoded = jnp.concatenate(encoded, axis=-1)
+        # print(f"Concatenated encoded shape: {encoded.shape}")
 
         if return_attention:
             attention_map = selected_attention_map

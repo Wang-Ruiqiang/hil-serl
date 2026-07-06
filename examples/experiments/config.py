@@ -64,6 +64,14 @@ class DefaultTrainingConfig:
     # capacity setting; most tasks should leave it at the default.
     mask_feature_hidden_dim: int = 128
 
+    # Learn scalar gates over encoded modalities after the mask-conditioned RGB
+    # feature has been formed. The gate starts as an identity scaling, then RL
+    # losses can learn to up/down-weight vision, tactile, and state features.
+    use_modality_gate: bool = False
+
+    # Hidden size of the small MLP that predicts modality gates.
+    modality_gate_hidden_dim: int = 128
+
     # Weight for the auxiliary loss that pulls the trainable mask feature map into
     # front_camera_mask. 0 disables this auxiliary supervision.
     mask_grounding_weight: float = 0.0

@@ -112,6 +112,8 @@ class TrainConfig(DefaultTrainingConfig):
     mask_feature_gate_alpha = 1.0
     mask_feature_min_gate = 0.1
     mask_feature_hidden_dim = 128
+    use_modality_gate = True
+    modality_gate_hidden_dim = 128
     mask_grounding_weight = 0.01
     mask_grounding_decay_step = 5000
     mask_grounding_decay_weight = 0.002

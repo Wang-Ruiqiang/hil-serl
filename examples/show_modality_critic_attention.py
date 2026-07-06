@@ -119,6 +119,16 @@ flags.DEFINE_integer(
     128,
     "Hidden channel count for the trainable mask feature head.",
 )
+flags.DEFINE_boolean(
+    "use_modality_gate",
+    True,
+    "Use learned scalar gates over encoded modalities after visual feature fusion.",
+)
+flags.DEFINE_integer(
+    "modality_gate_hidden_dim",
+    128,
+    "Hidden size of the small MLP that predicts modality gates.",
+)
 flags.DEFINE_string("gaze_json_name", "gaze_contact.json", "Recorded gaze json name.")
 flags.DEFINE_string(
     "attention_keys",
@@ -728,6 +738,8 @@ def create_attention_agent(
         mask_feature_gate_alpha=FLAGS.mask_feature_gate_alpha,
         mask_feature_min_gate=FLAGS.mask_feature_min_gate,
         mask_feature_hidden_dim=FLAGS.mask_feature_hidden_dim,
+        use_modality_gate=FLAGS.use_modality_gate,
+        modality_gate_hidden_dim=FLAGS.modality_gate_hidden_dim,
         return_raw_attention=return_raw_attention,
     )
 
@@ -858,6 +870,8 @@ def main(_):
     print_green(f"mask_feature_gate_alpha={FLAGS.mask_feature_gate_alpha}")
     print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
     print_green(f"mask_feature_hidden_dim={FLAGS.mask_feature_hidden_dim}")
+    print_green(f"use_modality_gate={FLAGS.use_modality_gate}")
+    print_green(f"modality_gate_hidden_dim={FLAGS.modality_gate_hidden_dim}")
     print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
     print_green(
         "viewer_mask_grounding_cell_threshold="
