@@ -37,23 +37,13 @@ class RAMEnv(FrankaEnv):
             
 
     def move_up(self):
-        distance = 0.06
-        steps = 100
-        step_time = 0.02
-        print(f"move up to verify grasp, distance={distance}")
-        cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
-        start_pose = np.concatenate((cur_position, cur_orientation), axis=0)
-        pos = cur_position.copy()
-        pos[2] += distance
-        nextpos = np.concatenate((pos, cur_orientation), axis=0)
-        self.ros_interface.arm_interpolate_and_publish(
-            start_pose,
-            nextpos,
-            step_time=step_time,
-            steps=steps,
-        )
-        self.cmd_pose = nextpos.copy()
-        self._update_cur_position(nextpos, wait_threshold=0.05)
+        print("move up to avoid collision")
+        pos = self.cur_position.copy()
+        pos[2] += 0.02
+        ori = self.cur_orientation.copy()
+        nextpos = np.concatenate((pos, ori), axis=0)
+        self.ros_interface.publish_arm_action(nextpos)
+        time.sleep(2.0)
         self.get_im()
 
     def reset(self, joint_reset=False, **kwargs):
@@ -91,7 +81,7 @@ class RAMEnv(FrankaEnv):
         return obs, {}
     
 class GripperPenaltyWrapper(gym.Wrapper):
-    def __init__(self, env, exp_name="tennis_ball_pick", penalty=-0.05):
+    def __init__(self, env, exp_name="tennis_ball_pick_and_place", penalty=-0.05):
         super().__init__(env)
         self.penalty = penalty
         self.last_hand_pos = None

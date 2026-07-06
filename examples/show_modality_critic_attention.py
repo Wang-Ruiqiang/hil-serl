@@ -23,14 +23,14 @@ for path in (
 
 DEFAULT_FRAME_ROOT = (
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-6-23-1"
+    "tennis_ball_pick-6-30-0"
 )
 DEFAULT_CHECKPOINT_PATH = str(
     REPO_ROOT
     / "examples"
     / "experiments"
     / "tennis_ball_pick"
-    / "2026-6-26_0_ball_pick_rl_run"
+    / "2026-7-3_0_ball_pick_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
@@ -44,6 +44,11 @@ from absl import app, flags
 from flax.training import checkpoints
 
 from experiments.mappings import NEW_MAPPING
+from serl_launcher.utils.gaze_mask_utils import (
+    add_gaze_mask_image_to_obs,
+    compute_index_target_mask_fields,
+    load_mask_predictor,
+)
 from serl_launcher.utils.launcher import make_gaze_sac_pixel_agent_hybrid_single_arm
 
 
@@ -58,34 +63,106 @@ flags.DEFINE_integer(
     -1,
     "Checkpoint step to load. Use -1 for latest.",
 )
+flags.DEFINE_boolean(
+    "skip_restore",
+    False,
+    "Do not restore RL checkpoint; useful for checking raw pretrained/backbone attention.",
+)
 flags.DEFINE_integer("image_size", 128, "Network image size.")
-flags.DEFINE_integer("max_frames", 24, "Max frames to render. Use 0 for all.")
-flags.DEFINE_integer("frame_stride", 25, "Process every Nth recorded frame.")
+flags.DEFINE_integer("max_frames", 0, "Max frames to render. Use 0 for all.")
+flags.DEFINE_integer("frame_stride", 1, "Process every Nth recorded frame.")
 flags.DEFINE_integer("start_frame", 0, "Skip frames with id smaller than this.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether tactile_data is part of obs.")
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
-    8,
+    0,
     "Dilation used when deciding whether recorded gaze hits mask1/mask2.",
 )
-flags.DEFINE_integer(
-    "mask1_input_dilation",
-    6,
-    "Dilation radius applied to mask1 before building front_camera_masked.",
+flags.DEFINE_enum(
+    "mask_selection_mode",
+    "auto",
+    ["auto", "recorded_gaze", "force_mask1", "force_mask2"],
+    "How this offline viewer builds front_camera_mask.",
+)
+flags.DEFINE_string(
+    "mask_predictor_checkpoint_path",
+    str(REPO_ROOT / "examples" / "gaze_data_process" / "SAM_process" / "mask_predictor_ckpt" / "best.pt"),
+    "Mask predictor checkpoint used by force_mask1/force_mask2 modes.",
+)
+flags.DEFINE_float(
+    "mask_spatial_gate_alpha",
+    1.0,
+    "Residual mask-guided RGB feature gate strength used during forward.",
+)
+flags.DEFINE_boolean(
+    "use_mask_pooling",
+    True,
+    "Include hard mask-pooled target feature in the fused visual feature.",
+)
+flags.DEFINE_boolean(
+    "use_mask_feature_head",
+    True,
+    "Render the trainable mask feature head instead of raw ResNet feature energy.",
+)
+flags.DEFINE_float(
+    "mask_feature_gate_alpha",
+    1.0,
+    "Signed feature gating strength from the trainable mask feature head.",
+)
+flags.DEFINE_float(
+    "mask_feature_min_gate",
+    0.1,
+    "Minimum multiplicative gate for non-selected RGB features.",
 )
 flags.DEFINE_integer(
-    "mask2_input_dilation",
-    0,
-    "Dilation radius applied to mask2 before building front_camera_masked.",
+    "mask_feature_hidden_dim",
+    128,
+    "Hidden channel count for the trainable mask feature head.",
 )
 flags.DEFINE_string("gaze_json_name", "gaze_contact.json", "Recorded gaze json name.")
 flags.DEFINE_string(
     "attention_keys",
-    "front_camera,tactile_data,front_camera_masked",
+    "front_camera,tactile_data",
     "Comma-separated image keys whose critic attention should be rendered.",
+)
+flags.DEFINE_boolean(
+    "compare_raw_mask_feature",
+    True,
+    "Render both raw spatial feature energy and trainable mask feature head.",
+)
+flags.DEFINE_float(
+    "viewer_mask_grounding_threshold",
+    0.05,
+    "High-resolution mask threshold used by this viewer for offline grounding metrics.",
+)
+flags.DEFINE_float(
+    "viewer_mask_grounding_cell_threshold",
+    0.01,
+    "Minimum per-cell mask occupancy used by this viewer for offline grounding metrics.",
+)
+flags.DEFINE_enum(
+    "attention_display_mode",
+    "both",
+    ["heatmap", "prob", "both"],
+    "Render raw min-max attention heatmaps, softmax probability maps, or both.",
+)
+flags.DEFINE_float(
+    "attention_logit_floor",
+    0.0,
+    "For logits heatmaps, values at or below this raw value render as no attention.",
+)
+flags.DEFINE_float(
+    "attention_probability_floor",
+    0.01,
+    "For probability maps, probabilities below this value render as no attention.",
 )
 flags.DEFINE_integer("output_scale", 3, "Scale rendered panels for easier viewing.")
 flags.DEFINE_float("text_scale", 0.42, "Panel text scale after output scaling.")
+flags.DEFINE_integer(
+    "attention_panels_per_row",
+    2,
+    "Number of attention panels per output row.",
+)
 flags.DEFINE_string(
     "output_dir",
     "modality_critic_attention_outputs",
@@ -281,6 +358,13 @@ def phase_onehot(selected_index):
     return phase
 
 
+def zero_action_rpy(action):
+    action = np.asarray(action, dtype=np.float32).copy()
+    if action.shape[-1] >= 6:
+        action[..., 3:6] = 0.0
+    return action
+
+
 def read_gaze_target_mask(frame_dir: Path, target_shape):
     gaze_xy = read_recorded_gaze_xy(frame_dir)
     if gaze_xy is None:
@@ -321,21 +405,56 @@ def read_gaze_target_mask(frame_dir: Path, target_shape):
     return selected, selected_index, selected_slot
 
 
-def read_front_camera_masked(frame_dir: Path, rgb_image, target_shape):
+def read_front_camera_mask(frame_dir: Path, rgb_image, target_shape):
     selected_mask, selected_index, selected_slot = read_gaze_target_mask(
         frame_dir,
         target_shape,
     )
-    input_dilation = (
-        FLAGS.mask1_input_dilation
-        if selected_index == 0
-        else FLAGS.mask2_input_dilation
+    mask_image = np.repeat(
+        (selected_mask.astype(np.uint8)[..., None] * 255),
+        3,
+        axis=-1,
     )
-    selected_mask = dilate_mask(selected_mask, input_dilation)
-    masked_rgb = (
-        rgb_image.astype(np.float32) * selected_mask.astype(np.float32)[..., None]
-    ).astype(np.uint8)
-    return masked_rgb, phase_onehot(selected_index), selected_slot
+    return mask_image, phase_onehot(selected_index), selected_slot
+
+
+def set_phase_in_obs(obs, selected_index):
+    obs = dict(obs)
+    phase = phase_onehot(selected_index)
+    state = np.asarray(obs["state"], dtype=np.float32).reshape(-1)
+    if state.shape[0] >= 3:
+        state = np.concatenate([state[:-3], phase], axis=0)
+    else:
+        state = np.concatenate([state, phase], axis=0)
+    obs["state"] = state.astype(np.float32)
+    return obs
+
+
+def apply_predicted_mask_to_obs(obs, mask_predictor, selected_index, target_shape):
+    if mask_predictor is None:
+        raise RuntimeError("force_mask mode requires a loaded mask predictor.")
+    fields = compute_index_target_mask_fields(
+        obs,
+        mask_predictor,
+        target_shape,
+        selected_mask_index=selected_index,
+    )
+    obs = add_gaze_mask_image_to_obs(
+        obs,
+        gaze_target_mask=fields["gaze_target_mask"],
+        image_key="front_camera_mask",
+        reference_key="front_camera",
+    )
+    obs = set_phase_in_obs(obs, selected_index)
+    return obs, fields.get("selected_mask_slot", f"mask{selected_index + 1}")
+
+
+def resolve_mask_selection_mode(exp_name):
+    if FLAGS.mask_selection_mode != "auto":
+        return FLAGS.mask_selection_mode
+    if exp_name == "tennis_ball_pick":
+        return "force_mask1"
+    return "recorded_gaze"
 
 
 def read_ee_pose(frame_dir: Path):
@@ -367,20 +486,20 @@ def read_frame_observation_and_action(frame_dir: Path, image_keys):
             obs[image_key] = rgb_image
         elif image_key == "tactile_data":
             obs[image_key] = read_tactile(frame_dir)
-        elif image_key == "front_camera_masked":
+        elif image_key == "front_camera_mask":
             if rgb_image is None:
                 rgb_image = read_rgb(frame_dir)
-            obs[image_key], gaze_phase, selected_slot = read_front_camera_masked(
+            obs[image_key], gaze_phase, selected_slot = read_front_camera_mask(
                 frame_dir,
                 rgb_image,
                 target_shape,
             )
         else:
             raise ValueError(f"Unsupported image_key={image_key}")
-    if "front_camera_masked" in image_keys and gaze_phase is None:
+    if "front_camera_mask" in image_keys and gaze_phase is None:
         if rgb_image is None:
             rgb_image = read_rgb(frame_dir)
-        obs["front_camera_masked"], gaze_phase, selected_slot = read_front_camera_masked(
+        obs["front_camera_mask"], gaze_phase, selected_slot = read_front_camera_mask(
             frame_dir,
             rgb_image,
             target_shape,
@@ -408,7 +527,7 @@ def read_frame_observation_and_action(frame_dir: Path, image_keys):
     )
     if action.shape[0] < 7:
         action = np.pad(action, (0, 7 - action.shape[0]))
-    return obs, action[:7].astype(np.float32), selected_slot
+    return obs, zero_action_rpy(action[:7]), selected_slot
 
 
 def attention_to_prob(attention_map):
@@ -422,16 +541,70 @@ def attention_to_prob(attention_map):
     return prob.reshape(values.shape)
 
 
-def normalize_heatmap(heatmap):
+def normalize_heatmap(heatmap, floor_value=None):
     heatmap = np.asarray(heatmap, dtype=np.float32)
     while heatmap.ndim > 2:
         heatmap = heatmap.reshape((-1, *heatmap.shape[-2:]))[0]
     heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=0.0, neginf=0.0)
-    heatmap = heatmap - np.min(heatmap)
+    if floor_value is None:
+        heatmap = heatmap - np.min(heatmap)
+    else:
+        heatmap = np.maximum(heatmap - float(floor_value), 0.0)
     denom = np.max(heatmap)
     if denom > 1e-8:
         heatmap = heatmap / denom
     return heatmap
+
+
+def resize_mask_to_attention(mask_image, attention_shape):
+    mask = np.asarray(mask_image, dtype=np.float32)
+    while mask.ndim > 3:
+        mask = mask.reshape((-1, *mask.shape[-3:]))[0]
+    if mask.ndim == 3:
+        mask = np.max(mask, axis=-1)
+    elif mask.ndim != 2:
+        raise ValueError(f"Unsupported mask image shape: {mask_image.shape}")
+    if np.max(mask) > 1.0:
+        mask = mask / 255.0
+    mask = mask > float(FLAGS.viewer_mask_grounding_threshold)
+
+    attention_h, attention_w = int(attention_shape[0]), int(attention_shape[1])
+    source_h, source_w = mask.shape
+    block_h = int(np.ceil(source_h / max(attention_h, 1)))
+    block_w = int(np.ceil(source_w / max(attention_w, 1)))
+    padded_h = attention_h * block_h
+    padded_w = attention_w * block_w
+    padded = np.pad(
+        mask,
+        ((0, padded_h - source_h), (0, padded_w - source_w)),
+        mode="constant",
+        constant_values=False,
+    )
+    pooled = padded.reshape(attention_h, block_h, attention_w, block_w)
+    occupancy = np.mean(pooled.astype(np.float32), axis=(1, 3))
+    return (
+        occupancy > float(FLAGS.viewer_mask_grounding_cell_threshold)
+    ).astype(np.float32)
+
+
+def attention_mask_metrics(attention_map, mask_image):
+    attention_prob = attention_to_prob(attention_map)
+    mask = resize_mask_to_attention(mask_image, attention_prob.shape)
+    mask_binary = mask > 0.5
+    mask_cell_fraction = float(np.mean(mask_binary))
+    if not np.any(mask_binary):
+        return {
+            "mask_mass": 0.0,
+            "mask_grounding_loss": np.nan,
+            "mask_cell_fraction": mask_cell_fraction,
+        }
+    mask_mass = float(np.sum(attention_prob * mask_binary.astype(np.float32)))
+    mask_grounding_loss = float(-np.log(max(mask_mass, 1e-8)))
+    return {
+        "mask_mass": mask_mass,
+        "mask_grounding_loss": mask_grounding_loss,
+        "mask_cell_fraction": mask_cell_fraction,
+    }
 
 
 def draw_text_panel(image, lines):
@@ -473,7 +646,10 @@ def draw_text_panel(image, lines):
 
 
 def render_attention_panel(image_rgb, attention_map, title, extra_lines):
-    heatmap = normalize_heatmap(attention_map)
+    heatmap = normalize_heatmap(
+        attention_map,
+        floor_value=FLAGS.attention_logit_floor,
+    )
     heatmap = cv2.resize(
         heatmap,
         (image_rgb.shape[1], image_rgb.shape[0]),
@@ -495,7 +671,46 @@ def render_attention_panel(image_rgb, attention_map, title, extra_lines):
     return overlay
 
 
-def create_attention_agent(config, sample_obs, attention_key):
+def render_attention_probability_panel(image_rgb, attention_map, title, extra_lines):
+    probability = attention_to_prob(attention_map)
+    probability = np.where(
+        probability >= float(FLAGS.attention_probability_floor),
+        probability,
+        0.0,
+    )
+    probability = cv2.resize(
+        probability,
+        (image_rgb.shape[1], image_rgb.shape[0]),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    probability_color = cv2.applyColorMap(
+        np.clip(255.0 * probability / max(float(np.max(probability)), 1e-8), 0, 255).astype(
+            np.uint8
+        ),
+        cv2.COLORMAP_JET,
+    )
+    image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    overlay = cv2.addWeighted(image_bgr, 0.62, probability_color, 0.38, 0.0)
+    if FLAGS.output_scale > 1:
+        overlay = cv2.resize(
+            overlay,
+            (overlay.shape[1] * FLAGS.output_scale, overlay.shape[0] * FLAGS.output_scale),
+            interpolation=cv2.INTER_NEAREST,
+        )
+    draw_text_panel(overlay, [title, *extra_lines])
+    return overlay
+
+
+def create_attention_agent(
+    config,
+    sample_obs,
+    attention_key,
+    *,
+    use_mask_pooling,
+    use_mask_feature_head,
+    mask_spatial_gate_alpha,
+    return_raw_attention,
+):
     return make_gaze_sac_pixel_agent_hybrid_single_arm(
         seed=FLAGS.seed,
         sample_obs=sample_obs,
@@ -507,16 +722,51 @@ def create_attention_agent(config, sample_obs, attention_key):
         gaze_heatmap_size=(FLAGS.image_size, FLAGS.image_size),
         gaze_region_radius=0,
         gaze_attention_image_key=attention_key,
+        use_mask_pooling=use_mask_pooling,
+        mask_spatial_gate_alpha=mask_spatial_gate_alpha,
+        use_mask_feature_head=use_mask_feature_head,
+        mask_feature_gate_alpha=FLAGS.mask_feature_gate_alpha,
+        mask_feature_min_gate=FLAGS.mask_feature_min_gate,
+        mask_feature_hidden_dim=FLAGS.mask_feature_hidden_dim,
+        return_raw_attention=return_raw_attention,
     )
 
 
-def restore_agent(agent):
+def restore_agent(agent, *, label, allow_fallback=False):
+    if FLAGS.skip_restore:
+        print_green(
+            f"skip_restore=True: using initialized agent for {label} "
+            "with loaded ResNet backbone only."
+        )
+        return agent
     step = None if FLAGS.checkpoint_step < 0 else FLAGS.checkpoint_step
-    restored_state = checkpoints.restore_checkpoint(
-        os.path.abspath(FLAGS.checkpoint_path),
-        agent.state,
-        step=step,
+    if step is None:
+        resolved_checkpoint = checkpoints.latest_checkpoint(
+            os.path.abspath(FLAGS.checkpoint_path)
+        )
+    else:
+        resolved_checkpoint = os.path.join(
+            os.path.abspath(FLAGS.checkpoint_path),
+            f"checkpoint_{step}",
+        )
+    print_green(
+        f"restoring {label} checkpoint="
+        f"{resolved_checkpoint if resolved_checkpoint is not None else 'None'}"
     )
+    try:
+        restored_state = checkpoints.restore_checkpoint(
+            os.path.abspath(FLAGS.checkpoint_path),
+            agent.state,
+            step=step,
+        )
+    except Exception as exc:
+        if not allow_fallback:
+            raise
+        print_red(
+            f"[warn] restore failed for {label}; using initialized raw encoder. "
+            f"reason={exc}"
+        )
+        return agent
     return agent.replace(state=restored_state)
 
 
@@ -546,10 +796,35 @@ def pad_to_same_height(panels):
     return padded
 
 
+def pad_to_same_width(panels):
+    max_width = max(panel.shape[1] for panel in panels)
+    padded = []
+    for panel in panels:
+        if panel.shape[1] == max_width:
+            padded.append(panel)
+            continue
+        pad = np.zeros((panel.shape[0], max_width - panel.shape[1], 3), dtype=panel.dtype)
+        padded.append(np.concatenate([panel, pad], axis=1))
+    return padded
+
+
+def make_panel_grid(panels, panels_per_row):
+    if not panels:
+        raise ValueError("No panels to render.")
+    panels_per_row = max(1, int(panels_per_row))
+    rows = []
+    for start in range(0, len(panels), panels_per_row):
+        row_panels = pad_to_same_height(panels[start : start + panels_per_row])
+        rows.append(np.concatenate(row_panels, axis=1))
+    rows = pad_to_same_width(rows)
+    return np.concatenate(rows, axis=0)
+
+
 def main(_):
     if FLAGS.exp_name not in NEW_MAPPING:
         raise ValueError(f"Unknown exp_name={FLAGS.exp_name}")
     config = NEW_MAPPING[FLAGS.exp_name]()
+    mask_selection_mode = resolve_mask_selection_mode(FLAGS.exp_name)
     config.image_keys = list(
         config.get_image_keys(
             enable_tactile=bool(FLAGS.enable_tactile),
@@ -559,7 +834,7 @@ def main(_):
     attention_keys = [
         key.strip()
         for key in FLAGS.attention_keys.split(",")
-        if key.strip() in config.image_keys
+        if key.strip() in config.image_keys and key.strip() != "front_camera_mask"
     ]
     if not attention_keys:
         raise ValueError(f"No valid attention_keys in {FLAGS.attention_keys}")
@@ -575,17 +850,103 @@ def main(_):
     print_green(f"checkpoint_path={Path(FLAGS.checkpoint_path).expanduser().resolve()}")
     print_green(f"image_keys={config.image_keys}")
     print_green(f"attention_keys={attention_keys}")
+    print_green(f"mask_selection_mode={mask_selection_mode}")
+    print_green(f"mask_spatial_gate_alpha={FLAGS.mask_spatial_gate_alpha}")
+    print_green(f"use_mask_pooling={FLAGS.use_mask_pooling}")
+    print_green(f"use_mask_feature_head={FLAGS.use_mask_feature_head}")
+    print_green(f"compare_raw_mask_feature={FLAGS.compare_raw_mask_feature}")
+    print_green(f"mask_feature_gate_alpha={FLAGS.mask_feature_gate_alpha}")
+    print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
+    print_green(f"mask_feature_hidden_dim={FLAGS.mask_feature_hidden_dim}")
+    print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
+    print_green(
+        "viewer_mask_grounding_cell_threshold="
+        f"{FLAGS.viewer_mask_grounding_cell_threshold}"
+    )
+    print_green(f"attention_display_mode={FLAGS.attention_display_mode}")
     print_green(f"frames={len(frame_dirs)} output_dir={output_dir}")
 
     sample_obs, _, _ = read_frame_observation_and_action(frame_dirs[0], config.image_keys)
-    agents = {}
+    mask_predictor = None
+    if mask_selection_mode in ("force_mask1", "force_mask2"):
+        mask_predictor = load_mask_predictor(
+            sample_obs,
+            config.image_keys,
+            FLAGS.mask_predictor_checkpoint_path,
+            preferred_key="front_camera",
+            log_fn=print_green,
+        )
+        selected_index = 0 if mask_selection_mode == "force_mask1" else 1
+        sample_obs, _ = apply_predicted_mask_to_obs(
+            sample_obs,
+            mask_predictor,
+            selected_index,
+            (FLAGS.image_size, FLAGS.image_size),
+        )
+    attention_specs = []
     for attention_key in attention_keys:
+        if FLAGS.compare_raw_mask_feature:
+            attention_specs.append(
+                {
+                    "key": attention_key,
+                    "kind": "raw_feature",
+                    "use_mask_pooling": FLAGS.use_mask_pooling,
+                    "use_mask_feature_head": FLAGS.use_mask_feature_head,
+                    "mask_spatial_gate_alpha": 0.0,
+                    "return_raw_attention": True,
+                    "allow_restore_fallback": False,
+                }
+            )
+        if attention_key == "front_camera" and FLAGS.use_mask_feature_head:
+            attention_specs.append(
+                {
+                    "key": attention_key,
+                    "kind": "mask_feature_head",
+                    "use_mask_pooling": FLAGS.use_mask_pooling,
+                    "use_mask_feature_head": True,
+                    "mask_spatial_gate_alpha": FLAGS.mask_spatial_gate_alpha,
+                    "return_raw_attention": False,
+                    "allow_restore_fallback": False,
+                }
+            )
+        elif not FLAGS.compare_raw_mask_feature:
+            attention_specs.append(
+                {
+                    "key": attention_key,
+                    "kind": "raw_feature",
+                    "use_mask_pooling": FLAGS.use_mask_pooling,
+                    "use_mask_feature_head": FLAGS.use_mask_feature_head,
+                    "mask_spatial_gate_alpha": 0.0,
+                    "return_raw_attention": True,
+                    "allow_restore_fallback": False,
+                }
+            )
+    if not attention_specs:
+        raise ValueError("No attention specs were created.")
+
+    agents = {}
+    for spec in attention_specs:
+        attention_key = spec["key"]
+        attention_kind = spec["kind"]
         start = time.time()
-        agent = create_attention_agent(config, sample_obs, attention_key)
-        agent = restore_agent(agent)
+        agent = create_attention_agent(
+            config,
+            sample_obs,
+            attention_key,
+            use_mask_pooling=spec["use_mask_pooling"],
+            use_mask_feature_head=spec["use_mask_feature_head"],
+            mask_spatial_gate_alpha=spec["mask_spatial_gate_alpha"],
+            return_raw_attention=spec["return_raw_attention"],
+        )
+        label = f"{attention_key}/{attention_kind}"
+        agent = restore_agent(
+            agent,
+            label=label,
+            allow_fallback=spec["allow_restore_fallback"],
+        )
         agent = jax.device_put(jax.tree_util.tree_map(jnp.array, agent))
-        agents[attention_key] = agent
-        print_green(f"loaded attention agent key={attention_key} time={time.time() - start:.2f}s")
+        agents[(attention_key, attention_kind)] = agent
+        print_green(f"loaded attention agent key={label} time={time.time() - start:.2f}s")
 
     summary_path = output_dir / "attention_summary.csv"
     with summary_path.open("w", newline="") as summary_file:
@@ -595,12 +956,17 @@ def main(_):
                 "frame_id",
                 "selected_mask",
                 "attention_key",
+                "attention_kind",
                 "attention_shape",
                 "peak_cell_x",
                 "peak_cell_y",
                 "peak_prob",
+                "mask_mass",
+                "mask_grounding_loss",
+                "mask_cell_fraction",
             ]
         )
+        metric_rows = []
 
         for index, frame_dir in enumerate(frame_dirs, start=1):
             fid = frame_id(frame_dir)
@@ -609,10 +975,20 @@ def main(_):
                     frame_dir,
                     config.image_keys,
                 )
+                if mask_selection_mode in ("force_mask1", "force_mask2"):
+                    selected_index = 0 if mask_selection_mode == "force_mask1" else 1
+                    obs, selected_slot = apply_predicted_mask_to_obs(
+                        obs,
+                        mask_predictor,
+                        selected_index,
+                        (FLAGS.image_size, FLAGS.image_size),
+                    )
                 panels = []
-                for attention_key in attention_keys:
+                for spec in attention_specs:
+                    attention_key = spec["key"]
+                    attention_kind = spec["kind"]
                     attention_map = critic_attention_for_frame(
-                        agents[attention_key],
+                        agents[(attention_key, attention_kind)],
                         obs,
                         action,
                     )
@@ -622,30 +998,77 @@ def main(_):
                         attention_prob.shape,
                     )
                     peak_prob = float(attention_prob[peak_y, peak_x])
+                    metrics = {
+                        "mask_mass": np.nan,
+                        "mask_grounding_loss": np.nan,
+                        "mask_cell_fraction": np.nan,
+                    }
+                    metric_lines = []
+                    if attention_key == "front_camera" and "front_camera_mask" in obs:
+                        metrics = attention_mask_metrics(
+                            attention_map,
+                            obs["front_camera_mask"],
+                        )
+                        metric_lines = [
+                            f"mask_mass={metrics['mask_mass']:.3f}",
+                            (
+                                "mask_loss=nan"
+                                if np.isnan(metrics["mask_grounding_loss"])
+                                else f"mask_loss={metrics['mask_grounding_loss']:.3f}"
+                            ),
+                        ]
+                        metric_rows.append(
+                            {
+                                "frame_id": fid,
+                                "selected_mask": selected_slot,
+                                "attention_key": attention_key,
+                                "attention_kind": attention_kind,
+                                **metrics,
+                            }
+                        )
                     writer.writerow(
                         [
                             fid,
                             selected_slot,
                             attention_key,
+                            attention_kind,
                             tuple(attention_map.shape),
                             int(peak_x),
                             int(peak_y),
                             f"{peak_prob:.8f}",
+                            f"{metrics['mask_mass']:.8f}",
+                            (
+                                "nan"
+                                if np.isnan(metrics["mask_grounding_loss"])
+                                else f"{metrics['mask_grounding_loss']:.8f}"
+                            ),
+                            f"{metrics['mask_cell_fraction']:.8f}",
                         ]
                     )
-                    panel = render_attention_panel(
-                        obs[attention_key],
-                        attention_map,
-                        f"frame={fid} {attention_key}",
-                        [
-                            f"attn_shape={tuple(attention_map.shape)}",
-                            f"peak=({int(peak_x)},{int(peak_y)}) p={peak_prob:.3f}",
-                            f"selected_mask={selected_slot}",
-                        ],
-                    )
-                    panels.append(panel)
+                    panel_lines = [
+                        f"attn_shape={tuple(attention_map.shape)}",
+                        f"peak=({int(peak_x)},{int(peak_y)}) p={peak_prob:.3f}",
+                        f"selected_mask={selected_slot}",
+                        *metric_lines,
+                    ]
+                    if FLAGS.attention_display_mode in ("heatmap", "both"):
+                        panel = render_attention_panel(
+                            obs[attention_key],
+                            attention_map,
+                            f"frame={fid} {attention_key} {attention_kind} logits",
+                            panel_lines,
+                        )
+                        panels.append(panel)
+                    if FLAGS.attention_display_mode in ("prob", "both"):
+                        panel = render_attention_probability_panel(
+                            obs[attention_key],
+                            attention_map,
+                            f"frame={fid} {attention_key} {attention_kind} prob",
+                            panel_lines,
+                        )
+                        panels.append(panel)
 
-                comparison = np.concatenate(pad_to_same_height(panels), axis=1)
+                comparison = make_panel_grid(panels, FLAGS.attention_panels_per_row)
                 output_path = output_dir / f"frame_{fid:06d}_modality_attention.jpg"
                 if not cv2.imwrite(str(output_path), comparison):
                     raise RuntimeError(f"cv2.imwrite failed: {output_path}")
@@ -654,7 +1077,45 @@ def main(_):
             except Exception as exc:
                 print_red(f"[skip] frame={fid}: {exc}")
 
+    loss_summary_path = output_dir / "attention_loss_summary.csv"
+    with loss_summary_path.open("w", newline="") as loss_summary_file:
+        writer = csv.writer(loss_summary_file)
+        writer.writerow(
+            [
+                "attention_key",
+                "attention_kind",
+                "frames",
+                "mean_mask_mass",
+                "mean_mask_grounding_loss",
+                "mean_mask_cell_fraction",
+            ]
+        )
+        grouped = {}
+        for row in metric_rows:
+            grouped.setdefault((row["attention_key"], row["attention_kind"]), []).append(row)
+        for (attention_key, attention_kind), rows in grouped.items():
+            losses = np.asarray(
+                [row["mask_grounding_loss"] for row in rows],
+                dtype=np.float32,
+            )
+            masses = np.asarray([row["mask_mass"] for row in rows], dtype=np.float32)
+            fractions = np.asarray(
+                [row["mask_cell_fraction"] for row in rows],
+                dtype=np.float32,
+            )
+            writer.writerow(
+                [
+                    attention_key,
+                    attention_kind,
+                    len(rows),
+                    f"{float(np.nanmean(masses)):.8f}",
+                    f"{float(np.nanmean(losses)):.8f}",
+                    f"{float(np.nanmean(fractions)):.8f}",
+                ]
+            )
+
     print_green(f"done. summary={summary_path}")
+    print_green(f"done. loss_summary={loss_summary_path}")
 
 
 if __name__ == "__main__":

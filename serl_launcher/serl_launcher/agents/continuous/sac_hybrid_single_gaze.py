@@ -15,11 +15,12 @@ from serl_launcher.networks.mlp import MLP
 
 
 class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
-    """Hybrid SAC agent with critic-side gaze-region attention supervision.
+    """Hybrid SAC agent with mask-pooled features and mask grounding loss.
 
     This class keeps the base SAC update structure intact. The only behavioral
-    change is inside critic_loss_fn, where an optional gaze auxiliary loss
-    encourages front-camera critic attention to cover the gaze peak region.
+    change is inside critic_loss_fn, where optional auxiliary losses encourage
+    the front-camera mask feature head to place probability mass inside the
+    selected mask region.
     """
 
     def forward_gaze_attention(
@@ -102,7 +103,84 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             has_gaze.astype(jnp.float32),
         )
 
-    def critic_loss_fn(self, batch, params: Params, rng: PRNGKey):
+    def _mask_to_attention_shape(self, mask, attention_map):
+        mask = jnp.asarray(mask, dtype=jnp.float32)
+        if mask.ndim == 5:
+            mask = jnp.max(mask, axis=(1, 4))
+        elif mask.ndim == 4:
+            mask = jnp.max(mask, axis=-1)
+        elif mask.ndim != 3:
+            raise ValueError(f"Unsupported mask shape for grounding loss: {mask.shape}")
+
+        batch_size, attention_h, attention_w = attention_map.shape
+        mask = jnp.where(jnp.max(mask) > 1.0, mask / 255.0, mask)
+        mask = mask > self.config["mask_grounding_threshold"]
+
+        source_h, source_w = mask.shape[-2:]
+        block_h = (source_h + attention_h - 1) // attention_h
+        block_w = (source_w + attention_w - 1) // attention_w
+        padded_h = attention_h * block_h
+        padded_w = attention_w * block_w
+        mask = jnp.pad(
+            mask,
+            (
+                (0, 0),
+                (0, padded_h - source_h),
+                (0, padded_w - source_w),
+            ),
+            mode="constant",
+            constant_values=False,
+        )
+        mask = mask.reshape(batch_size, attention_h, block_h, attention_w, block_w)
+        occupancy = jnp.mean(mask.astype(attention_map.dtype), axis=(2, 4))
+        mask = (
+            occupancy > self.config["mask_grounding_cell_threshold"]
+        ).astype(attention_map.dtype)
+        return mask
+
+    def _mask_grounding_loss(self, observations, attention_map):
+        key = self.config["mask_grounding_key"]
+        if key not in observations:
+            batch_size = attention_map.shape[0]
+            zeros = jnp.zeros((batch_size,), dtype=attention_map.dtype)
+            return zeros, zeros, zeros, zeros
+
+        mask = self._mask_to_attention_shape(observations[key], attention_map)
+        mask = mask.astype(attention_map.dtype)
+        logits_flat = attention_map.reshape(attention_map.shape[0], -1)
+        mask_flat = mask.reshape(mask.shape[0], -1)
+
+        attention_probs = jax.nn.softmax(
+            logits_flat,
+            axis=-1,
+        )
+        mask_mass = jnp.sum(attention_probs * mask_flat, axis=-1)
+        outside_mass = jnp.sum(attention_probs * (1.0 - mask_flat), axis=-1)
+        valid_mask = (jnp.sum(mask_flat, axis=-1) > 0).astype(attention_map.dtype)
+        mass_loss = -jnp.log(mask_mass + 1e-8)
+
+        mask_feature_entropy = -jnp.sum(
+            attention_probs * jnp.log(attention_probs + 1e-8),
+            axis=-1,
+        ) / jnp.log(attention_probs.shape[-1])
+        return (
+            jnp.where(valid_mask > 0, mass_loss, 0.0),
+            jnp.where(valid_mask > 0, mask_mass, 0.0),
+            jnp.where(valid_mask > 0, outside_mass, 0.0),
+            jnp.where(valid_mask > 0, mask_feature_entropy, 0.0),
+            valid_mask,
+        )
+
+    def _effective_mask_grounding_weight(self, train_step):
+        base_weight = float(self.config["mask_grounding_weight"])
+        decay_step = int(self.config["mask_grounding_decay_step"])
+        decay_weight = float(self.config["mask_grounding_decay_weight"])
+        if train_step is None or decay_step <= 0:
+            return base_weight
+        train_step = jnp.asarray(train_step, dtype=jnp.int32)
+        return jnp.where(train_step >= decay_step, decay_weight, base_weight)
+
+    def critic_loss_fn(self, batch, params: Params, rng: PRNGKey, train_step=None):
         batch_size = batch["rewards"].shape[0]
         actions = batch["actions"][..., :-1]
 
@@ -152,11 +230,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         chex.assert_equal_shape([predicted_qs, target_qs])
         td_loss = jnp.mean((predicted_qs - target_qs) ** 2)
 
-        gaze_heatmap, has_gaze_heatmap = self._gaze_heatmap_per_sample(batch)
-        gaze_heatmap = jnp.reshape(
-            gaze_heatmap,
-            (batch_size, *self.config["gaze_heatmap_size"]),
-        )
         attention_map = self.forward_gaze_attention(
             batch["observations"],
             actions,
@@ -165,11 +238,22 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         )
 
         gaze_weight = self.config["gaze_regularization_weight"]
-        gaze_loss_per_sample, gaze_region_coverage, valid_gaze = (
-            self._gaze_region_tracking_loss(gaze_heatmap, attention_map)
-        )
+        if gaze_weight > 0.0:
+            gaze_heatmap, has_gaze_heatmap = self._gaze_heatmap_per_sample(batch)
+            gaze_heatmap = jnp.reshape(
+                gaze_heatmap,
+                (batch_size, *self.config["gaze_heatmap_size"]),
+            )
+            gaze_loss_per_sample, gaze_region_coverage, valid_gaze = (
+                self._gaze_region_tracking_loss(gaze_heatmap, attention_map)
+            )
+            has_active_gaze_aux = has_gaze_heatmap
+        else:
+            gaze_loss_per_sample = jnp.zeros((batch_size,), dtype=td_loss.dtype)
+            gaze_region_coverage = jnp.zeros((batch_size,), dtype=td_loss.dtype)
+            valid_gaze = jnp.zeros((batch_size,), dtype=td_loss.dtype)
+            has_active_gaze_aux = False
         valid_gaze_count = jnp.maximum(jnp.sum(valid_gaze), 1.0)
-        has_active_gaze_aux = has_gaze_heatmap and gaze_weight > 0.0
         gaze_aux_loss = (
             jnp.sum(gaze_loss_per_sample * valid_gaze)
             / valid_gaze_count
@@ -179,7 +263,29 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
 
         weighted_gaze_aux_loss = gaze_weight * gaze_aux_loss
         gaze_to_td_ratio = weighted_gaze_aux_loss / (td_loss + 1e-8)
-        critic_loss = td_loss + weighted_gaze_aux_loss
+
+        mask_grounding_weight = self._effective_mask_grounding_weight(train_step)
+        (
+            mask_mass_loss_per_sample,
+            mask_grounding_coverage,
+            mask_grounding_outside_mass,
+            mask_feature_entropy,
+            valid_mask,
+        ) = self._mask_grounding_loss(batch["observations"], attention_map)
+        valid_mask_count = jnp.maximum(jnp.sum(valid_mask), 1.0)
+        mask_mass_loss = (
+            jnp.sum(mask_mass_loss_per_sample * valid_mask) / valid_mask_count
+        )
+        mask_grounding_loss = mask_mass_loss
+        mask_grounding_loss = jnp.where(
+            mask_grounding_weight > 0.0,
+            mask_grounding_loss,
+            jnp.asarray(0.0, dtype=td_loss.dtype),
+        )
+        weighted_mask_grounding_loss = mask_grounding_weight * mask_grounding_loss
+        mask_grounding_to_td_ratio = weighted_mask_grounding_loss / (td_loss + 1e-8)
+
+        critic_loss = td_loss + weighted_gaze_aux_loss + weighted_mask_grounding_loss
 
         info = {
             "critic_loss": critic_loss,
@@ -194,9 +300,32 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             "gaze_to_td_ratio": gaze_to_td_ratio,
             "gaze_region_coverage": jnp.sum(gaze_region_coverage) / valid_gaze_count,
             "gaze_valid_fraction": jnp.mean(valid_gaze),
+            "mask_grounding_loss": mask_grounding_loss,
+            "mask_grounding_mass_loss": mask_mass_loss,
+            "mask_grounding_weight": jnp.asarray(mask_grounding_weight, dtype=td_loss.dtype),
+            "weighted_mask_grounding_loss": weighted_mask_grounding_loss,
+            "mask_grounding_to_td_ratio": mask_grounding_to_td_ratio,
+            "mask_grounding_coverage": (
+                jnp.sum(mask_grounding_coverage) / valid_mask_count
+            ),
+            "mask_grounding_outside_mass": (
+                jnp.sum(mask_grounding_outside_mass) / valid_mask_count
+            ),
+            "mask_feature_entropy": (
+                jnp.sum(mask_feature_entropy) / valid_mask_count
+            ),
+            "mask_grounding_valid_fraction": jnp.mean(valid_mask),
         }
 
         return critic_loss, info
+
+    def loss_fns(self, batch, train_step=None):
+        return {
+            "critic": partial(self.critic_loss_fn, batch, train_step=train_step),
+            "grasp_critic": partial(self.grasp_critic_loss_fn, batch),
+            "actor": partial(self.policy_loss_fn, batch),
+            "temperature": partial(self.temperature_loss_fn, batch),
+        }
 
     @classmethod
     def create_pixels(
@@ -230,10 +359,31 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         gaze_valid_threshold: float = 1e-8,
         gaze_region_radius: int = 1,
         gaze_attention_image_key: str = "front_camera",
+        use_mask_pooling: bool = True,
+        mask_spatial_gate_alpha: float = 0.0,
+        use_mask_feature_head: bool = True,
+        mask_feature_gate_alpha: float = 1.0,
+        mask_feature_min_gate: float = 0.1,
+        mask_feature_hidden_dim: int = 128,
+        return_raw_attention: bool = False,
+        mask_grounding_weight: float = 0.0,
+        mask_grounding_decay_step: int = 0,
+        mask_grounding_decay_weight: float = 0.0,
+        mask_grounding_key: str = "front_camera_mask",
+        mask_grounding_threshold: float = 0.05,
+        mask_grounding_cell_threshold: float = 0.01,
         **kwargs,
     ):
         policy_network_kwargs["activate_final"] = True
         critic_network_kwargs["activate_final"] = True
+
+        mask_pool_pairs = (
+            (("front_camera", "front_camera_mask"),)
+            if "front_camera_mask" in image_keys
+            else ()
+        )
+        mask_pool_keys = {mask_key for _, mask_key in mask_pool_pairs}
+        encoder_image_keys = [key for key in image_keys if key not in mask_pool_keys]
 
         if encoder_type == "resnet":
             from serl_launcher.vision.resnet_v1 import resnetv1_configs
@@ -245,7 +395,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                     bottleneck_dim=256,
                     name=f"encoder_{image_key}",
                 )
-                for image_key in image_keys
+                for image_key in encoder_image_keys
             }
         elif encoder_type == "resnet-pretrained":
             from serl_launcher.vision.resnet_v1 import (
@@ -265,7 +415,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                     pretrained_encoder=pretrained_encoder,
                     name=f"encoder_{image_key}",
                 )
-                for image_key in image_keys
+                for image_key in encoder_image_keys
             }
         else:
             raise NotImplementedError(f"Unknown encoder type: {encoder_type}")
@@ -276,10 +426,18 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             encoder=encoders,
             use_proprio=use_proprio,
             enable_stacking=True,
-            image_keys=image_keys,
+            image_keys=encoder_image_keys,
             # TODO: If gaze is collected on a different camera in a future task,
             # pass that camera key through the launcher/config instead of front_camera.
             attention_image_key=gaze_attention_image_key,
+            mask_pool_pairs=mask_pool_pairs,
+            use_mask_pooling=use_mask_pooling,
+            mask_spatial_gate_alpha=mask_spatial_gate_alpha,
+            use_mask_feature_head=use_mask_feature_head,
+            mask_feature_gate_alpha=mask_feature_gate_alpha,
+            mask_feature_min_gate=mask_feature_min_gate,
+            mask_feature_hidden_dim=mask_feature_hidden_dim,
+            return_raw_attention=return_raw_attention,
         )
 
         encoders = {
@@ -335,12 +493,18 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             gaze_heatmap_size=gaze_heatmap_size,
             gaze_valid_threshold=gaze_valid_threshold,
             gaze_region_radius=gaze_region_radius,
+            mask_grounding_weight=mask_grounding_weight,
+            mask_grounding_decay_step=mask_grounding_decay_step,
+            mask_grounding_decay_weight=mask_grounding_decay_weight,
+            mask_grounding_key=mask_grounding_key,
+            mask_grounding_threshold=mask_grounding_threshold,
+            mask_grounding_cell_threshold=mask_grounding_cell_threshold,
             **kwargs,
         )
 
         if "pretrained" in encoder_type:
             from serl_launcher.utils.train_utils import load_resnet10_params
 
-            agent = load_resnet10_params(agent, image_keys)
+            agent = load_resnet10_params(agent, encoder_image_keys)
 
         return agent

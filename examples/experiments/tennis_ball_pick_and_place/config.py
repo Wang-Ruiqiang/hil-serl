@@ -16,7 +16,7 @@ from serl_launcher.wrappers.gaze_derived_observation import GazeDerivedObservati
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from experiments.config import DefaultTrainingConfig
-from experiments.tennis_ball_pick.wrapper import RAMEnv, GripperPenaltyWrapper
+from experiments.tennis_ball_pick_and_place.wrapper import RAMEnv, GripperPenaltyWrapper
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -63,7 +63,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
-    ACTION_SCALE = (0.003, 0.003, 0.003)
+    ACTION_SCALE = (0.007, 0.007, 0.007)
     CMD_POSE_RESYNC_THRESHOLD = 0.05
     DISPLAY_IMAGE = True
     GAZE_DISPLAY_MARKERS = True
@@ -91,7 +91,7 @@ class EnvConfig(DefaultEnvConfig):
     TACT_BASE_PATH = '/home/user/franka_ros2_ws/src/tact9d/tact9d/shape_reconstruction/'
     DM_TAC_DEPTH_SCALE = 3
     USE_SPACEMOUSE = True
-    EXP_NAME = "tennis_ball_pick"
+    EXP_NAME = "tennis_ball_pick_and_place"
 
 
 class TrainConfig(DefaultTrainingConfig):
@@ -103,17 +103,20 @@ class TrainConfig(DefaultTrainingConfig):
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
+    pick_shaping_reward = 0.2
+    pick_reward_threshold = 0.95
+    place_reward_threshold = 0.93
     mask_spatial_gate_alpha = 1.0
     use_mask_pooling = True
     use_mask_feature_head = True
     mask_feature_gate_alpha = 1.0
     mask_feature_min_gate = 0.1
     mask_feature_hidden_dim = 128
-    mask_grounding_weight = 0.1
-    mask_grounding_decay_step = 1000
-    mask_grounding_decay_weight = 0.02
+    mask_grounding_weight = 0.01
+    mask_grounding_decay_step = 5000
+    mask_grounding_decay_weight = 0.002
     mask_grounding_threshold = 0.05
-    mask_grounding_cell_threshold = 0.03
+    mask_grounding_cell_threshold = 0.01
 
     def get_image_keys(
         self,
@@ -205,28 +208,42 @@ class TrainConfig(DefaultTrainingConfig):
                     f"shape={image_sample.shape}, dtype={image_sample.dtype}"
                 )
             if enable_tactile:
-                reward_classifier = load_classifier_func(
+                pick_reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=sample,
                     image_keys=self.classifier_keys,
                     checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
                 )
+                place_reward_classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=sample,
+                    image_keys=self.classifier_keys,
+                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_place"),
+                )
             else:
-                reward_classifier = load_classifier_func(
+                pick_reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=sample,
                     image_keys=self.classifier_keys,
                     checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick_no_tactile"),
                 )
+                place_reward_classifier = load_classifier_func(
+                    key=jax.random.PRNGKey(0),
+                    sample=sample,
+                    image_keys=self.classifier_keys,
+                    checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_place_no_tactile"),
+                )
             
             # input("debug")
             def reward_func(obs, is_pick=True):
                 sigmoid = lambda x: 1 / (1 + jnp.exp(-x))
-                prob = sigmoid(reward_classifier(obs)).item()
-                print("sigmoid(reward_classifier(obs)) = ", prob)
-                # added check for z position to further robustify classifier, but should work without as well
-                # return int(sigmoid(classifier(obs)).item() > 0.95)
-                return int(prob > 0.75)
+                if is_pick:
+                    pick_prob = sigmoid(pick_reward_classifier(obs)).item()
+                    print("sigmoid(pick_reward_classifier(obs)) = ", pick_prob)
+                    return self.pick_shaping_reward if pick_prob > self.pick_reward_threshold else 0
+                place_prob = sigmoid(place_reward_classifier(obs)).item()
+                print("sigmoid(place_reward_classifier(obs)) = ", place_prob)
+                return int(place_prob > self.place_reward_threshold)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

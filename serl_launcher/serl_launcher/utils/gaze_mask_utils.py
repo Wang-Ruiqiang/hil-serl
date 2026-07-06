@@ -243,22 +243,6 @@ def mask_to_image(mask, reference_image=None, channels=3):
     return image
 
 
-def mask_rgb_image(obs, *, gaze_target_mask, image_key="front_camera"):
-    """Return RGB image with pixels outside gaze_target_mask set to zero."""
-    reference_image = latest_image(obs, image_key)
-    if reference_image is None:
-        raise KeyError(f"Could not find source image for masked RGB: {image_key}")
-
-    reference_image = np.asarray(reference_image)
-    mask_array = np.asarray(gaze_target_mask, dtype=np.float32)
-    while mask_array.ndim > 2:
-        mask_array = mask_array[0]
-    if mask_array.shape != reference_image.shape[:2]:
-        mask_array = _resize_2d(mask_array, reference_image.shape[:2], method="nearest")
-    mask_array = np.clip(mask_array, 0.0, 1.0)
-    return (reference_image.astype(np.float32) * mask_array[..., None]).astype(np.uint8)
-
-
 def gaze_phase_onehot(selected_mask_index):
     """Encode selected gaze target as [mask1, mask2, none]."""
     phase = np.zeros((3,), dtype=np.float32)
@@ -281,35 +265,22 @@ def append_gaze_phase_to_state(obs, selected_mask_index):
     return obs
 
 
-def add_gaze_masked_rgb_to_obs(
+def add_gaze_mask_image_to_obs(
     obs,
     *,
     gaze_target_mask,
-    image_key="front_camera_masked",
+    image_key="front_camera_mask",
     reference_key="front_camera",
 ):
-    """Add RGB * selected_mask as a uint8 image modality."""
+    """Add the selected target mask as a uint8 image observation."""
     obs = dict(obs)
-    obs[image_key] = mask_rgb_image(
-        obs,
-        gaze_target_mask=gaze_target_mask,
-        image_key=reference_key,
+    reference_image = latest_image(obs, reference_key)
+    obs[image_key] = mask_to_image(
+        gaze_target_mask,
+        reference_image=reference_image,
+        channels=3,
     )
     return obs
-
-
-def dilate_gaze_target_mask_for_input(
-    gaze_target_mask,
-    selected_mask_index,
-    *,
-    mask1_dilation_px: int = 6,
-    mask2_dilation_px: int = 0,
-):
-    """Dilate the selected mask used for RGB masking, not for phase selection."""
-    radius = mask1_dilation_px if selected_mask_index == 0 else mask2_dilation_px
-    return _dilate_binary_mask(np.asarray(gaze_target_mask) > 0.5, int(radius)).astype(
-        np.float32
-    )
 
 
 def select_gaze_target_mask(

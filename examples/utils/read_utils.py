@@ -180,7 +180,7 @@ def get_frame_data(
         np.array(tcp_ori, dtype=np.float32).flatten(),
         np.array(hand_state, dtype=np.float32).flatten(),
     ])
-    if exp_name == "tennis_ball_pick" or exp_name == "tennis_ball_place":
+    if exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
         IMAGE_CROP = TENNIS_BALL_PICK_IMAGE_CROP
         CLASSIFIER_IMAGE_CROP = {}
     elif exp_name == "tube_insertion":

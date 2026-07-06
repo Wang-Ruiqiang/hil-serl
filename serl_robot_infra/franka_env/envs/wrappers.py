@@ -66,6 +66,10 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         elif self.config.EXP_NAME == "twist_bottle_cap":
             done = (rew == 1) and (not self.is_pick)
             self.is_pick = self.is_pick and not (rew == 1)
+        elif self.config.EXP_NAME == "tennis_ball_pick_and_place":
+            is_pick_reward = 0 < rew < 1
+            done = (rew >= 1) and (not self.is_pick)
+            self.is_pick = self.is_pick and not is_pick_reward
             
         else:
             done = done or (rew > 0)
@@ -75,7 +79,8 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         if self.target_hz is not None:
             time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
         
-        rew = rew if rew >= 1 else 0
+        if self.config.EXP_NAME != "tennis_ball_pick_and_place":
+            rew = rew if rew >= 1 else 0
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):

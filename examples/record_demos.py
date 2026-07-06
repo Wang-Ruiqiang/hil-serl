@@ -30,7 +30,7 @@ flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames whil
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
 flags.DEFINE_string(
     "frame_save_path",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-2",
+    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-30-1",
     "Directory used by the environment when --record_data or --record_gaze is enabled.",
 )
 
@@ -161,9 +161,24 @@ def _write_recording_metadata(env, exp_name, successes_needed, success_count, ep
     return meta_path
 
 
+def _recording_mode(exp_name):
+    if exp_name == "tennis_ball_pick":
+        return "pick_only"
+    if exp_name == "tennis_ball_pick_and_place":
+        return "pick_and_place"
+    return "default"
+
+
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     collect_gaze = bool(FLAGS.record_gaze)
+    recording_mode = _recording_mode(FLAGS.exp_name)
+    if recording_mode == "pick_only":
+        print("[record_demos] mode=pick_only: stop and save when pick succeeds.")
+    elif recording_mode == "pick_and_place":
+        print("[record_demos] mode=pick_and_place: record full trajectory until final success.")
+    else:
+        print(f"[record_demos] mode=default for exp_name={FLAGS.exp_name}.")
     config = NEW_MAPPING[FLAGS.exp_name]()
     env_kwargs = dict(
         fake_env=False,
@@ -199,6 +214,13 @@ def main(_):
             actions = np.zeros(env.action_space.sample().shape)
             # actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
+            info = dict(info)
+            if recording_mode == "pick_only" and rew:
+                done = True
+                info["succeed"] = True
+            elif recording_mode == "pick_and_place" and 0 < float(rew) < 1:
+                done = False
+                info["succeed"] = False
             # print("reward = ", rew)
             # print(f"obs[state] =  {obs['state']}")
             
@@ -206,7 +228,6 @@ def main(_):
             while key is not None:
                 if key == '1':
                     done = True
-                    info = dict(info)
                     rew = 1.0
                     info['succeed'] = True
                 key = key_reader.get_key_nowait()
@@ -249,7 +270,7 @@ def main(_):
 
             obs = next_obs
             if done:
-                if info["succeed"]:
+                if info.get("succeed", False):
                     # time.sleep(0.5)
                     # actions = np.zeros(env.action_space.sample().shape)
                     # # actions[6] = 1.0

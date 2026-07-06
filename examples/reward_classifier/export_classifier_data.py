@@ -35,6 +35,11 @@ flags.DEFINE_multi_string(
     "Recorded data root(s) containing frame_xxx folders.",
 )
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
+flags.DEFINE_string(
+    "classifier_task",
+    "pick",
+    "Classifier task: pick or place. Controls default label/range/output paths.",
+)
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")
 flags.DEFINE_boolean(
     "disable_image_crop",
@@ -53,8 +58,8 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string(
     "label_name",
-    "is_recorded_pick_success.txt",
-    "Success label filename inside each frame_xxx folder.",
+    "",
+    "Success label filename inside each frame_xxx folder. Empty chooses by classifier_task.",
 )
 flags.DEFINE_string(
     "output_dir",
@@ -64,15 +69,41 @@ flags.DEFINE_string(
 flags.DEFINE_integer("batch_size", 500, "Number of transitions per pickle dump.")
 flags.DEFINE_string(
     "range_name",
-    "pick_classifier_ranges.json",
+    "",
     "Optional range json inside each frame_root. If present, only current frames "
-    "inside its ranges are exported.",
+    "inside its ranges are exported. Empty chooses by classifier_task; use 'none' to disable.",
 )
 
 
 def _frame_number(path: Path) -> int:
     match = re.search(r"frame_(\d+)", path.name)
     return int(match.group(1)) if match else 10**12
+
+
+def _classifier_task() -> str:
+    task = FLAGS.classifier_task.lower().strip()
+    if task not in ("pick", "place"):
+        raise ValueError("--classifier_task must be 'pick' or 'place'")
+    return task
+
+
+def _label_name() -> str:
+    if FLAGS.label_name:
+        return FLAGS.label_name
+    if _classifier_task() == "pick":
+        return "is_recorded_pick_success.txt"
+    return "is_recorded_success.txt"
+
+
+def _range_name() -> str:
+    if FLAGS.range_name:
+        range_name = FLAGS.range_name.strip()
+        if range_name.lower() in ("none", "null", "off", "false"):
+            return ""
+        return range_name
+    if _classifier_task() == "pick":
+        return "pick_classifier_ranges.json"
+    return "place_classifier_ranges.json"
 
 
 def _frame_dirs(root: Path):
@@ -87,17 +118,18 @@ def _frame_dirs(root: Path):
 
 
 def _read_success_label(frame_dir: Path) -> int:
-    return 1 if (frame_dir / FLAGS.label_name).read_text().strip() == "1" else 0
+    return 1 if (frame_dir / _label_name()).read_text().strip() == "1" else 0
 
 
 def _has_label(frame_dir: Path) -> bool:
-    return (frame_dir / FLAGS.label_name).exists()
+    return (frame_dir / _label_name()).exists()
 
 
 def _load_allowed_frame_ids(root: Path):
-    if not FLAGS.range_name:
+    range_name = _range_name()
+    if not range_name:
         return None
-    range_path = root / FLAGS.range_name
+    range_path = root / range_name
     if not range_path.exists():
         return None
     data = json.loads(range_path.read_text())
@@ -113,7 +145,10 @@ def _load_allowed_frame_ids(root: Path):
 def _default_output_dir() -> Path:
     if FLAGS.output_dir:
         return Path(FLAGS.output_dir).expanduser()
-    suffix = "classifier_data_pick" if FLAGS.enable_tactile else "classifier_data_pick_no_tactile"
+    if _classifier_task() == "pick":
+        suffix = "classifier_data_pick" if FLAGS.enable_tactile else "classifier_data_pick_no_tactile"
+    else:
+        suffix = "classifier_data_place" if FLAGS.enable_tactile else "classifier_data_place_no_tactile"
     return SCRIPT_DIR / suffix
 
 
@@ -161,7 +196,7 @@ def _transition_from_frames(current_frame: Path, next_frame: Path, robot_urdf_pa
         FLAGS.exp_name,
         image_keys=image_keys,
         disable_image_crop=FLAGS.disable_image_crop,
-        label_name=FLAGS.label_name,
+        label_name=_label_name(),
     )
     next_obs, _, _ = read_utils.get_frame_data(
         str(next_frame),
@@ -170,7 +205,7 @@ def _transition_from_frames(current_frame: Path, next_frame: Path, robot_urdf_pa
         FLAGS.exp_name,
         image_keys=image_keys,
         disable_image_crop=FLAGS.disable_image_crop,
-        label_name=FLAGS.label_name,
+        label_name=_label_name(),
     )
     action = np.asarray(frame_action, dtype=np.float32).copy()
     return copy.deepcopy(
@@ -203,6 +238,7 @@ def main(_):
     skipped = 0
 
     print(f"[source] config_module={FLAGS.config_module or f'experiments.{FLAGS.exp_name}.config'}")
+    print(f"[source] classifier_task={_classifier_task()} label_name={_label_name()} range_name={_range_name() or 'disabled'}")
     print(f"[source] classifier_image_keys={image_keys}")
     print(f"[source] robot_urdf={robot_urdf_path}")
     print(f"[source] disable_image_crop={FLAGS.disable_image_crop}")

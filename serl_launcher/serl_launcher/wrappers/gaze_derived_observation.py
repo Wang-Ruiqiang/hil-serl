@@ -5,11 +5,10 @@ import cv2
 import numpy as np
 
 from serl_launcher.utils.gaze_mask_utils import (
-    add_gaze_masked_rgb_to_obs,
+    add_gaze_mask_image_to_obs,
     append_gaze_phase_to_state,
     compute_gaze_target_mask_fields,
     compute_index_target_mask_fields,
-    dilate_gaze_target_mask_for_input,
     load_mask_predictor,
 )
 from serl_launcher.utils.gaze_utils import (
@@ -33,7 +32,7 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         *,
         use_gaze_target_mask=True,
         source_image_key="front_camera",
-        gaze_target_mask_key="front_camera_masked",
+        gaze_target_mask_key="front_camera_mask",
         gaze_predictor_checkpoint_path="examples/gaze_data_process/gaze_heatmap_ckpt",
         mask_predictor_checkpoint_path=(
             "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
@@ -42,10 +41,8 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         pick_classifier_checkpoint_path="examples/reward_classifier/classifier_ckpt_ball_pick",
         pick_classifier_threshold=0.95,
         pick_classifier_image_keys=("front_camera", "tactile_data"),
-        gaze_target_mask_dilation=2,
+        gaze_target_mask_dilation=0,
         channels=3,
-        mask1_input_dilation=6,
-        mask2_input_dilation=0,
         log_fn=print,
     ):
         super().__init__(env)
@@ -59,14 +56,14 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         self.pick_classifier_threshold = float(pick_classifier_threshold)
         self.pick_classifier_image_keys = tuple(pick_classifier_image_keys)
         self.gaze_target_mask_dilation = int(gaze_target_mask_dilation)
-        self.mask1_input_dilation = int(mask1_input_dilation)
-        self.mask2_input_dilation = int(mask2_input_dilation)
         self.channels = int(channels)
         self.log_fn = log_fn
         self.gaze_predictor = None
         self.mask_predictor = None
         self.pick_classifier = None
         self.predictors_loaded = False
+        self.pick_latched = False
+        self.last_pick_classifier_prob = 0.0
         if hasattr(self.env, "config"):
             self.config = self.env.config
 
@@ -96,6 +93,11 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
                 dtype=state_space.dtype,
             )
         self.observation_space = gym.spaces.Dict(spaces)
+
+    def reset(self, **kwargs):
+        self.pick_latched = False
+        self.last_pick_classifier_prob = 0.0
+        return super().reset(**kwargs)
 
     def _image_keys(self):
         return list(self.observation_space.spaces.keys())
@@ -167,7 +169,7 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         space = self.observation_space[key]
         return np.zeros(space.shape, dtype=space.dtype)
 
-    def _display_gaze_masked_rgb(self, obs, selected_slot):
+    def _display_gaze_mask(self, obs, selected_slot):
         try:
             env = self.env.unwrapped
             if not getattr(env, "display_image", False) or not hasattr(env, "img_queue"):
@@ -187,7 +189,7 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
             )
             env.img_queue.put({self.gaze_target_mask_key: mask_image})
         except Exception as exc:
-            print(f"[warn] failed to display front_camera_masked: {exc}")
+            print(f"[warn] failed to display {self.gaze_target_mask_key}: {exc}")
             return
 
     def observation(self, obs):
@@ -203,8 +205,17 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         )
 
         if self.mask_selection_mode == "pick_classifier":
-            pick_prob = self._pick_classifier_prob(obs)
-            selected_index = 1 if pick_prob >= self.pick_classifier_threshold else 0
+            classifier_checked = False
+            if self.pick_latched:
+                pick_prob = self.last_pick_classifier_prob
+            else:
+                pick_prob = self._pick_classifier_prob(obs)
+                self.last_pick_classifier_prob = pick_prob
+                classifier_checked = True
+                if pick_prob >= self.pick_classifier_threshold:
+                    self.pick_latched = True
+                    print("pick classifier latched: switch to mask2 until next reset")
+            selected_index = 1 if self.pick_latched else 0
             fields = compute_index_target_mask_fields(
                 obs,
                 self.mask_predictor,
@@ -212,6 +223,8 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
                 selected_mask_index=selected_index,
             )
             fields["pick_classifier_prob"] = pick_prob
+            fields["pick_latched"] = self.pick_latched
+            fields["pick_classifier_checked"] = classifier_checked
         else:
             fields = compute_gaze_target_mask_fields(
                 obs,
@@ -220,15 +233,9 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
                 heatmap_shape,
                 dilation_px=self.gaze_target_mask_dilation,
             )
-        input_mask = dilate_gaze_target_mask_for_input(
-            fields["gaze_target_mask"],
-            fields.get("selected_mask_index"),
-            mask1_dilation_px=self.mask1_input_dilation,
-            mask2_dilation_px=self.mask2_input_dilation,
-        )
-        obs = add_gaze_masked_rgb_to_obs(
+        obs = add_gaze_mask_image_to_obs(
             obs,
-            gaze_target_mask=input_mask,
+            gaze_target_mask=fields["gaze_target_mask"],
             image_key=self.gaze_target_mask_key,
             reference_key=self.source_image_key,
         )
@@ -241,14 +248,23 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         selected_slot = fields.get("selected_mask_slot", "none")
         phase = obs["state"][..., -3:]
         if self.mask_selection_mode == "pick_classifier":
+            pick_prob = fields.get("pick_classifier_prob", 0.0)
             print(
-                "front_camera_masked = "
-                f"{selected_slot}, pick_prob={fields.get('pick_classifier_prob', 0.0):.3f}, "
-                f"phase={phase}"
+                f"pick_classifier_prob={pick_prob:.3f}, "
+                f"pick_latched={fields.get('pick_latched', False)}, "
+                f"classifier_checked={fields.get('pick_classifier_checked', False)}, "
+                f"threshold={self.pick_classifier_threshold:.3f}, "
+                f"selected_mask={selected_slot}"
             )
+            # print(
+            #     f"{self.gaze_target_mask_key} = "
+            #     f"{selected_slot}, pick_prob={fields.get('pick_classifier_prob', 0.0):.3f}, "
+            #     f"phase={phase}"
+            # )
         else:
-            print(f"front_camera_masked = {selected_slot}, phase={phase}")
-        self._display_gaze_masked_rgb(obs, selected_slot)
+            # print(f"{self.gaze_target_mask_key} = {selected_slot}, phase={phase}")
+            pass
+        self._display_gaze_mask(obs, selected_slot)
 
         if self.mask_selection_mode == "gaze":
             update_env_gaze_prediction_overlay(

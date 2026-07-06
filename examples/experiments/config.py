@@ -33,7 +33,56 @@ class DefaultTrainingConfig:
     classifier_keys: List[str] = None
     proprio_keys: List[str] = None
     state_weights: List[float] | None = None
-    
+
+    # Gaze/mask-conditioned visual feature settings.
+    # These only affect the gaze/mask SAC agent when observations include
+    # front_camera_mask. Plain vision+tactile SAC ignores these values.
+
+    # Fixed mask gate applied directly to front_camera spatial features before
+    # the trainable mask feature head. 0 disables this hard mask guidance;
+    # 1 keeps mask pixels at 2x strength and non-mask pixels unchanged.
+    mask_spatial_gate_alpha: float = 1.0
+
+    # Include the hard mask-pooled target feature in the fused visual feature.
+    # If False, the visual feature uses only the trainable mask feature head.
+    use_mask_pooling: bool = True
+
+    # Enable a small trainable mask feature head on top of front_camera
+    # features. Its output is used for mask pooling visualization and
+    # mask_grounding_loss.
+    use_mask_feature_head: bool = True
+
+    # Strength of the trainable mask feature gate. The learned gate can both
+    # amplify selected regions and suppress less useful regions.
+    mask_feature_gate_alpha: float = 1.0
+
+    # Lower bound for the trainable gate multiplier. Smaller values suppress
+    # non-selected regions harder; larger values preserve more global context.
+    mask_feature_min_gate: float = 0.1
+
+    # Hidden channel count inside the trainable mask feature head. This is a model
+    # capacity setting; most tasks should leave it at the default.
+    mask_feature_hidden_dim: int = 128
+
+    # Weight for the auxiliary loss that pulls the trainable mask feature map into
+    # front_camera_mask. 0 disables this auxiliary supervision.
+    mask_grounding_weight: float = 0.0
+
+    # Optional step-based decay for mask_grounding_weight. This lets the mask
+    # strongly shape mask features early, then reduce its influence after the
+    # mask feature head has learned a stable target region. Set step <= 0 to disable.
+    mask_grounding_decay_step: int = 0
+    mask_grounding_decay_weight: float = 0.0
+
+    # Threshold used after resizing front_camera_mask to the critic attention
+    # resolution when computing mask_grounding_loss.
+    mask_grounding_threshold: float = 0.05
+
+    # Minimum high-resolution mask occupancy required to mark one low-resolution
+    # attention cell as positive. For example, 0.01 means at least 1% of the
+    # source pixels in that attention cell must belong to the mask.
+    mask_grounding_cell_threshold: float = 0.01
+
     # "single-arm-learned-gripper", "dual-arm-learned-gripper" for with learned gripper, 
     # "single-arm-fixed-gripper", "dual-arm-fixed-gripper" for without learned gripper (i.e. pregrasped)
     setup_mode: str = "single-arm-fixed-gripper"

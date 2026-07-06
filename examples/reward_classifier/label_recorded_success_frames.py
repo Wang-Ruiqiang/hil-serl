@@ -21,14 +21,19 @@ flags.DEFINE_multi_string(
     "Recorded data root(s) containing frame_xxx folders.",
 )
 flags.DEFINE_string(
+    "classifier_task",
+    "place",
+    "Classifier label task: pick or place. Controls default label/range filenames.",
+)
+flags.DEFINE_string(
     "image_name",
     "color_image.jpg",
     "Image filename inside each frame_xxx folder.",
 )
 flags.DEFINE_string(
     "label_name",
-    "is_recorded_pick_success.txt",
-    "Success label filename to create/update inside each frame_xxx folder.",
+    "",
+    "Success label filename to create/update. Empty chooses by classifier_task.",
 )
 flags.DEFINE_bool(
     "reset_existing_labels",
@@ -52,8 +57,8 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_string(
     "range_name",
-    "pick_classifier_ranges.json",
-    "Range json written after labeling. Empty string disables range export.",
+    "",
+    "Range json written after labeling. Empty chooses by classifier_task; use 'none' to disable.",
 )
 flags.DEFINE_bool(
     "export_only_manual_ranges",
@@ -65,6 +70,32 @@ flags.DEFINE_bool(
 def _frame_number(path: Path) -> int:
     match = re.search(r"frame_(\d+)", path.name)
     return int(match.group(1)) if match else 10**12
+
+
+def _classifier_task() -> str:
+    task = FLAGS.classifier_task.lower().strip()
+    if task not in ("pick", "place"):
+        raise ValueError("--classifier_task must be 'pick' or 'place'")
+    return task
+
+
+def _label_name() -> str:
+    if FLAGS.label_name:
+        return FLAGS.label_name
+    if _classifier_task() == "pick":
+        return "is_recorded_pick_success.txt"
+    return "is_recorded_success.txt"
+
+
+def _range_name() -> str:
+    if FLAGS.range_name:
+        range_name = FLAGS.range_name.strip()
+        if range_name.lower() in ("none", "null", "off", "false"):
+            return ""
+        return range_name
+    if _classifier_task() == "pick":
+        return "pick_classifier_ranges.json"
+    return "place_classifier_ranges.json"
 
 
 def _find_frames(root: Path):
@@ -126,7 +157,7 @@ def _load_episode_ranges(root: Path, frames):
 
 
 def _read_label(frame_dir: Path) -> int:
-    label_path = frame_dir / FLAGS.label_name
+    label_path = frame_dir / _label_name()
     try:
         return 1 if label_path.read_text().strip() == "1" else 0
     except OSError:
@@ -134,20 +165,21 @@ def _read_label(frame_dir: Path) -> int:
 
 
 def _write_label(frame_dir: Path, value: int):
-    (frame_dir / FLAGS.label_name).write_text(f"{int(value)}\n")
+    (frame_dir / _label_name()).write_text(f"{int(value)}\n")
 
 
 def _initialise_labels(frames):
     for frame_dir in frames:
-        label_path = frame_dir / FLAGS.label_name
+        label_path = frame_dir / _label_name()
         if FLAGS.reset_existing_labels or not label_path.exists():
             _write_label(frame_dir, 0)
 
 
 def _range_label_path(root: Path):
-    if not FLAGS.range_name:
+    range_name = _range_name()
+    if not range_name:
         return None
-    return root / FLAGS.range_name
+    return root / range_name
 
 
 def _read_manual_ranges(root: Path):
@@ -178,7 +210,8 @@ def _episode_index_for_frame(frame_id: int, episodes):
 
 
 def _write_pick_range_file(root: Path, frames, manual_ranges):
-    if not FLAGS.range_name:
+    range_name = _range_name()
+    if not range_name:
         return
     output_ranges = []
     for episode in _load_episode_ranges(root, frames):
@@ -211,10 +244,11 @@ def _write_pick_range_file(root: Path, frames, manual_ranges):
 
     output_path = _range_label_path(root)
     output = {
-        "label_name": FLAGS.label_name,
-        "range_name": FLAGS.range_name,
+        "classifier_task": _classifier_task(),
+        "label_name": _label_name(),
+        "range_name": range_name,
         "semantics": (
-            "For pick classifier export, keep frames start_frame..end_frame inclusive. "
+            f"For {_classifier_task()} classifier export, keep frames start_frame..end_frame inclusive. "
             "Use '[' to set the current episode range start and ']' to set range end. "
             "Unset episodes are skipped when export_only_manual_ranges=True."
         ),
@@ -297,7 +331,7 @@ def _make_display_image(
     frame_text = (
         f"{root.name} | {frame_dir.name} | sample={sample_idx + 1}/{total} | {status}"
     )
-    label_text = f"label file: {FLAGS.label_name}"
+    label_text = f"task={_classifier_task()} label file: {_label_name()}"
     range_text = (
         f"episode={episode_index} range="
         f"{manual_range['start_frame']}..{manual_range['end_frame']}"
@@ -367,7 +401,7 @@ def _label_root(root: Path):
     manual_ranges = _read_manual_ranges(root)
     _initialise_labels(frames)
     print(f"[label] root={root}")
-    print(f"[label] frames={len(frames)} label={FLAGS.label_name}")
+    print(f"[label] frames={len(frames)} task={_classifier_task()} label={_label_name()}")
     print(f"[label] range_file={_range_label_path(root)}")
 
     idx = 0

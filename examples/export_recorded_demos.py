@@ -80,6 +80,11 @@ flags.DEFINE_boolean(
     True,
     "Only export episodes marked success=True in recording_metadata.json.",
 )
+flags.DEFINE_string(
+    "reward_label_name",
+    "",
+    "Frame success label used for demo reward/done. Empty chooses by exp_name.",
+)
 flags.DEFINE_integer(
     "max_transitions",
     0,
@@ -88,27 +93,17 @@ flags.DEFINE_integer(
 flags.DEFINE_boolean(
     "use_gaze_target_mask",
     True,
-    "Add gaze-selected masked RGB image and phase one-hot to exported observations.",
+    "Add gaze-selected mask image and phase one-hot to exported observations.",
 )
 flags.DEFINE_string(
     "gaze_target_mask_key",
-    "front_camera_masked",
-    "Observation key for RGB multiplied by the gaze-selected mask.",
+    "front_camera_mask",
+    "Observation key for the gaze-selected mask image.",
 )
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
-    8,
-    "Dilation radius in exported 128x128 mask pixels when checking gaze hits.",
-)
-flags.DEFINE_integer(
-    "mask1_input_dilation",
-    6,
-    "Dilation radius applied to mask1 before building front_camera_masked.",
-)
-flags.DEFINE_integer(
-    "mask2_input_dilation",
     0,
-    "Dilation radius applied to mask2 before building front_camera_masked.",
+    "Dilation radius in exported 128x128 mask pixels when checking gaze hits.",
 )
 def _frame_number(path: Path) -> int:
     match = re.search(r"frame_(\d+)", path.name)
@@ -123,6 +118,12 @@ def _stack_obs_horizon_one(obs):
     return {key: np.asarray(value)[None] for key, value in obs.items()}
 
 
+def _zero_action_rpy(action):
+    action = np.asarray(action, dtype=np.float32).copy()
+    action[..., 3:6] = 0.0
+    return action
+
+
 def _read_numeric_file(path: Path, default=None, dtype=np.float32):
     if not path.exists():
         if default is None:
@@ -132,9 +133,17 @@ def _read_numeric_file(path: Path, default=None, dtype=np.float32):
     return np.asarray(values, dtype=dtype).reshape(-1)
 
 
+def _reward_label_name() -> str:
+    if FLAGS.reward_label_name:
+        return FLAGS.reward_label_name
+    if FLAGS.exp_name == "tennis_ball_pick":
+        return "is_recorded_pick_success.txt"
+    return "is_recorded_success.txt"
+
+
 def _read_recorded_success(frame_dir: Path) -> bool:
-    label_path = frame_dir / "is_recorded_success.txt"
-    if not label_path.exists():
+    label_path = frame_dir / _reward_label_name()
+    if not label_path.exists() and _reward_label_name() == "is_recorded_success.txt":
         label_path = frame_dir / "is_record_success.txt"
     if not label_path.exists():
         return False
@@ -282,22 +291,17 @@ def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
     return selected, selected_index
 
 
-def _read_front_camera_masked(
+def _mask_to_image(mask):
+    return np.repeat((np.asarray(mask, dtype=np.uint8)[..., None] * 255), 3, axis=-1)
+
+
+def _read_front_camera_mask(
     frame_dir: Path,
     rgb_image,
     target_shape=(128, 128),
 ):
     selected_mask, selected_index = _read_gaze_target_mask(frame_dir, target_shape)
-    input_dilation = (
-        FLAGS.mask1_input_dilation
-        if selected_index == 0
-        else FLAGS.mask2_input_dilation
-    )
-    selected_mask = _dilate_mask(selected_mask, input_dilation)
-    masked_rgb = (
-        rgb_image.astype(np.float32) * selected_mask.astype(np.float32)[..., None]
-    ).astype(np.uint8)
-    return masked_rgb, _phase_onehot(selected_index)
+    return _mask_to_image(selected_mask), _phase_onehot(selected_index)
 
 
 def _read_tactile_depth(path: Path):
@@ -382,7 +386,7 @@ def _read_frame_data(
         elif image_key == FLAGS.gaze_target_mask_key:
             if rgb_image is None:
                 rgb_image = _read_rgb(frame_dir / "color_image.jpg")
-            obs[image_key], gaze_phase = _read_front_camera_masked(
+            obs[image_key], gaze_phase = _read_front_camera_mask(
                 frame_dir,
                 rgb_image,
             )
@@ -391,7 +395,7 @@ def _read_frame_data(
     if FLAGS.gaze_target_mask_key in image_keys and gaze_phase is None:
         if rgb_image is None:
             rgb_image = _read_rgb(frame_dir / "color_image.jpg")
-        obs[FLAGS.gaze_target_mask_key], gaze_phase = _read_front_camera_masked(
+        obs[FLAGS.gaze_target_mask_key], gaze_phase = _read_front_camera_mask(
             frame_dir,
             rgb_image,
         )
@@ -415,7 +419,7 @@ def _read_frame_data(
         default=np.zeros(7, dtype=np.float32),
         dtype=np.float32,
     )
-    return obs, action[:7].astype(np.float32)
+    return obs, _zero_action_rpy(action[:7])
 
 
 def _read_metadata(root: Path):
@@ -585,6 +589,7 @@ def main(_):
         print(f"[warn] missing root: {root}")
 
     print(f"[source] exp_name={FLAGS.exp_name}")
+    print(f"[source] reward_label_name={_reward_label_name()}")
     print(f"[source] image_keys={image_keys}")
     print(f"[source] robot_urdf={robot_urdf_path}")
     print(f"[source] use_filtered_ranges={FLAGS.use_filtered_ranges}")
@@ -641,15 +646,17 @@ def main(_):
         first_obs = transitions[0]["observations"]
         first_state = np.asarray(first_obs["state"])
         if FLAGS.gaze_target_mask_key in first_obs:
-            masked_rgb = np.asarray(first_obs[FLAGS.gaze_target_mask_key])
+            mask_image = np.asarray(first_obs[FLAGS.gaze_target_mask_key])
             print(
-                f"[check] {FLAGS.gaze_target_mask_key} shape={masked_rgb.shape} "
-                f"active_pixels={int(np.count_nonzero(masked_rgb))}"
+                f"[check] {FLAGS.gaze_target_mask_key} shape={mask_image.shape} "
+                f"active_pixels={int(np.count_nonzero(mask_image))}"
             )
         print(
             f"[check] state_shape={first_state.shape} "
             f"phase_onehot={first_state[..., -3:]}"
         )
+        first_action = np.asarray(transitions[0]["actions"], dtype=np.float32)
+        print(f"[check] first_action_rpy={first_action[3:6]}")
 
     done_count = sum(int(transition["dones"]) for transition in transitions)
     reward_sum = float(sum(float(transition["rewards"]) for transition in transitions))

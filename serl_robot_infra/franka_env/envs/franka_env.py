@@ -510,7 +510,7 @@ class FrankaEnv(gym.Env):
         # self.cmd_pose = np.concatenate([self.cur_position.copy(), self.cur_orientation.copy()], axis=0)
 
 
-        if self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
+        if self.exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
         # grip with index
             self.gripper_close_joint = config.GRIPPER_CLOSE_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
@@ -587,7 +587,7 @@ class FrankaEnv(gym.Env):
                 
         self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
 
-        if self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
+        if self.exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
             if self.nextpos[2] < 0.19:
                 self.nextpos[2] = 0.19
         elif self.exp_name == "tube_insertion":
@@ -613,7 +613,7 @@ class FrankaEnv(gym.Env):
 
         if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip" or self.exp_name == "tube_insertion":
             target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
-        elif self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
+        elif self.exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
             target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
 
         # print("target_hand_pos = ", target_hand_pos)
