@@ -22,15 +22,15 @@ for path in (
         sys.path.insert(0, path)
 
 DEFAULT_FRAME_ROOT = (
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-6-30-0"
+    "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/"
+    "tennis_ball_pick-7-9-0"
 )
 DEFAULT_CHECKPOINT_PATH = str(
     REPO_ROOT
     / "examples"
     / "experiments"
     / "tennis_ball_pick"
-    / "2026-7-3_0_ball_pick_rl_run"
+    / "2026-7-7_0_ball_pick_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
@@ -46,6 +46,7 @@ from flax.training import checkpoints
 from experiments.mappings import NEW_MAPPING
 from serl_launcher.utils.gaze_mask_utils import (
     add_gaze_mask_image_to_obs,
+    compute_all_index_target_mask_fields,
     compute_index_target_mask_fields,
     load_mask_predictor,
 )
@@ -69,8 +70,8 @@ flags.DEFINE_boolean(
     "Do not restore RL checkpoint; useful for checking raw pretrained/backbone attention.",
 )
 flags.DEFINE_integer("image_size", 128, "Network image size.")
-flags.DEFINE_integer("max_frames", 0, "Max frames to render. Use 0 for all.")
-flags.DEFINE_integer("frame_stride", 1, "Process every Nth recorded frame.")
+flags.DEFINE_integer("max_frames", 100, "Max frames to render. Use 0 for all.")
+flags.DEFINE_integer("frame_stride", 10, "Process every Nth recorded frame.")
 flags.DEFINE_integer("start_frame", 0, "Skip frames with id smaller than this.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether tactile_data is part of obs.")
 flags.DEFINE_integer(
@@ -90,13 +91,13 @@ flags.DEFINE_string(
     "Mask predictor checkpoint used by force_mask1/force_mask2 modes.",
 )
 flags.DEFINE_float(
-    "mask_spatial_gate_alpha",
+    "mask_suppress_beta",
     1.0,
-    "Residual mask-guided RGB feature gate strength used during forward.",
+    "Feature-space suppression strength for front_camera_mask2.",
 )
 flags.DEFINE_boolean(
     "use_mask_pooling",
-    True,
+    False,
     "Include hard mask-pooled target feature in the fused visual feature.",
 )
 flags.DEFINE_boolean(
@@ -106,7 +107,7 @@ flags.DEFINE_boolean(
 )
 flags.DEFINE_float(
     "mask_feature_gate_alpha",
-    1.0,
+    0.25,
     "Signed feature gating strength from the trainable mask feature head.",
 )
 flags.DEFINE_float(
@@ -118,16 +119,6 @@ flags.DEFINE_integer(
     "mask_feature_hidden_dim",
     128,
     "Hidden channel count for the trainable mask feature head.",
-)
-flags.DEFINE_boolean(
-    "use_modality_gate",
-    True,
-    "Use learned scalar gates over encoded modalities after visual feature fusion.",
-)
-flags.DEFINE_integer(
-    "modality_gate_hidden_dim",
-    128,
-    "Hidden size of the small MLP that predicts modality gates.",
 )
 flags.DEFINE_string("gaze_json_name", "gaze_contact.json", "Recorded gaze json name.")
 flags.DEFINE_string(
@@ -428,6 +419,11 @@ def read_front_camera_mask(frame_dir: Path, rgb_image, target_shape):
     return mask_image, phase_onehot(selected_index), selected_slot
 
 
+def read_mask_image(frame_dir: Path, slot: str, target_shape):
+    mask = first_existing_mask(frame_dir, slot, target_shape)
+    return np.repeat((mask.astype(np.uint8)[..., None] * 255), 3, axis=-1)
+
+
 def set_phase_in_obs(obs, selected_index):
     obs = dict(obs)
     phase = phase_onehot(selected_index)
@@ -443,6 +439,24 @@ def set_phase_in_obs(obs, selected_index):
 def apply_predicted_mask_to_obs(obs, mask_predictor, selected_index, target_shape):
     if mask_predictor is None:
         raise RuntimeError("force_mask mode requires a loaded mask predictor.")
+    all_fields = compute_all_index_target_mask_fields(
+        obs,
+        mask_predictor,
+        target_shape,
+    )
+    for slot_name, image_key in (
+        ("mask1", "front_camera_mask1"),
+        ("mask2", "front_camera_mask2"),
+    ):
+        slot_fields = all_fields.get(slot_name)
+        if slot_fields is None:
+            continue
+        obs = add_gaze_mask_image_to_obs(
+            obs,
+            gaze_target_mask=slot_fields["gaze_target_mask"],
+            image_key=image_key,
+            reference_key="front_camera",
+        )
     fields = compute_index_target_mask_fields(
         obs,
         mask_predictor,
@@ -504,6 +518,10 @@ def read_frame_observation_and_action(frame_dir: Path, image_keys):
                 rgb_image,
                 target_shape,
             )
+        elif image_key == "front_camera_mask1":
+            obs[image_key] = read_mask_image(frame_dir, "mask1", target_shape)
+        elif image_key == "front_camera_mask2":
+            obs[image_key] = read_mask_image(frame_dir, "mask2", target_shape)
         else:
             raise ValueError(f"Unsupported image_key={image_key}")
     if "front_camera_mask" in image_keys and gaze_phase is None:
@@ -609,7 +627,17 @@ def attention_mask_metrics(attention_map, mask_image):
             "mask_cell_fraction": mask_cell_fraction,
         }
     mask_mass = float(np.sum(attention_prob * mask_binary.astype(np.float32)))
-    mask_grounding_loss = float(-np.log(max(mask_mass, 1e-8)))
+    gaze_distribution = mask_binary.astype(np.float32)
+    gaze_distribution /= max(float(np.sum(gaze_distribution)), 1e-8)
+    mask_grounding_loss = float(
+        np.sum(
+            gaze_distribution
+            * (
+                np.log(gaze_distribution + 1e-8)
+                - np.log(attention_prob + 1e-8)
+            )
+        )
+    )
     return {
         "mask_mass": mask_mass,
         "mask_grounding_loss": mask_grounding_loss,
@@ -718,7 +746,6 @@ def create_attention_agent(
     *,
     use_mask_pooling,
     use_mask_feature_head,
-    mask_spatial_gate_alpha,
     return_raw_attention,
 ):
     return make_gaze_sac_pixel_agent_hybrid_single_arm(
@@ -733,14 +760,13 @@ def create_attention_agent(
         gaze_region_radius=0,
         gaze_attention_image_key=attention_key,
         use_mask_pooling=use_mask_pooling,
-        mask_spatial_gate_alpha=mask_spatial_gate_alpha,
+        mask_suppress_beta=FLAGS.mask_suppress_beta,
         use_mask_feature_head=use_mask_feature_head,
         mask_feature_gate_alpha=FLAGS.mask_feature_gate_alpha,
         mask_feature_min_gate=FLAGS.mask_feature_min_gate,
         mask_feature_hidden_dim=FLAGS.mask_feature_hidden_dim,
-        use_modality_gate=FLAGS.use_modality_gate,
-        modality_gate_hidden_dim=FLAGS.modality_gate_hidden_dim,
         return_raw_attention=return_raw_attention,
+        mask_grounding_key="front_camera_mask1",
     )
 
 
@@ -846,7 +872,9 @@ def main(_):
     attention_keys = [
         key.strip()
         for key in FLAGS.attention_keys.split(",")
-        if key.strip() in config.image_keys and key.strip() != "front_camera_mask"
+        if key.strip() in config.image_keys
+        and key.strip()
+        not in {"front_camera_mask", "front_camera_mask1", "front_camera_mask2"}
     ]
     if not attention_keys:
         raise ValueError(f"No valid attention_keys in {FLAGS.attention_keys}")
@@ -863,15 +891,13 @@ def main(_):
     print_green(f"image_keys={config.image_keys}")
     print_green(f"attention_keys={attention_keys}")
     print_green(f"mask_selection_mode={mask_selection_mode}")
-    print_green(f"mask_spatial_gate_alpha={FLAGS.mask_spatial_gate_alpha}")
+    print_green(f"mask_suppress_beta={FLAGS.mask_suppress_beta}")
     print_green(f"use_mask_pooling={FLAGS.use_mask_pooling}")
     print_green(f"use_mask_feature_head={FLAGS.use_mask_feature_head}")
     print_green(f"compare_raw_mask_feature={FLAGS.compare_raw_mask_feature}")
     print_green(f"mask_feature_gate_alpha={FLAGS.mask_feature_gate_alpha}")
     print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
     print_green(f"mask_feature_hidden_dim={FLAGS.mask_feature_hidden_dim}")
-    print_green(f"use_modality_gate={FLAGS.use_modality_gate}")
-    print_green(f"modality_gate_hidden_dim={FLAGS.modality_gate_hidden_dim}")
     print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
     print_green(
         "viewer_mask_grounding_cell_threshold="
@@ -906,7 +932,6 @@ def main(_):
                     "kind": "raw_feature",
                     "use_mask_pooling": FLAGS.use_mask_pooling,
                     "use_mask_feature_head": FLAGS.use_mask_feature_head,
-                    "mask_spatial_gate_alpha": 0.0,
                     "return_raw_attention": True,
                     "allow_restore_fallback": False,
                 }
@@ -918,7 +943,6 @@ def main(_):
                     "kind": "mask_feature_head",
                     "use_mask_pooling": FLAGS.use_mask_pooling,
                     "use_mask_feature_head": True,
-                    "mask_spatial_gate_alpha": FLAGS.mask_spatial_gate_alpha,
                     "return_raw_attention": False,
                     "allow_restore_fallback": False,
                 }
@@ -930,7 +954,6 @@ def main(_):
                     "kind": "raw_feature",
                     "use_mask_pooling": FLAGS.use_mask_pooling,
                     "use_mask_feature_head": FLAGS.use_mask_feature_head,
-                    "mask_spatial_gate_alpha": 0.0,
                     "return_raw_attention": True,
                     "allow_restore_fallback": False,
                 }
@@ -949,7 +972,6 @@ def main(_):
             attention_key,
             use_mask_pooling=spec["use_mask_pooling"],
             use_mask_feature_head=spec["use_mask_feature_head"],
-            mask_spatial_gate_alpha=spec["mask_spatial_gate_alpha"],
             return_raw_attention=spec["return_raw_attention"],
         )
         label = f"{attention_key}/{attention_kind}"
@@ -1018,10 +1040,10 @@ def main(_):
                         "mask_cell_fraction": np.nan,
                     }
                     metric_lines = []
-                    if attention_key == "front_camera" and "front_camera_mask" in obs:
+                    if attention_key == "front_camera" and "front_camera_mask1" in obs:
                         metrics = attention_mask_metrics(
                             attention_map,
-                            obs["front_camera_mask"],
+                            obs["front_camera_mask1"],
                         )
                         metric_lines = [
                             f"mask_mass={metrics['mask_mass']:.3f}",

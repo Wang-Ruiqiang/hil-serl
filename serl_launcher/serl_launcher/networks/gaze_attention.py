@@ -21,10 +21,13 @@ class GazeAttentionCritic(nn.Module):
         actions: jnp.ndarray,
         train: bool = False,
         return_attention: bool = False,
+        return_cgl_attention: bool = False,
     ):
         if jnp.ndim(actions) == 3:
-            if return_attention:
-                raise ValueError("return_attention is only supported for 2D actions.")
+            if return_attention or return_cgl_attention:
+                raise ValueError(
+                    "return_attention is only supported for 2D actions."
+                )
             return jax.vmap(
                 lambda action: self(observations, action, train=train),
                 in_axes=1,
@@ -34,11 +37,12 @@ class GazeAttentionCritic(nn.Module):
         if self.encoder is None:
             obs_enc = observations
             attention_map = None
-        elif return_attention:
+        elif return_attention or return_cgl_attention:
             obs_enc, attention_map = self.encoder(
                 observations,
                 train=train,
                 return_attention=True,
+                return_cgl_attention=return_cgl_attention,
             )
         else:
             obs_enc = self.encoder(observations)
@@ -55,6 +59,6 @@ class GazeAttentionCritic(nn.Module):
             value = nn.Dense(1, kernel_init=default_init())(outputs)
         q_value = jnp.squeeze(value, -1)
 
-        if return_attention:
+        if return_attention or return_cgl_attention:
             return q_value, attention_map
         return q_value

@@ -25,8 +25,15 @@ from sensor_msgs.msg import JointState
 import threading
 from franka_env.camera.video_capture import VideoCapture
 from franka_env.camera.rs_capture import RSCapture
-from leap_hand.srv import LeapPosition, LeapPosVelEff
-from dmrobotics import Sensor as DMTacSensor
+try:
+    from leap_hand.srv import LeapPosition, LeapPosVelEff
+except ImportError:
+    LeapPosition = None
+    LeapPosVelEff = None
+try:
+    from dmrobotics import Sensor as DMTacSensor
+except ImportError:
+    DMTacSensor = None
 from franka_env.gaze.display_markers import draw_gaze_display_markers, marker_points_for_size
 from franka_env.recording.episode_recorder import EpisodeDataRecorder
 
@@ -101,6 +108,11 @@ class DefaultEnvConfig:
 
 class ROSNodeInterface(Node):
     def __init__(self):
+        if LeapPosition is None:
+            raise ImportError(
+                "leap_hand.srv is required for the Franka actor. "
+                "Source/build the ROS2 workspace that provides leap_hand messages."
+            )
         super().__init__('franka_env_node')
 
         # Publishers（发送）

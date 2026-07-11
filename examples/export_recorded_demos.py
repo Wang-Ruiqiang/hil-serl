@@ -29,7 +29,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick-6-23-1",
     ],
     "Recorded data root(s) containing frame_xxx folders and recording_metadata.json.",
 )
@@ -99,6 +99,16 @@ flags.DEFINE_string(
     "gaze_target_mask_key",
     "front_camera_mask",
     "Observation key for the gaze-selected mask image.",
+)
+flags.DEFINE_string(
+    "mask1_key",
+    "front_camera_mask1",
+    "Observation key for the first predicted/recorded target mask.",
+)
+flags.DEFINE_string(
+    "mask2_key",
+    "front_camera_mask2",
+    "Observation key for the second predicted/recorded target mask.",
 )
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
@@ -295,6 +305,10 @@ def _mask_to_image(mask):
     return np.repeat((np.asarray(mask, dtype=np.uint8)[..., None] * 255), 3, axis=-1)
 
 
+def _read_slot_mask_image(frame_dir: Path, slot: str, target_shape=(128, 128)):
+    return _mask_to_image(_first_existing_mask(frame_dir, slot, target_shape))
+
+
 def _read_front_camera_mask(
     frame_dir: Path,
     rgb_image,
@@ -390,6 +404,10 @@ def _read_frame_data(
                 frame_dir,
                 rgb_image,
             )
+        elif image_key == FLAGS.mask1_key:
+            obs[image_key] = _read_slot_mask_image(frame_dir, "mask1")
+        elif image_key == FLAGS.mask2_key:
+            obs[image_key] = _read_slot_mask_image(frame_dir, "mask2")
         else:
             raise ValueError(f"Unsupported image key for RL demo export: {image_key}")
     if FLAGS.gaze_target_mask_key in image_keys and gaze_phase is None:
@@ -487,11 +505,19 @@ def _image_keys_from_config():
             image_keys = list(config.get_image_keys(**kwargs))
             if FLAGS.use_gaze_target_mask and FLAGS.gaze_target_mask_key not in image_keys:
                 image_keys.append(FLAGS.gaze_target_mask_key)
+            if FLAGS.use_gaze_target_mask:
+                for mask_key in (FLAGS.mask1_key, FLAGS.mask2_key):
+                    if mask_key not in image_keys:
+                        image_keys.append(mask_key)
             return image_keys
         if hasattr(config, "image_keys"):
             image_keys = list(config.image_keys)
             if FLAGS.use_gaze_target_mask and FLAGS.gaze_target_mask_key not in image_keys:
                 image_keys.append(FLAGS.gaze_target_mask_key)
+            if FLAGS.use_gaze_target_mask:
+                for mask_key in (FLAGS.mask1_key, FLAGS.mask2_key):
+                    if mask_key not in image_keys:
+                        image_keys.append(mask_key)
             return image_keys
     except Exception as exc:
         print(
@@ -504,6 +530,7 @@ def _image_keys_from_config():
         image_keys.append("tactile_data")
     if FLAGS.use_gaze_target_mask:
         image_keys.append(FLAGS.gaze_target_mask_key)
+        image_keys.extend([FLAGS.mask1_key, FLAGS.mask2_key])
     return image_keys
 
 
@@ -651,6 +678,13 @@ def main(_):
                 f"[check] {FLAGS.gaze_target_mask_key} shape={mask_image.shape} "
                 f"active_pixels={int(np.count_nonzero(mask_image))}"
             )
+        for mask_key in (FLAGS.mask1_key, FLAGS.mask2_key):
+            if mask_key in first_obs:
+                mask_image = np.asarray(first_obs[mask_key])
+                print(
+                    f"[check] {mask_key} shape={mask_image.shape} "
+                    f"active_pixels={int(np.count_nonzero(mask_image))}"
+                )
         print(
             f"[check] state_shape={first_state.shape} "
             f"phase_onehot={first_state[..., -3:]}"

@@ -127,14 +127,18 @@ class Policy(nn.Module):
 
     @nn.compact
     def __call__(
-        self, observations: jnp.ndarray, temperature: float = 1.0, train: bool = False, non_squash_distribution: bool = False,
+        self,
+        observations: jnp.ndarray,
+        temperature: float = 1.0,
+        train: bool = False,
+        non_squash_distribution: bool = False,
     ) -> distrax.Distribution:
         # print("observations shape = ", observations["front_camera"].shape)
         if self.encoder is None:
             obs_enc = observations
         else:
             obs_enc = self.encoder(observations, train=train, stop_gradient=True)
-            
+
         outputs = self.network(obs_enc, train=train)
 
         means = nn.Dense(self.action_dim, kernel_init=default_init())(outputs)

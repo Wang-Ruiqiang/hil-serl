@@ -7,6 +7,7 @@ import numpy as np
 from serl_launcher.utils.gaze_mask_utils import (
     add_gaze_mask_image_to_obs,
     append_gaze_phase_to_state,
+    compute_all_index_target_mask_fields,
     compute_gaze_target_mask_fields,
     compute_index_target_mask_fields,
     load_mask_predictor,
@@ -33,6 +34,8 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         use_gaze_target_mask=True,
         source_image_key="front_camera",
         gaze_target_mask_key="front_camera_mask",
+        mask1_key="front_camera_mask1",
+        mask2_key="front_camera_mask2",
         gaze_predictor_checkpoint_path="examples/gaze_data_process/gaze_heatmap_ckpt",
         mask_predictor_checkpoint_path=(
             "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
@@ -49,6 +52,8 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         self.use_gaze_target_mask = bool(use_gaze_target_mask)
         self.source_image_key = source_image_key
         self.gaze_target_mask_key = gaze_target_mask_key
+        self.mask1_key = mask1_key
+        self.mask2_key = mask2_key
         self.gaze_predictor_checkpoint_path = gaze_predictor_checkpoint_path
         self.mask_predictor_checkpoint_path = mask_predictor_checkpoint_path
         self.mask_selection_mode = str(mask_selection_mode)
@@ -80,8 +85,10 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
             shape=(height, width, self.channels),
             dtype=np.uint8,
         )
-        if self.use_gaze_target_mask and self.gaze_target_mask_key not in spaces:
-            spaces[self.gaze_target_mask_key] = image_space
+        if self.use_gaze_target_mask:
+            for mask_key in (self.gaze_target_mask_key, self.mask1_key, self.mask2_key):
+                if mask_key not in spaces:
+                    spaces[mask_key] = image_space
         if self.use_gaze_target_mask and "state" in spaces:
             state_space = spaces["state"]
             state_shape = list(state_space.shape)
@@ -239,31 +246,28 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
             image_key=self.gaze_target_mask_key,
             reference_key=self.source_image_key,
         )
+
+        slot_fields = compute_all_index_target_mask_fields(
+            obs,
+            self.mask_predictor,
+            heatmap_shape,
+        )
+        for slot_name, image_key in (("mask1", self.mask1_key), ("mask2", self.mask2_key)):
+            slot_mask = slot_fields.get(slot_name, {}).get(
+                "gaze_target_mask",
+                np.zeros(tuple(heatmap_shape), dtype=np.float32),
+            )
+            obs = add_gaze_mask_image_to_obs(
+                obs,
+                gaze_target_mask=slot_mask,
+                image_key=image_key,
+                reference_key=self.source_image_key,
+            )
         obs = append_gaze_phase_to_state(obs, fields.get("selected_mask_index"))
 
-        obs.setdefault(
-            self.gaze_target_mask_key,
-            self._zero_image(self.gaze_target_mask_key),
-        )
+        for mask_key in (self.gaze_target_mask_key, self.mask1_key, self.mask2_key):
+            obs.setdefault(mask_key, self._zero_image(mask_key))
         selected_slot = fields.get("selected_mask_slot", "none")
-        phase = obs["state"][..., -3:]
-        if self.mask_selection_mode == "pick_classifier":
-            pick_prob = fields.get("pick_classifier_prob", 0.0)
-            print(
-                f"pick_classifier_prob={pick_prob:.3f}, "
-                f"pick_latched={fields.get('pick_latched', False)}, "
-                f"classifier_checked={fields.get('pick_classifier_checked', False)}, "
-                f"threshold={self.pick_classifier_threshold:.3f}, "
-                f"selected_mask={selected_slot}"
-            )
-            # print(
-            #     f"{self.gaze_target_mask_key} = "
-            #     f"{selected_slot}, pick_prob={fields.get('pick_classifier_prob', 0.0):.3f}, "
-            #     f"phase={phase}"
-            # )
-        else:
-            # print(f"{self.gaze_target_mask_key} = {selected_slot}, phase={phase}")
-            pass
         self._display_gaze_mask(obs, selected_slot)
 
         if self.mask_selection_mode == "gaze":

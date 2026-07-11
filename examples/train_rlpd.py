@@ -4,6 +4,7 @@ import os, sys, threading, queue, termios, tty, select
 import inspect
 import glob
 import time
+import cv2
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -43,7 +44,7 @@ flags.DEFINE_boolean("actor", False, "Whether this is an actor.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 38000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 40000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
@@ -86,6 +87,21 @@ flags.DEFINE_integer(
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
 )  # debug mode will disable wandb logging
+flags.DEFINE_boolean(
+    "actor_feature_overlay",
+    False,
+    "Display current critic feature/attention heatmap over front_camera in actor/eval.",
+)
+flags.DEFINE_integer(
+    "actor_feature_overlay_period",
+    1,
+    "Display feature overlay every N actor env steps. Set 0 to disable.",
+)
+flags.DEFINE_float(
+    "actor_feature_overlay_alpha",
+    0.45,
+    "Heatmap opacity for actor feature overlay.",
+)
 
 
 devices = jax.local_devices()
@@ -132,6 +148,69 @@ def zero_action_rpy(action):
     return action
 
 
+def _last_rgb_frame(image):
+    image = np.asarray(image)
+    if image.ndim == 4:
+        image = image[-1]
+    if image.ndim != 3 or image.shape[-1] < 3:
+        raise ValueError(f"Expected RGB image with shape HxWxC, got {image.shape}")
+    return image[..., :3].astype(np.uint8)
+
+
+def _attention_heatmap_overlay(rgb_image, attention_map, alpha):
+    attention = np.asarray(attention_map, dtype=np.float32)
+    if attention.ndim > 2:
+        attention = attention.reshape((-1, *attention.shape[-2:]))[0]
+    attention = attention - np.nanmin(attention)
+    denom = float(np.nanmax(attention))
+    if denom > 1e-8:
+        attention = attention / denom
+    attention_uint8 = np.clip(attention * 255.0, 0, 255).astype(np.uint8)
+    heatmap = cv2.applyColorMap(
+        cv2.resize(
+            attention_uint8,
+            (rgb_image.shape[1], rgb_image.shape[0]),
+            interpolation=cv2.INTER_LINEAR,
+        ),
+        cv2.COLORMAP_JET,
+    )
+    base_bgr = rgb_image[..., ::-1]
+    return cv2.addWeighted(base_bgr, 1.0 - alpha, heatmap, alpha, 0)
+
+
+def maybe_display_actor_feature_overlay(agent, env, obs, action, step):
+    if (
+        not FLAGS.actor_feature_overlay
+        or FLAGS.actor_feature_overlay_period <= 0
+        or step % FLAGS.actor_feature_overlay_period != 0
+        or not hasattr(agent, "forward_gaze_attention")
+    ):
+        return
+    unwrapped = env.unwrapped
+    if not getattr(unwrapped, "display_image", False) or not hasattr(unwrapped, "img_queue"):
+        return
+    if "front_camera" not in obs:
+        return
+    try:
+        critic_action = np.asarray(action, dtype=np.float32)
+        if critic_action.shape[-1] > 6:
+            critic_action = critic_action[..., :-1]
+        attention_map = agent.forward_gaze_attention(
+            jax.device_put(obs),
+            jax.device_put(critic_action),
+            rng=None,
+            train=False,
+        )
+        overlay = _attention_heatmap_overlay(
+            _last_rgb_frame(obs["front_camera"]),
+            jax.device_get(attention_map),
+            FLAGS.actor_feature_overlay_alpha,
+        )
+        unwrapped.img_queue.put({"front_camera_feature_overlay": overlay})
+    except Exception as exc:
+        print_red(f"[warn] failed to display actor feature overlay: {exc}")
+
+
 def actor(agent, data_store, intvn_data_store, env, sampling_rng):
     """Run a single-agent actor for tennis_ball_pick / tennis_ball_pick_and_place."""
 
@@ -154,6 +233,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             intervention_label = 0
             done_by_manual = False
             time_list = []
+            eval_step = 0
 
             for episode in range(FLAGS.eval_n_trajs):
                 done = False
@@ -166,6 +246,14 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                         seed=key,
                     )
                     actions = zero_action_rpy(jax.device_get(actions))
+                    maybe_display_actor_feature_overlay(
+                        agent,
+                        env,
+                        obs,
+                        actions,
+                        eval_step,
+                    )
+                    eval_step += 1
                     print("actions = ", actions)
 
                     next_obs, reward, done, truncated, info = env.step(actions)
@@ -275,6 +363,7 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 seed=key,
             )
             actions = zero_action_rpy(jax.device_get(actions))
+            maybe_display_actor_feature_overlay(agent, env, obs, actions, step)
 
         with timer.context("step_env"):
             next_obs, reward, done, truncated, info = env.step(actions)
@@ -456,7 +545,7 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
                 f"[learner step {step}] mask grounding: "
                 f"td={info_scalar('critic_td_loss'):.4g} "
                 f"total={info_scalar('mask_grounding_loss'):.4g} "
-                f"mass={info_scalar('mask_grounding_mass_loss'):.4g} "
+                f"cgl={info_scalar('mask_grounding_cgl_loss'):.4g} "
                 f"weighted={info_scalar('weighted_mask_grounding_loss'):.4g} "
                 f"ratio={info_scalar('mask_grounding_to_td_ratio'):.4g} "
                 f"inside={info_scalar('mask_grounding_coverage'):.3f} "
@@ -532,17 +621,16 @@ def main(_):
         discount=config.discount,
     )
     if FLAGS.use_gaze_target_mask:
-        agent_kwargs["mask_spatial_gate_alpha"] = config.mask_spatial_gate_alpha
+        agent_kwargs["mask_suppress_beta"] = config.mask_suppress_beta
         agent_kwargs["use_mask_pooling"] = config.use_mask_pooling
         agent_kwargs["use_mask_feature_head"] = config.use_mask_feature_head
         agent_kwargs["mask_feature_gate_alpha"] = config.mask_feature_gate_alpha
         agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate
         agent_kwargs["mask_feature_hidden_dim"] = config.mask_feature_hidden_dim
-        agent_kwargs["use_modality_gate"] = config.use_modality_gate
-        agent_kwargs["modality_gate_hidden_dim"] = config.modality_gate_hidden_dim
         agent_kwargs["mask_grounding_weight"] = config.mask_grounding_weight
         agent_kwargs["mask_grounding_decay_step"] = config.mask_grounding_decay_step
         agent_kwargs["mask_grounding_decay_weight"] = config.mask_grounding_decay_weight
+        agent_kwargs["mask_grounding_key"] = config.mask_grounding_key
         agent_kwargs["mask_grounding_threshold"] = config.mask_grounding_threshold
         agent_kwargs["mask_grounding_cell_threshold"] = (
             config.mask_grounding_cell_threshold
@@ -585,7 +673,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-7-3",
+            project="tennis_ball_pick-7-9",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -625,12 +713,12 @@ def main(_):
                 if (
                     not logged_demo_front_camera_mask
                     and obs_key == "observations"
-                    and "front_camera_mask" in obs_dict
+                    and "front_camera_mask1" in obs_dict
                 ):
-                    front_camera_mask = np.asarray(obs_dict["front_camera_mask"])
+                    front_camera_mask = np.asarray(obs_dict["front_camera_mask1"])
                     state = np.asarray(obs_dict["state"], dtype=np.float32)
                     print_green(
-                        "[demo front_camera_mask obs] "
+                        "[demo front_camera_mask1 obs] "
                         f"shape={front_camera_mask.shape} "
                         f"active_pixels={int(np.count_nonzero(front_camera_mask))} "
                         f"phase={state[..., -3:]}"

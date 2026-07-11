@@ -451,6 +451,7 @@ class SACAgentHybridSingleArm(flax.struct.PyTreeNode):
         critic_optimizer_kwargs={
             "learning_rate": 3e-4,
         },
+        visual_aux_optimizer_kwargs=None,
         grasp_critic_optimizer_kwargs={
             "learning_rate": 3e-4,
         },
@@ -486,6 +487,8 @@ class SACAgentHybridSingleArm(flax.struct.PyTreeNode):
             "grasp_critic": make_optimizer(**grasp_critic_optimizer_kwargs),
             "temperature": make_optimizer(**temperature_optimizer_kwargs),
         }
+        if visual_aux_optimizer_kwargs is not None:
+            txs["visual_aux"] = make_optimizer(**visual_aux_optimizer_kwargs)
 
         rng, init_rng = jax.random.split(rng)
 

@@ -444,3 +444,41 @@ def compute_index_target_mask_fields(
     fields["gaze_hit_mask"] = True
     fields["candidate_mask_indices"] = [selected_mask_index]
     return fields
+
+
+def compute_all_index_target_mask_fields(
+    obs,
+    mask_predictor,
+    target_shape,
+    *,
+    threshold: float = 0.5,
+):
+    """Return mask1/mask2 fields in one RGB->mask predictor call."""
+    fields_by_slot = {}
+    if mask_predictor is None:
+        return fields_by_slot
+
+    mask_probs = _predict_mask_probs(obs, mask_predictor)
+    if mask_probs is None:
+        return fields_by_slot
+
+    mask_probs = np.asarray(mask_probs, dtype=np.float32)
+    if mask_probs.ndim != 3:
+        return fields_by_slot
+
+    for index in range(mask_probs.shape[0]):
+        selected_mask = (mask_probs[index] >= float(threshold)).astype(np.float32)
+        selected_mask = _resize_2d(selected_mask, tuple(target_shape), method="nearest")
+        selected_slot = (
+            mask_predictor.mask_slots[index]
+            if index < len(mask_predictor.mask_slots)
+            else f"mask{index + 1}"
+        )
+        fields_by_slot[selected_slot] = {
+            "gaze_target_mask": selected_mask.astype(np.float32),
+            "selected_mask_index": index,
+            "selected_mask_slot": selected_slot,
+            "gaze_hit_mask": True,
+            "candidate_mask_indices": [index],
+        }
+    return fields_by_slot

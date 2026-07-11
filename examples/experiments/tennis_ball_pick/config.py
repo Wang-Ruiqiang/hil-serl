@@ -79,6 +79,15 @@ class EnvConfig(DefaultEnvConfig):
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
         4.6126804, 3.118583, 3.128078, 3.5085052,
     ], dtype=np.float32)
+
+    # GRIPPER_CLOSE_JOINT = np.array([
+    #     3.078699350, 4.512971401, 2.707476139, 4.020563602,
+    #     3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
+    #     3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
+    #     4.594272614, 3.063359737, 3.178408146, 3.528155804,
+    # ], dtype=np.float32)
+
+
     GRIPPER_OPEN_JOINT = np.array([
         3.209087848663330078, 4.022466754913330078, 3.210621833801269531, 3.652039194107055664,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
@@ -103,17 +112,16 @@ class TrainConfig(DefaultTrainingConfig):
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
-    mask_spatial_gate_alpha = 1.0
-    use_mask_pooling = True
+    mask_suppress_beta = 1.0
+    use_mask_pooling = False
     use_mask_feature_head = True
-    mask_feature_gate_alpha = 1.0
+    mask_feature_gate_alpha = 0.9
     mask_feature_min_gate = 0.1
     mask_feature_hidden_dim = 128
-    use_modality_gate = True
-    modality_gate_hidden_dim = 128
-    mask_grounding_weight = 0.1
+    mask_grounding_weight = 0.05
     mask_grounding_decay_step = 1000
     mask_grounding_decay_weight = 0.02
+    mask_grounding_key = "front_camera_mask1"
     mask_grounding_threshold = 0.05
     mask_grounding_cell_threshold = 0.03
 
@@ -126,7 +134,7 @@ class TrainConfig(DefaultTrainingConfig):
         if enable_tactile:
             image_keys.append("tactile_data")
         if use_gaze_target_mask:
-            image_keys.append("front_camera_mask")
+            image_keys.extend(["front_camera_mask1", "front_camera_mask2"])
         return image_keys
 
     def get_classifier_keys(self, enable_tactile=True):

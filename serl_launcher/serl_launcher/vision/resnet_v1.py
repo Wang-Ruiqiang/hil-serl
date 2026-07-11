@@ -12,37 +12,6 @@ from serl_launcher.vision.data_augmentations import resize
 ModuleDef = Any
 
 
-def _resize_mask_to_spatial(mask: jnp.ndarray, spatial_features: jnp.ndarray):
-    """Resize an image-space mask to a CNN spatial feature map."""
-    mask = jnp.asarray(mask, dtype=jnp.float32)
-    if spatial_features.ndim == 3:
-        if mask.ndim == 4:
-            mask = jnp.max(mask, axis=(0, 3))
-        elif mask.ndim == 3:
-            mask = jnp.max(mask, axis=-1)
-        elif mask.ndim != 2:
-            raise ValueError(f"Unsupported unbatched mask shape: {mask.shape}")
-        mask = mask[..., None]
-        target_shape = (*spatial_features.shape[:2], 1)
-    elif spatial_features.ndim == 4:
-        if mask.ndim == 5:
-            mask = jnp.max(mask, axis=(1, 4))
-        elif mask.ndim == 4:
-            mask = jnp.max(mask, axis=-1)
-        elif mask.ndim == 3:
-            pass
-        else:
-            raise ValueError(f"Unsupported batched mask shape: {mask.shape}")
-        mask = mask[..., None]
-        target_shape = (spatial_features.shape[0], *spatial_features.shape[1:3], 1)
-    else:
-        raise ValueError(f"Unsupported spatial feature shape: {spatial_features.shape}")
-
-    mask = jax.image.resize(mask, target_shape, method="linear")
-    mask = jnp.where(jnp.max(mask) > 1.0, mask / 255.0, mask)
-    return jnp.clip(mask, 0.0, 1.0)
-
-
 class AddSpatialCoordinates(nn.Module):
     dtype: Any = jnp.float32
 
@@ -247,8 +216,6 @@ class ResNetEncoder(nn.Module):
         stop_gradient=False,
         encode: bool = True,
         return_spatial: bool = False,
-        spatial_attention_mask: Optional[jnp.ndarray] = None,
-        spatial_attention_alpha: float = 0.0,
     ):
         # put inputs in [-1, 1]
         # x = observations.astype(jnp.float32) / 127.5 - 1.0
@@ -353,9 +320,6 @@ class ResNetEncoder(nn.Module):
                     )(cond_var)
                     x_mult = jnp.expand_dims(jnp.expand_dims(cond_out, 1), 1)
                     x = x * x_mult
-        if spatial_attention_mask is not None and spatial_attention_alpha != 0.0:
-            mask = _resize_mask_to_spatial(spatial_attention_mask, x)
-            x = x * (1.0 + spatial_attention_alpha * mask)
         spatial_features = x
         if self.pre_pooling:
             return jax.lax.stop_gradient(x)
@@ -415,15 +379,10 @@ class PreTrainedResNetEncoder(nn.Module):
         encode: bool = True,
         train: bool = True,
         return_spatial: bool = False,
-        spatial_attention_mask: Optional[jnp.ndarray] = None,
-        spatial_attention_alpha: float = 0.0,
     ):
         x = observations
         if encode:
             x = self.pretrained_encoder(x, train=train)
-        if spatial_attention_mask is not None and spatial_attention_alpha != 0.0:
-            mask = _resize_mask_to_spatial(spatial_attention_mask, x)
-            x = x * (1.0 + spatial_attention_alpha * mask)
         spatial_features = x
 
         if self.pooling_method == "spatial_learned_embeddings":

@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Iterable, Optional
+from typing import FrozenSet, Iterable, Optional, Tuple
 
 import chex
 import flax.linen as nn
@@ -15,13 +15,55 @@ from serl_launcher.networks.mlp import MLP
 
 
 class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
-    """Hybrid SAC agent with mask-pooled features and mask grounding loss.
+    """Hybrid SAC agent with mask-conditioned features and CGL grounding loss.
 
     This class keeps the base SAC update structure intact. The only behavioral
-    change is inside critic_loss_fn, where optional auxiliary losses encourage
-    the front-camera mask feature head to place probability mass inside the
-    selected mask region.
+    change is inside critic_loss_fn, where optional auxiliary losses apply the
+    CGL KL term to the front-camera mask feature head.
     """
+
+    _VISUAL_AUX_PARAM_MARKERS = (
+        "encoder",
+        "mask_feature_head",
+        "mask_visual_fusion",
+    )
+
+    @staticmethod
+    def _path_keys(path) -> Tuple[str, ...]:
+        return tuple(str(getattr(entry, "key", entry)) for entry in path)
+
+    @classmethod
+    def _is_visual_aux_param_path(cls, path) -> bool:
+        keys = cls._path_keys(path)
+        if any(key in ("actor", "grasp_critic", "temperature") for key in keys):
+            return False
+        return any(
+            marker in key
+            for key in keys
+            for marker in cls._VISUAL_AUX_PARAM_MARKERS
+        )
+
+    @classmethod
+    def _stop_visual_aux_params(cls, params: Params) -> Params:
+        return jax.tree_util.tree_map_with_path(
+            lambda path, value: (
+                jax.lax.stop_gradient(value)
+                if cls._is_visual_aux_param_path(path)
+                else value
+            ),
+            params,
+        )
+
+    @classmethod
+    def _stop_non_visual_aux_params(cls, params: Params) -> Params:
+        return jax.tree_util.tree_map_with_path(
+            lambda path, value: (
+                value
+                if cls._is_visual_aux_param_path(path)
+                else jax.lax.stop_gradient(value)
+            ),
+            params,
+        )
 
     def forward_gaze_attention(
         self,
@@ -42,6 +84,28 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             rngs={"dropout": rng} if train else {},
             train=train,
             return_attention=True,
+        )
+        return attention_map
+
+    def forward_cgl_attention(
+        self,
+        observations,
+        actions: jax.Array,
+        rng: PRNGKey,
+        *,
+        grad_params: Optional[Params] = None,
+        train: bool = True,
+    ):
+        if train:
+            assert rng is not None, "Must specify rng when training"
+        _, attention_map = self.state.apply_fn(
+            {"params": grad_params or self.state.params},
+            observations,
+            actions,
+            name="critic",
+            rngs={"dropout": rng} if train else {},
+            train=train,
+            return_cgl_attention=True,
         )
         return attention_map
 
@@ -143,7 +207,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         if key not in observations:
             batch_size = attention_map.shape[0]
             zeros = jnp.zeros((batch_size,), dtype=attention_map.dtype)
-            return zeros, zeros, zeros, zeros
+            return zeros, zeros, zeros, zeros, zeros
 
         mask = self._mask_to_attention_shape(observations[key], attention_map)
         mask = mask.astype(attention_map.dtype)
@@ -154,17 +218,26 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             logits_flat,
             axis=-1,
         )
+        mask_sum = jnp.sum(mask_flat, axis=-1, keepdims=True)
+        valid_mask = (mask_sum[:, 0] > 0).astype(attention_map.dtype)
+        gaze_distribution = mask_flat / jnp.maximum(mask_sum, 1e-8)
+        cgl_loss = jnp.sum(
+            gaze_distribution
+            * (
+                jnp.log(gaze_distribution + 1e-8)
+                - jnp.log(attention_probs + 1e-8)
+            ),
+            axis=-1,
+        )
         mask_mass = jnp.sum(attention_probs * mask_flat, axis=-1)
         outside_mass = jnp.sum(attention_probs * (1.0 - mask_flat), axis=-1)
-        valid_mask = (jnp.sum(mask_flat, axis=-1) > 0).astype(attention_map.dtype)
-        mass_loss = -jnp.log(mask_mass + 1e-8)
 
         mask_feature_entropy = -jnp.sum(
             attention_probs * jnp.log(attention_probs + 1e-8),
             axis=-1,
         ) / jnp.log(attention_probs.shape[-1])
         return (
-            jnp.where(valid_mask > 0, mass_loss, 0.0),
+            jnp.where(valid_mask > 0, cgl_loss, 0.0),
             jnp.where(valid_mask > 0, mask_mass, 0.0),
             jnp.where(valid_mask > 0, outside_mass, 0.0),
             jnp.where(valid_mask > 0, mask_feature_entropy, 0.0),
@@ -180,7 +253,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         train_step = jnp.asarray(train_step, dtype=jnp.int32)
         return jnp.where(train_step >= decay_step, decay_weight, base_weight)
 
-    def critic_loss_fn(self, batch, params: Params, rng: PRNGKey, train_step=None):
+    def _critic_td_loss(self, batch, params: Params, rng: PRNGKey):
         batch_size = batch["rewards"].shape[0]
         actions = batch["actions"][..., :-1]
 
@@ -229,12 +302,45 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         target_qs = target_q[None].repeat(self.config["critic_ensemble_size"], axis=0)
         chex.assert_equal_shape([predicted_qs, target_qs])
         td_loss = jnp.mean((predicted_qs - target_qs) ** 2)
+        return td_loss, predicted_qs, target_qs, actions
 
+    def critic_loss_fn(self, batch, params: Params, rng: PRNGKey, train_step=None):
+        td_params = self._stop_visual_aux_params(params)
+        td_loss, predicted_qs, target_qs, _actions = self._critic_td_loss(
+            batch, td_params, rng
+        )
+
+        info = {
+            "critic_loss": td_loss,
+            "critic_td_loss": td_loss,
+            "predicted_qs": jnp.mean(predicted_qs),
+            "target_qs": jnp.mean(target_qs),
+            "rewards": batch["rewards"].mean(),
+        }
+
+        return td_loss, info
+
+    def visual_aux_loss_fn(self, batch, params: Params, rng: PRNGKey, train_step=None):
+        batch_size = batch["rewards"].shape[0]
+        actions = batch["actions"][..., :-1]
+        visual_params = self._stop_non_visual_aux_params(params)
+
+        reference_td_loss, _predicted_qs, _target_qs, _actions = self._critic_td_loss(
+            batch,
+            jax.tree_util.tree_map(jax.lax.stop_gradient, params),
+            rng,
+        )
         attention_map = self.forward_gaze_attention(
             batch["observations"],
             actions,
             rng=rng,
-            grad_params=params,
+            grad_params=visual_params,
+        )
+        cgl_attention_map = self.forward_cgl_attention(
+            batch["observations"],
+            actions,
+            rng=rng,
+            grad_params=visual_params,
         )
 
         gaze_weight = self.config["gaze_regularization_weight"]
@@ -249,9 +355,15 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             )
             has_active_gaze_aux = has_gaze_heatmap
         else:
-            gaze_loss_per_sample = jnp.zeros((batch_size,), dtype=td_loss.dtype)
-            gaze_region_coverage = jnp.zeros((batch_size,), dtype=td_loss.dtype)
-            valid_gaze = jnp.zeros((batch_size,), dtype=td_loss.dtype)
+            gaze_loss_per_sample = jnp.zeros(
+                (batch_size,),
+                dtype=reference_td_loss.dtype,
+            )
+            gaze_region_coverage = jnp.zeros(
+                (batch_size,),
+                dtype=reference_td_loss.dtype,
+            )
+            valid_gaze = jnp.zeros((batch_size,), dtype=reference_td_loss.dtype)
             has_active_gaze_aux = False
         valid_gaze_count = jnp.maximum(jnp.sum(valid_gaze), 1.0)
         gaze_aux_loss = (
@@ -259,50 +371,53 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             / valid_gaze_count
         )
         if not has_active_gaze_aux:
-            gaze_aux_loss = jnp.asarray(0.0, dtype=td_loss.dtype)
+            gaze_aux_loss = jnp.asarray(0.0, dtype=reference_td_loss.dtype)
 
         weighted_gaze_aux_loss = gaze_weight * gaze_aux_loss
-        gaze_to_td_ratio = weighted_gaze_aux_loss / (td_loss + 1e-8)
+        gaze_to_td_ratio = weighted_gaze_aux_loss / (reference_td_loss + 1e-8)
 
         mask_grounding_weight = self._effective_mask_grounding_weight(train_step)
         (
-            mask_mass_loss_per_sample,
+            mask_cgl_loss_per_sample,
             mask_grounding_coverage,
             mask_grounding_outside_mass,
             mask_feature_entropy,
             valid_mask,
-        ) = self._mask_grounding_loss(batch["observations"], attention_map)
+        ) = self._mask_grounding_loss(batch["observations"], cgl_attention_map)
         valid_mask_count = jnp.maximum(jnp.sum(valid_mask), 1.0)
-        mask_mass_loss = (
-            jnp.sum(mask_mass_loss_per_sample * valid_mask) / valid_mask_count
+        mask_cgl_loss = (
+            jnp.sum(mask_cgl_loss_per_sample * valid_mask) / valid_mask_count
         )
-        mask_grounding_loss = mask_mass_loss
+        mask_grounding_loss = mask_cgl_loss
         mask_grounding_loss = jnp.where(
             mask_grounding_weight > 0.0,
             mask_grounding_loss,
-            jnp.asarray(0.0, dtype=td_loss.dtype),
+            jnp.asarray(0.0, dtype=reference_td_loss.dtype),
         )
         weighted_mask_grounding_loss = mask_grounding_weight * mask_grounding_loss
-        mask_grounding_to_td_ratio = weighted_mask_grounding_loss / (td_loss + 1e-8)
+        mask_grounding_to_td_ratio = weighted_mask_grounding_loss / (
+            reference_td_loss + 1e-8
+        )
 
-        critic_loss = td_loss + weighted_gaze_aux_loss + weighted_mask_grounding_loss
+        visual_aux_loss = weighted_gaze_aux_loss + weighted_mask_grounding_loss
 
         info = {
-            "critic_loss": critic_loss,
-            "critic_td_loss": td_loss,
-            "predicted_qs": jnp.mean(predicted_qs),
-            "target_qs": jnp.mean(target_qs),
-            "rewards": batch["rewards"].mean(),
+            "visual_aux_loss": visual_aux_loss,
+            "visual_aux_reference_td_loss": reference_td_loss,
             "gaze_aux_available": jnp.asarray(float(has_active_gaze_aux)),
             "gaze_aux_loss": gaze_aux_loss,
-            "gaze_weight": jnp.asarray(gaze_weight, dtype=td_loss.dtype),
+            "gaze_weight": jnp.asarray(gaze_weight, dtype=reference_td_loss.dtype),
             "weighted_gaze_aux_loss": weighted_gaze_aux_loss,
             "gaze_to_td_ratio": gaze_to_td_ratio,
             "gaze_region_coverage": jnp.sum(gaze_region_coverage) / valid_gaze_count,
             "gaze_valid_fraction": jnp.mean(valid_gaze),
             "mask_grounding_loss": mask_grounding_loss,
-            "mask_grounding_mass_loss": mask_mass_loss,
-            "mask_grounding_weight": jnp.asarray(mask_grounding_weight, dtype=td_loss.dtype),
+            "mask_grounding_cgl_loss": mask_cgl_loss,
+            "mask_grounding_mass_loss": mask_cgl_loss,
+            "mask_grounding_weight": jnp.asarray(
+                mask_grounding_weight,
+                dtype=reference_td_loss.dtype,
+            ),
             "weighted_mask_grounding_loss": weighted_mask_grounding_loss,
             "mask_grounding_to_td_ratio": mask_grounding_to_td_ratio,
             "mask_grounding_coverage": (
@@ -317,15 +432,38 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             "mask_grounding_valid_fraction": jnp.mean(valid_mask),
         }
 
-        return critic_loss, info
+        return visual_aux_loss, info
 
     def loss_fns(self, batch, train_step=None):
         return {
             "critic": partial(self.critic_loss_fn, batch, train_step=train_step),
+            "visual_aux": partial(
+                self.visual_aux_loss_fn,
+                batch,
+                train_step=train_step,
+            ),
             "grasp_critic": partial(self.grasp_critic_loss_fn, batch),
             "actor": partial(self.policy_loss_fn, batch),
             "temperature": partial(self.temperature_loss_fn, batch),
         }
+
+    @partial(jax.jit, static_argnames=("pmap_axis", "networks_to_update"))
+    def update(
+        self,
+        batch: Batch,
+        *,
+        pmap_axis: Optional[str] = None,
+        networks_to_update: FrozenSet[str] = frozenset(
+            {"actor", "critic", "visual_aux", "grasp_critic", "temperature"}
+        ),
+        **kwargs,
+    ):
+        return super().update(
+            batch,
+            pmap_axis=pmap_axis,
+            networks_to_update=networks_to_update,
+            **kwargs,
+        )
 
     @classmethod
     def create_pixels(
@@ -360,13 +498,11 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         gaze_region_radius: int = 1,
         gaze_attention_image_key: str = "front_camera",
         use_mask_pooling: bool = True,
-        mask_spatial_gate_alpha: float = 0.0,
+        mask_suppress_beta: float = 1.0,
         use_mask_feature_head: bool = True,
         mask_feature_gate_alpha: float = 1.0,
         mask_feature_min_gate: float = 0.1,
         mask_feature_hidden_dim: int = 128,
-        use_modality_gate: bool = False,
-        modality_gate_hidden_dim: int = 128,
         return_raw_attention: bool = False,
         mask_grounding_weight: float = 0.0,
         mask_grounding_decay_step: int = 0,
@@ -378,14 +514,30 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
     ):
         policy_network_kwargs["activate_final"] = True
         critic_network_kwargs["activate_final"] = True
+        kwargs.setdefault(
+            "visual_aux_optimizer_kwargs",
+            kwargs.get("critic_optimizer_kwargs", {"learning_rate": 3e-4}),
+        )
 
         mask_pool_pairs = (
-            (("front_camera", "front_camera_mask"),)
+            (("front_camera", "front_camera_mask1"),)
+            if "front_camera_mask1" in image_keys
+            else (("front_camera", "front_camera_mask"),)
             if "front_camera_mask" in image_keys
             else ()
         )
+        mask_suppress_pairs = (
+            (("front_camera", "front_camera_mask2"),)
+            if "front_camera_mask2" in image_keys
+            else ()
+        )
         mask_pool_keys = {mask_key for _, mask_key in mask_pool_pairs}
-        encoder_image_keys = [key for key in image_keys if key not in mask_pool_keys]
+        mask_suppress_keys = {mask_key for _, mask_key in mask_suppress_pairs}
+        encoder_image_keys = [
+            key
+            for key in image_keys
+            if key not in mask_pool_keys and key not in mask_suppress_keys
+        ]
 
         if encoder_type == "resnet":
             from serl_launcher.vision.resnet_v1 import resnetv1_configs
@@ -433,14 +585,13 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             # pass that camera key through the launcher/config instead of front_camera.
             attention_image_key=gaze_attention_image_key,
             mask_pool_pairs=mask_pool_pairs,
+            mask_suppress_pairs=mask_suppress_pairs,
             use_mask_pooling=use_mask_pooling,
-            mask_spatial_gate_alpha=mask_spatial_gate_alpha,
+            mask_suppress_beta=mask_suppress_beta,
             use_mask_feature_head=use_mask_feature_head,
             mask_feature_gate_alpha=mask_feature_gate_alpha,
             mask_feature_min_gate=mask_feature_min_gate,
             mask_feature_hidden_dim=mask_feature_hidden_dim,
-            use_modality_gate=use_modality_gate,
-            modality_gate_hidden_dim=modality_gate_hidden_dim,
             return_raw_attention=return_raw_attention,
         )
 

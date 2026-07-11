@@ -38,11 +38,6 @@ class DefaultTrainingConfig:
     # These only affect the gaze/mask SAC agent when observations include
     # front_camera_mask. Plain vision+tactile SAC ignores these values.
 
-    # Fixed mask gate applied directly to front_camera spatial features before
-    # the trainable mask feature head. 0 disables this hard mask guidance;
-    # 1 keeps mask pixels at 2x strength and non-mask pixels unchanged.
-    mask_spatial_gate_alpha: float = 1.0
-
     # Include the hard mask-pooled target feature in the fused visual feature.
     # If False, the visual feature uses only the trainable mask feature head.
     use_mask_pooling: bool = True
@@ -63,14 +58,6 @@ class DefaultTrainingConfig:
     # Hidden channel count inside the trainable mask feature head. This is a model
     # capacity setting; most tasks should leave it at the default.
     mask_feature_hidden_dim: int = 128
-
-    # Learn scalar gates over encoded modalities after the mask-conditioned RGB
-    # feature has been formed. The gate starts as an identity scaling, then RL
-    # losses can learn to up/down-weight vision, tactile, and state features.
-    use_modality_gate: bool = False
-
-    # Hidden size of the small MLP that predicts modality gates.
-    modality_gate_hidden_dim: int = 128
 
     # Weight for the auxiliary loss that pulls the trainable mask feature map into
     # front_camera_mask. 0 disables this auxiliary supervision.
