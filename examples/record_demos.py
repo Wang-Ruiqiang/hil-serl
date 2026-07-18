@@ -30,7 +30,7 @@ flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames whil
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
 flags.DEFINE_string(
     "frame_save_path",
-    "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-9-0",
+    "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-2",
     "Directory used by the environment when --record_data or --record_gaze is enabled.",
 )
 

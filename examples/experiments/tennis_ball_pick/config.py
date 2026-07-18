@@ -63,13 +63,13 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
-    ACTION_SCALE = (0.003, 0.003, 0.003)
+    ACTION_SCALE = (0.004, 0.004, 0.004)
     CMD_POSE_RESYNC_THRESHOLD = 0.05
     DISPLAY_IMAGE = True
     GAZE_DISPLAY_MARKERS = True
     GAZE_RS_SAVE_WIDTH = 640
     GAZE_RS_SAVE_HEIGHT = 480
-    MAX_EPISODE_LENGTH = 100
+    MAX_EPISODE_LENGTH = 200
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
 
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
@@ -113,17 +113,18 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
     mask_suppress_beta = 1.0
-    use_mask_pooling = False
     use_mask_feature_head = True
     mask_feature_gate_alpha = 0.9
-    mask_feature_min_gate = 0.1
+    mask_feature_min_gate = 0.4
     mask_feature_hidden_dim = 128
+    use_mask_encoder = True
+    mask_encoder_latent_dim = 64
     mask_grounding_weight = 0.05
     mask_grounding_decay_step = 1000
     mask_grounding_decay_weight = 0.02
     mask_grounding_key = "front_camera_mask1"
     mask_grounding_threshold = 0.05
-    mask_grounding_cell_threshold = 0.03
+    mask_grounding_cell_threshold = 0.04
 
     def get_image_keys(
         self,
@@ -236,7 +237,7 @@ class TrainConfig(DefaultTrainingConfig):
                 print("sigmoid(reward_classifier(obs)) = ", prob)
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
-                return int(prob > 0.75)
+                return int(prob > 0.8)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

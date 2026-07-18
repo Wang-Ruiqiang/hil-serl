@@ -548,6 +548,21 @@ class FrankaEnv(gym.Env):
             self.et_mirror_dir = self.data_recorder.et_mirror_dir
             self.rs_mirror_dir = self.data_recorder.rs_mirror_dir
 
+        self.terminate = False
+        if not fake_env:
+            try:
+                from pynput import keyboard
+
+                def on_press(key):
+                    if key == keyboard.Key.esc:
+                        print("[FrankaEnv] Esc pressed; terminating current episode.")
+                        self.terminate = True
+
+                self.listener = keyboard.Listener(on_press=on_press)
+                self.listener.start()
+            except Exception as exc:
+                print(f"[FrankaEnv] keyboard terminate listener disabled: {exc}")
+
         print("Initialized franka")
 
 
@@ -676,13 +691,22 @@ class FrankaEnv(gym.Env):
         _timing_log("step.compute_reward", t)
         # self.save_training_frame()
         # print(f"reward in franka_env = {reward}")
-        # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
-        done = reward or self.terminate
+        timeout = (
+            not self.enable_data_recording
+            and self.max_episode_length > 0
+            and self.curr_path_length >= self.max_episode_length
+        )
+        terminated_by_user = bool(self.terminate)
+        done = bool(timeout or reward or terminated_by_user)
         # t_end = time.time()
         # print(f"[Step End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("curr hand pos = ", self.curr_leap_hand_pos)
         # input("debug for hand pos")
-        info = {"succeed": reward}
+        info = {
+            "succeed": reward,
+            "timeout": timeout,
+            "terminated_by_user": terminated_by_user,
+        }
         if self.enable_data_recording and frame_idx is not None:
             info["frame_idx"] = int(frame_idx)
             info["episode_id"] = int(self._episode_counter)

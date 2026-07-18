@@ -44,7 +44,7 @@ flags.DEFINE_boolean("actor", False, "Whether this is an actor.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 40000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 38000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
@@ -502,6 +502,13 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     else:
         train_critic_networks_to_update = frozenset({"critic", "grasp_critic"})
         train_networks_to_update = frozenset({"critic", "grasp_critic", "actor", "temperature"})
+        if FLAGS.use_gaze_target_mask:
+            train_critic_networks_to_update = train_critic_networks_to_update | frozenset(
+                {"visual_aux"}
+            )
+            train_networks_to_update = train_networks_to_update | frozenset(
+                {"visual_aux"}
+            )
 
     for step in tqdm.tqdm(
         range(start_step, config.max_steps), dynamic_ncols=True, desc="learner"
@@ -536,14 +543,14 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
             agent = jax.block_until_ready(agent)
             server.publish_network(agent.state.params)
 
-        critic_update_info = update_info.get("critic", update_info)
-        if step % 100 == 0 and "mask_grounding_loss" in critic_update_info:
+        visual_aux_info = update_info.get("visual_aux", {})
+        if step % 100 == 0 and "mask_grounding_loss" in visual_aux_info:
             def info_scalar(key):
-                return float(np.asarray(jax.device_get(critic_update_info[key])).mean())
+                return float(np.asarray(jax.device_get(visual_aux_info[key])).mean())
 
             print_green(
                 f"[learner step {step}] mask grounding: "
-                f"td={info_scalar('critic_td_loss'):.4g} "
+                f"td={info_scalar('visual_aux_reference_td_loss'):.4g} "
                 f"total={info_scalar('mask_grounding_loss'):.4g} "
                 f"cgl={info_scalar('mask_grounding_cgl_loss'):.4g} "
                 f"weighted={info_scalar('weighted_mask_grounding_loss'):.4g} "
@@ -622,11 +629,12 @@ def main(_):
     )
     if FLAGS.use_gaze_target_mask:
         agent_kwargs["mask_suppress_beta"] = config.mask_suppress_beta
-        agent_kwargs["use_mask_pooling"] = config.use_mask_pooling
         agent_kwargs["use_mask_feature_head"] = config.use_mask_feature_head
         agent_kwargs["mask_feature_gate_alpha"] = config.mask_feature_gate_alpha
         agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate
         agent_kwargs["mask_feature_hidden_dim"] = config.mask_feature_hidden_dim
+        agent_kwargs["use_mask_encoder"] = config.use_mask_encoder
+        agent_kwargs["mask_encoder_latent_dim"] = config.mask_encoder_latent_dim
         agent_kwargs["mask_grounding_weight"] = config.mask_grounding_weight
         agent_kwargs["mask_grounding_decay_step"] = config.mask_grounding_decay_step
         agent_kwargs["mask_grounding_decay_weight"] = config.mask_grounding_decay_weight
@@ -673,7 +681,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-7-9",
+            project="tennis_ball_pick-7-14",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

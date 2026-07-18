@@ -23,15 +23,17 @@ class EncodingWrapper(nn.Module):
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
     attention_image_key: Optional[str] = "front_camera"
-    mask_pool_pairs: Tuple[Tuple[str, str], ...] = ()
+    mask_target_pairs: Tuple[Tuple[str, str], ...] = ()
     mask_suppress_pairs: Tuple[Tuple[str, str], ...] = ()
-    use_mask_pooling: bool = True
     mask_suppress_beta: float = 1.0
     use_mask_feature_head: bool = False
     mask_feature_hidden_dim: int = 128
     mask_feature_gate_alpha: float = 1.0
     mask_feature_min_gate: float = 0.1
+    use_mask_encoder: bool = True
+    mask_encoder_latent_dim: int = 64
     return_raw_attention: bool = False
+    return_mask_encoder_attention: bool = False
     # state_weights: Optional[Iterable[float]] = None
 
     def _mask_for_spatial(self, mask: jnp.ndarray, spatial_features: jnp.ndarray):
@@ -63,22 +65,6 @@ class EncodingWrapper(nn.Module):
         mask = jnp.where(jnp.max(mask) > 1.0, mask / 255.0, mask)
         return jnp.clip(mask, 0.0, 1.0)
 
-    def _mask_pool_feature(
-        self,
-        spatial_features: jnp.ndarray,
-        mask: jnp.ndarray,
-        output_dim: int,
-        name: str,
-    ):
-        mask = self._mask_for_spatial(mask, spatial_features)
-        weighted = spatial_features * mask
-        numerator = jnp.sum(weighted, axis=(-3, -2))
-        denominator = jnp.maximum(jnp.sum(mask, axis=(-3, -2)), 1e-6)
-        target_feature = numerator / denominator
-        target_feature = nn.Dense(output_dim, name=f"{name}_proj")(target_feature)
-        target_feature = nn.LayerNorm(name=f"{name}_ln")(target_feature)
-        return nn.tanh(target_feature)
-
     def _project_pooled_feature(self, pooled_feature, output_dim: int, name: str):
         pooled_feature = nn.Dense(output_dim, name=f"{name}_proj")(pooled_feature)
         pooled_feature = nn.LayerNorm(name=f"{name}_ln")(pooled_feature)
@@ -102,6 +88,44 @@ class EncodingWrapper(nn.Module):
         suppress_gate = 1.0 - self.mask_suppress_beta * mask
         suppress_gate = jnp.clip(suppress_gate, 0.0, 1.0)
         return spatial_features * suppress_gate
+
+    def _mask_encoder_feature(
+        self,
+        mask: jnp.ndarray,
+        name: str,
+        return_spatial_attention: bool = False,
+    ):
+        mask = jnp.asarray(mask, dtype=jnp.float32)
+        if self.enable_stacking:
+            if mask.ndim == 4:
+                mask = rearrange(mask, "T H W C -> H W (T C)")
+            elif mask.ndim == 5:
+                mask = rearrange(mask, "B T H W C -> B H W (T C)")
+        if mask.ndim == 2:
+            mask = mask[..., None]
+        elif mask.ndim == 3:
+            mask = jnp.max(mask, axis=-1, keepdims=True)
+        elif mask.ndim == 4:
+            mask = jnp.max(mask, axis=-1, keepdims=True)
+        else:
+            raise ValueError(f"Unsupported mask encoder input shape: {mask.shape}")
+        mask = jnp.where(jnp.max(mask) > 1.0, mask / 255.0, mask)
+        mask = jnp.clip(mask, 0.0, 1.0)
+
+        hidden = nn.Conv(16, (5, 5), strides=(2, 2), padding="SAME", name=f"{name}_conv1")(mask)
+        hidden = nn.relu(hidden)
+        hidden = nn.Conv(32, (3, 3), strides=(2, 2), padding="SAME", name=f"{name}_conv2")(hidden)
+        hidden = nn.relu(hidden)
+        hidden = nn.Conv(64, (3, 3), strides=(2, 2), padding="SAME", name=f"{name}_conv3")(hidden)
+        hidden = nn.relu(hidden)
+        attention_map = jnp.mean(jnp.square(hidden), axis=-1)
+        hidden = jnp.mean(hidden, axis=(-3, -2))
+        hidden = nn.Dense(self.mask_encoder_latent_dim, name=f"{name}_proj")(hidden)
+        hidden = nn.LayerNorm(name=f"{name}_ln")(hidden)
+        hidden = nn.tanh(hidden)
+        if return_spatial_attention:
+            return hidden, attention_map
+        return hidden
 
     def _fuse_feature_list(self, features, output_dim: int, name: str):
         if len(features) == 1:
@@ -160,27 +184,12 @@ class EncodingWrapper(nn.Module):
             name=f"{name}_global",
         )
 
-        mask_feature_probs = jax.nn.softmax(
-            mask_feature_logits.reshape(mask_feature_logits.shape[0], -1),
-            axis=-1,
-        ).reshape(mask_feature_logits.shape)
-        target_feature = jnp.sum(
-            task_features * mask_feature_probs[..., None],
-            axis=(-3, -2),
-        )
-        target_feature = self._project_pooled_feature(
-            target_feature,
-            output_dim,
-            name=f"{name}_target",
-        )
-
         if no_batch_dim:
             task_features = task_features[0]
             mask_feature_logits = mask_feature_logits[0]
             global_feature = global_feature[0]
-            target_feature = target_feature[0]
 
-        return global_feature, target_feature, task_features, mask_feature_logits
+        return global_feature, task_features, mask_feature_logits
 
     @nn.compact
     def __call__(
@@ -198,9 +207,9 @@ class EncodingWrapper(nn.Module):
         cgl_attention_maps = []
         selected_attention_map = None
         selected_cgl_attention_map = None
-        mask_pool_pairs = dict(self.mask_pool_pairs)
+        mask_target_pairs = dict(self.mask_target_pairs)
         mask_suppress_pairs = dict(self.mask_suppress_pairs)
-        mask_keys = set(mask_pool_pairs.values()) | set(mask_suppress_pairs.values())
+        mask_keys = set(mask_target_pairs.values()) | set(mask_suppress_pairs.values())
         for image_key in self.image_keys:
             if image_key in mask_keys:
                 continue
@@ -215,10 +224,10 @@ class EncodingWrapper(nn.Module):
             needs_spatial_features = (
                 return_attention
                 or return_cgl_attention
-                or image_key in mask_pool_pairs
+                or image_key in mask_target_pairs
             )
             needs_spatial_features = needs_spatial_features or image_key in mask_suppress_pairs
-            mask_key = mask_pool_pairs.get(image_key)
+            mask_key = mask_target_pairs.get(image_key)
             suppress_mask_key = mask_suppress_pairs.get(image_key)
             if needs_spatial_features:
                 image, spatial_features = self.encoder[image_key](
@@ -235,13 +244,12 @@ class EncodingWrapper(nn.Module):
                         observations[suppress_mask_key],
                     )
                 mask_feature_map = None
-                mask_head_target_feature = None
+                mask_head_global_feature = None
                 mask_head_task_features = None
-                fused_spatial_features = suppressed_spatial_features
-                if self.use_mask_feature_head and image_key in mask_pool_pairs:
+                attention_spatial_features = suppressed_spatial_features
+                if self.use_mask_feature_head and image_key in mask_target_pairs:
                     (
-                        _mask_head_global_feature,
-                        mask_head_target_feature,
+                        mask_head_global_feature,
                         mask_head_task_features,
                         mask_feature_map,
                     ) = self._mask_feature_head_outputs(
@@ -249,15 +257,18 @@ class EncodingWrapper(nn.Module):
                         image.shape[-1],
                         name=f"mask_feature_head_{image_key}",
                     )
-                    # The mask head is residual around the mask2-suppressed map,
-                    # so its task feature map preserves global hand/arm context
-                    # while allowing the CGL loss to shape ball-relevant cells.
-                    fused_spatial_features = mask_head_task_features
+                    # Keep the mask2-suppressed raw branch for hand/arm context,
+                    # and add the mask-head branch for target-focused features.
+                    # This spatial blend is only used for attention visualization;
+                    # the RL input below fuses the two pooled vector branches.
+                    attention_spatial_features = (
+                        suppressed_spatial_features + mask_head_task_features
+                    )
                 if return_attention:
                     attention_map = raw_attention_map
                     if not self.return_raw_attention:
                         attention_map = jnp.mean(
-                            jnp.square(fused_spatial_features),
+                            jnp.square(attention_spatial_features),
                             axis=-1,
                         )
                     attention_maps.append(attention_map)
@@ -278,29 +289,21 @@ class EncodingWrapper(nn.Module):
             if stop_gradient:
                 image = jax.lax.stop_gradient(image)
 
-            if image_key in mask_pool_pairs:
-                mask_key = mask_pool_pairs[image_key]
+            if image_key in mask_target_pairs:
+                mask_key = mask_target_pairs[image_key]
                 if mask_key not in observations:
                     raise KeyError(
                         f"Mask feature head for {image_key} requires observation key {mask_key}."
                     )
                 fused_features = [
                     self._global_feature_from_spatial(
-                        fused_spatial_features,
+                        suppressed_spatial_features,
                         image.shape[-1],
-                        name=f"mask2_suppressed_fused_global_{image_key}",
+                        name=f"mask2_suppressed_raw_global_{image_key}",
                     )
                 ]
-                if self.use_mask_pooling and mask_head_target_feature is not None:
-                    fused_features.append(mask_head_target_feature)
-                if self.use_mask_pooling:
-                    target_feature = self._mask_pool_feature(
-                        fused_spatial_features,
-                        observations[mask_key],
-                        image.shape[-1],
-                        name=f"mask_pool_{image_key}",
-                    )
-                    fused_features.append(target_feature)
+                if mask_head_global_feature is not None:
+                    fused_features.append(mask_head_global_feature)
                 if fused_features:
                     image = self._fuse_feature_list(
                         fused_features,
@@ -311,6 +314,26 @@ class EncodingWrapper(nn.Module):
                     image = jax.lax.stop_gradient(image)
 
             encoded.append(image)
+
+            if (
+                self.use_mask_encoder
+                and image_key in mask_target_pairs
+                and mask_target_pairs[image_key] in observations
+            ):
+                mask_encoder_output = self._mask_encoder_feature(
+                    observations[mask_target_pairs[image_key]],
+                    name=f"mask_encoder_{image_key}",
+                    return_spatial_attention=(
+                        return_attention and self.return_mask_encoder_attention
+                    ),
+                )
+                if return_attention and self.return_mask_encoder_attention:
+                    mask_encoder_feature, mask_encoder_attention = mask_encoder_output
+                    selected_attention_map = mask_encoder_attention
+                    attention_maps.append(mask_encoder_attention)
+                    encoded.append(mask_encoder_feature)
+                else:
+                    encoded.append(mask_encoder_output)
 
         if self.use_proprio:
             # project state to embeddings as well

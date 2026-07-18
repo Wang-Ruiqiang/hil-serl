@@ -23,14 +23,14 @@ for path in (
 
 DEFAULT_FRAME_ROOT = (
     "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-7-9-0"
+    "tennis_ball_pick-7-14-0"
 )
 DEFAULT_CHECKPOINT_PATH = str(
     REPO_ROOT
     / "examples"
     / "experiments"
     / "tennis_ball_pick"
-    / "2026-7-7_0_ball_pick_rl_run"
+    / "2026-7-14_0_ball_pick_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
@@ -96,11 +96,6 @@ flags.DEFINE_float(
     "Feature-space suppression strength for front_camera_mask2.",
 )
 flags.DEFINE_boolean(
-    "use_mask_pooling",
-    False,
-    "Include hard mask-pooled target feature in the fused visual feature.",
-)
-flags.DEFINE_boolean(
     "use_mask_feature_head",
     True,
     "Render the trainable mask feature head instead of raw ResNet feature energy.",
@@ -119,6 +114,21 @@ flags.DEFINE_integer(
     "mask_feature_hidden_dim",
     128,
     "Hidden channel count for the trainable mask feature head.",
+)
+flags.DEFINE_boolean(
+    "use_mask_encoder",
+    True,
+    "Encode front_camera_mask1 with a small CNN and concatenate it as an extra modality.",
+)
+flags.DEFINE_integer(
+    "mask_encoder_latent_dim",
+    64,
+    "Output dimension of the small CNN mask encoder.",
+)
+flags.DEFINE_boolean(
+    "show_mask_encoder_feature",
+    True,
+    "Render the small CNN mask encoder's last convolutional feature energy.",
 )
 flags.DEFINE_string("gaze_json_name", "gaze_contact.json", "Recorded gaze json name.")
 flags.DEFINE_string(
@@ -295,6 +305,14 @@ def first_existing_mask(frame_dir: Path, slot: str, target_shape):
     return np.zeros(target_shape, dtype=bool)
 
 
+def has_recorded_mask(frame_dir: Path, slot: str):
+    return any(mask_path.exists() for mask_path in mask_paths(frame_dir)[slot])
+
+
+def has_any_recorded_mask(frame_dirs, slot: str):
+    return any(has_recorded_mask(frame_dir, slot) for frame_dir in frame_dirs)
+
+
 def dilate_mask(mask, radius: int):
     if radius <= 0:
         return mask
@@ -428,10 +446,46 @@ def set_phase_in_obs(obs, selected_index):
     obs = dict(obs)
     phase = phase_onehot(selected_index)
     state = np.asarray(obs["state"], dtype=np.float32).reshape(-1)
-    if state.shape[0] >= 3:
+    if state.shape[0] >= 11:
         state = np.concatenate([state[:-3], phase], axis=0)
     else:
         state = np.concatenate([state, phase], axis=0)
+    obs["state"] = state.astype(np.float32)
+    return obs
+
+
+def selected_slot_to_phase_index(selected_slot):
+    if selected_slot == "mask1":
+        return 0
+    if selected_slot == "mask2":
+        return 1
+    return 2
+
+
+def infer_actor_state_dim(agent):
+    try:
+        kernel = agent.state.params["modules_actor"]["encoder"]["Dense_0"]["kernel"]
+    except Exception:
+        return None
+    return int(kernel.shape[0])
+
+
+def align_obs_state_dim(obs, expected_dim, selected_slot):
+    if expected_dim is None:
+        return obs
+    obs = dict(obs)
+    state = np.asarray(obs["state"], dtype=np.float32).reshape(-1)
+    if state.shape[0] == expected_dim:
+        return obs
+    if state.shape[0] + 3 == expected_dim:
+        state = np.concatenate(
+            [state, phase_onehot(selected_slot_to_phase_index(selected_slot))],
+            axis=0,
+        )
+    elif state.shape[0] > expected_dim:
+        state = state[:expected_dim]
+    else:
+        state = np.pad(state, (0, expected_dim - state.shape[0]))
     obs["state"] = state.astype(np.float32)
     return obs
 
@@ -739,14 +793,20 @@ def render_attention_probability_panel(image_rgb, attention_map, title, extra_li
     return overlay
 
 
+def panel_base_image(obs, attention_key, attention_kind):
+    if attention_kind == "mask_encoder_feature" and "front_camera_mask1" in obs:
+        return obs["front_camera_mask1"]
+    return obs[attention_key]
+
+
 def create_attention_agent(
     config,
     sample_obs,
     attention_key,
     *,
-    use_mask_pooling,
     use_mask_feature_head,
     return_raw_attention,
+    return_mask_encoder_attention=False,
 ):
     return make_gaze_sac_pixel_agent_hybrid_single_arm(
         seed=FLAGS.seed,
@@ -759,13 +819,15 @@ def create_attention_agent(
         gaze_heatmap_size=(FLAGS.image_size, FLAGS.image_size),
         gaze_region_radius=0,
         gaze_attention_image_key=attention_key,
-        use_mask_pooling=use_mask_pooling,
         mask_suppress_beta=FLAGS.mask_suppress_beta,
         use_mask_feature_head=use_mask_feature_head,
         mask_feature_gate_alpha=FLAGS.mask_feature_gate_alpha,
         mask_feature_min_gate=FLAGS.mask_feature_min_gate,
         mask_feature_hidden_dim=FLAGS.mask_feature_hidden_dim,
+        use_mask_encoder=FLAGS.use_mask_encoder,
+        mask_encoder_latent_dim=FLAGS.mask_encoder_latent_dim,
         return_raw_attention=return_raw_attention,
+        return_mask_encoder_attention=return_mask_encoder_attention,
         mask_grounding_key="front_camera_mask1",
     )
 
@@ -885,6 +947,12 @@ def main(_):
     frame_dirs = list_frame_dirs(frame_root)
     if not frame_dirs:
         raise FileNotFoundError(f"No frame_* dirs found under {frame_root}")
+    has_recorded_mask1 = has_any_recorded_mask(frame_dirs, "mask1")
+    show_mask_encoder_feature = bool(
+        FLAGS.show_mask_encoder_feature
+        and FLAGS.use_mask_encoder
+        and has_recorded_mask1
+    )
 
     print_green(f"frame_root={frame_root}")
     print_green(f"checkpoint_path={Path(FLAGS.checkpoint_path).expanduser().resolve()}")
@@ -892,12 +960,17 @@ def main(_):
     print_green(f"attention_keys={attention_keys}")
     print_green(f"mask_selection_mode={mask_selection_mode}")
     print_green(f"mask_suppress_beta={FLAGS.mask_suppress_beta}")
-    print_green(f"use_mask_pooling={FLAGS.use_mask_pooling}")
     print_green(f"use_mask_feature_head={FLAGS.use_mask_feature_head}")
+    print_green(f"use_mask_encoder={FLAGS.use_mask_encoder}")
+    print_green(f"has_recorded_mask1={has_recorded_mask1}")
+    print_green(f"show_mask_encoder_feature={show_mask_encoder_feature}")
+    if FLAGS.show_mask_encoder_feature and FLAGS.use_mask_encoder and not has_recorded_mask1:
+        print_green("No recorded mask1 files found; skipping mask_encoder_feature panels.")
     print_green(f"compare_raw_mask_feature={FLAGS.compare_raw_mask_feature}")
     print_green(f"mask_feature_gate_alpha={FLAGS.mask_feature_gate_alpha}")
     print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
     print_green(f"mask_feature_hidden_dim={FLAGS.mask_feature_hidden_dim}")
+    print_green(f"mask_encoder_latent_dim={FLAGS.mask_encoder_latent_dim}")
     print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
     print_green(
         "viewer_mask_grounding_cell_threshold="
@@ -930,9 +1003,9 @@ def main(_):
                 {
                     "key": attention_key,
                     "kind": "raw_feature",
-                    "use_mask_pooling": FLAGS.use_mask_pooling,
                     "use_mask_feature_head": FLAGS.use_mask_feature_head,
                     "return_raw_attention": True,
+                    "return_mask_encoder_attention": False,
                     "allow_restore_fallback": False,
                 }
             )
@@ -940,10 +1013,24 @@ def main(_):
             attention_specs.append(
                 {
                     "key": attention_key,
-                    "kind": "mask_feature_head",
-                    "use_mask_pooling": FLAGS.use_mask_pooling,
+                    "kind": "fused_feature",
                     "use_mask_feature_head": True,
                     "return_raw_attention": False,
+                    "return_mask_encoder_attention": False,
+                    "allow_restore_fallback": False,
+                }
+            )
+        if (
+            attention_key == "front_camera"
+            and show_mask_encoder_feature
+        ):
+            attention_specs.append(
+                {
+                    "key": attention_key,
+                    "kind": "mask_encoder_feature",
+                    "use_mask_feature_head": FLAGS.use_mask_feature_head,
+                    "return_raw_attention": False,
+                    "return_mask_encoder_attention": True,
                     "allow_restore_fallback": False,
                 }
             )
@@ -952,9 +1039,9 @@ def main(_):
                 {
                     "key": attention_key,
                     "kind": "raw_feature",
-                    "use_mask_pooling": FLAGS.use_mask_pooling,
                     "use_mask_feature_head": FLAGS.use_mask_feature_head,
                     "return_raw_attention": True,
+                    "return_mask_encoder_attention": False,
                     "allow_restore_fallback": False,
                 }
             )
@@ -962,6 +1049,7 @@ def main(_):
         raise ValueError("No attention specs were created.")
 
     agents = {}
+    expected_state_dims = {}
     for spec in attention_specs:
         attention_key = spec["key"]
         attention_kind = spec["kind"]
@@ -970,9 +1058,9 @@ def main(_):
             config,
             sample_obs,
             attention_key,
-            use_mask_pooling=spec["use_mask_pooling"],
             use_mask_feature_head=spec["use_mask_feature_head"],
             return_raw_attention=spec["return_raw_attention"],
+            return_mask_encoder_attention=spec["return_mask_encoder_attention"],
         )
         label = f"{attention_key}/{attention_kind}"
         agent = restore_agent(
@@ -980,9 +1068,14 @@ def main(_):
             label=label,
             allow_fallback=spec["allow_restore_fallback"],
         )
+        expected_state_dims[(attention_key, attention_kind)] = infer_actor_state_dim(agent)
         agent = jax.device_put(jax.tree_util.tree_map(jnp.array, agent))
         agents[(attention_key, attention_kind)] = agent
-        print_green(f"loaded attention agent key={label} time={time.time() - start:.2f}s")
+        print_green(
+            f"loaded attention agent key={label} "
+            f"state_dim={expected_state_dims[(attention_key, attention_kind)]} "
+            f"time={time.time() - start:.2f}s"
+        )
 
     summary_path = output_dir / "attention_summary.csv"
     with summary_path.open("w", newline="") as summary_file:
@@ -1023,9 +1116,14 @@ def main(_):
                 for spec in attention_specs:
                     attention_key = spec["key"]
                     attention_kind = spec["kind"]
+                    frame_obs = align_obs_state_dim(
+                        obs,
+                        expected_state_dims.get((attention_key, attention_kind)),
+                        selected_slot,
+                    )
                     attention_map = critic_attention_for_frame(
                         agents[(attention_key, attention_kind)],
-                        obs,
+                        frame_obs,
                         action,
                     )
                     attention_prob = attention_to_prob(attention_map)
@@ -1087,9 +1185,10 @@ def main(_):
                         f"selected_mask={selected_slot}",
                         *metric_lines,
                     ]
+                    base_image = panel_base_image(obs, attention_key, attention_kind)
                     if FLAGS.attention_display_mode in ("heatmap", "both"):
                         panel = render_attention_panel(
-                            obs[attention_key],
+                            base_image,
                             attention_map,
                             f"frame={fid} {attention_key} {attention_kind} logits",
                             panel_lines,
@@ -1097,7 +1196,7 @@ def main(_):
                         panels.append(panel)
                     if FLAGS.attention_display_mode in ("prob", "both"):
                         panel = render_attention_probability_panel(
-                            obs[attention_key],
+                            base_image,
                             attention_map,
                             f"frame={fid} {attention_key} {attention_kind} prob",
                             panel_lines,

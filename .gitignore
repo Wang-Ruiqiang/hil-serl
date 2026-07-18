@@ -57,3 +57,5 @@ examples/gaze_data_process/gaze_point_ckpt/*
 examples/reward_classifier/classifier_data*/
 examples/reward_classifier/classifier_ckpt*/
 examples/modality_critic_attention_outputs/*
+scripts/*
+docs/reports/*

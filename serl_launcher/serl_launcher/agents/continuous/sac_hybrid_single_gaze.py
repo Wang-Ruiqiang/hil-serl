@@ -23,9 +23,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
     """
 
     _VISUAL_AUX_PARAM_MARKERS = (
-        "encoder",
         "mask_feature_head",
-        "mask_visual_fusion",
     )
 
     @staticmethod
@@ -497,13 +495,15 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         gaze_valid_threshold: float = 1e-8,
         gaze_region_radius: int = 1,
         gaze_attention_image_key: str = "front_camera",
-        use_mask_pooling: bool = True,
         mask_suppress_beta: float = 1.0,
         use_mask_feature_head: bool = True,
         mask_feature_gate_alpha: float = 1.0,
         mask_feature_min_gate: float = 0.1,
         mask_feature_hidden_dim: int = 128,
+        use_mask_encoder: bool = True,
+        mask_encoder_latent_dim: int = 64,
         return_raw_attention: bool = False,
+        return_mask_encoder_attention: bool = False,
         mask_grounding_weight: float = 0.0,
         mask_grounding_decay_step: int = 0,
         mask_grounding_decay_weight: float = 0.0,
@@ -519,7 +519,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             kwargs.get("critic_optimizer_kwargs", {"learning_rate": 3e-4}),
         )
 
-        mask_pool_pairs = (
+        mask_target_pairs = (
             (("front_camera", "front_camera_mask1"),)
             if "front_camera_mask1" in image_keys
             else (("front_camera", "front_camera_mask"),)
@@ -531,12 +531,12 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             if "front_camera_mask2" in image_keys
             else ()
         )
-        mask_pool_keys = {mask_key for _, mask_key in mask_pool_pairs}
+        mask_target_keys = {mask_key for _, mask_key in mask_target_pairs}
         mask_suppress_keys = {mask_key for _, mask_key in mask_suppress_pairs}
         encoder_image_keys = [
             key
             for key in image_keys
-            if key not in mask_pool_keys and key not in mask_suppress_keys
+            if key not in mask_target_keys and key not in mask_suppress_keys
         ]
 
         if encoder_type == "resnet":
@@ -584,15 +584,17 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             # TODO: If gaze is collected on a different camera in a future task,
             # pass that camera key through the launcher/config instead of front_camera.
             attention_image_key=gaze_attention_image_key,
-            mask_pool_pairs=mask_pool_pairs,
+            mask_target_pairs=mask_target_pairs,
             mask_suppress_pairs=mask_suppress_pairs,
-            use_mask_pooling=use_mask_pooling,
             mask_suppress_beta=mask_suppress_beta,
             use_mask_feature_head=use_mask_feature_head,
             mask_feature_gate_alpha=mask_feature_gate_alpha,
             mask_feature_min_gate=mask_feature_min_gate,
             mask_feature_hidden_dim=mask_feature_hidden_dim,
+            use_mask_encoder=use_mask_encoder,
+            mask_encoder_latent_dim=mask_encoder_latent_dim,
             return_raw_attention=return_raw_attention,
+            return_mask_encoder_attention=return_mask_encoder_attention,
         )
 
         encoders = {

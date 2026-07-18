@@ -38,12 +38,8 @@ class DefaultTrainingConfig:
     # These only affect the gaze/mask SAC agent when observations include
     # front_camera_mask. Plain vision+tactile SAC ignores these values.
 
-    # Include the hard mask-pooled target feature in the fused visual feature.
-    # If False, the visual feature uses only the trainable mask feature head.
-    use_mask_pooling: bool = True
-
     # Enable a small trainable mask feature head on top of front_camera
-    # features. Its output is used for mask pooling visualization and
+    # features. Its output is used for fused-feature visualization and
     # mask_grounding_loss.
     use_mask_feature_head: bool = True
 
@@ -58,6 +54,11 @@ class DefaultTrainingConfig:
     # Hidden channel count inside the trainable mask feature head. This is a model
     # capacity setting; most tasks should leave it at the default.
     mask_feature_hidden_dim: int = 128
+
+    # Encode the selected binary mask with a small CNN and concatenate that
+    # vector as an additional policy/critic modality.
+    use_mask_encoder: bool = True
+    mask_encoder_latent_dim: int = 64
 
     # Weight for the auxiliary loss that pulls the trainable mask feature map into
     # front_camera_mask. 0 disables this auxiliary supervision.

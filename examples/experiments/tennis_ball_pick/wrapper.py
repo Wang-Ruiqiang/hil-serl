@@ -69,7 +69,7 @@ class RAMEnv(FrankaEnv):
         cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
         self.curpos = np.concatenate((cur_position, cur_orientation), axis=0)
         # init_pos = np.array([x_init, y_init, z_init])
-        init_pos = np.array([0.55977625898067087, -0.090797684551726014, 0.4022486952647027])
+        init_pos = np.array([0.55977625898067087, -0.140797684551726014, 0.4022486952647027])
         init_ori = np.array([0, 1, 0, 0], dtype=np.float32)
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.arm_interpolate_and_publish(self.curpos, init_arm_action, 0.02, 200)

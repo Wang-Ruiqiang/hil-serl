@@ -30,7 +30,10 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/media/user/data3/wrq/recorded_data/tennis_ball_pick/classifier_data/tennis_ball_pick-6-23-1",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-0",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-1",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-2",
     ],
     "Recorded data root(s) containing frame_xxx folders.",
 )
