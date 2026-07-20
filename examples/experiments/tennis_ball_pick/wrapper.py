@@ -1,14 +1,8 @@
-import copy
 import time
-from scipy.spatial.transform import Rotation as R
 import numpy as np
-from typing import OrderedDict
 import gymnasium as gym
 
 from denso_env.envs.denso_env import DensoEnv
-
-from denso_env.camera.rs_capture import RSCapture
-from denso_env.camera.video_capture import VideoCapture
 
 robot_urdf_path = "/home/wrq/workspaces/HK_TACEXO_WANG/hm_denso_wrq_ws/src/hm_denso/hm_denso_description/urdf/denso_robot_with_ati_4.urdf"
 

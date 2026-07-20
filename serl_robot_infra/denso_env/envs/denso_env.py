@@ -1,5 +1,6 @@
 """Gym Interface for Franka"""
 import os
+import json
 import numpy as np
 import gymnasium as gym
 import cv2
@@ -240,6 +241,8 @@ class DensoEnv(gym.Env):
         save_video=False,
         config: DefaultEnvConfig = None,
         set_load=False,
+        record_data=False,
+        frame_save_path=None,
     ):
         self.action_scale = config.ACTION_SCALE
         self._TARGET_POSE = config.TARGET_POSE
@@ -254,6 +257,7 @@ class DensoEnv(gym.Env):
         self.enable_tactile = config.ENABLE_TACTILE
         self.fake_env = fake_env
         self.exp_name = config.EXP_NAME
+        self.record_data = bool(record_data)
 
         self.last_gripper_act = time.time()
         self.lastsent = time.time()
@@ -398,9 +402,14 @@ class DensoEnv(gym.Env):
         self.interpolation_thread = None
         self.thread_lock = threading.Lock()
 
-        self.frame_save_path = "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-2-6-0"  # 可自行修改
+        self.frame_save_path = (
+            frame_save_path
+            or "/home/wrq/workspaces/HK_TACEXO_WANG/recorded_data/recorded_data_training-2-6-0"
+        )
         os.makedirs(self.frame_save_path, exist_ok=True)
         self.frame_count = 0
+        self._cur_ep_start = None
+        self.episode_records = []
         self.video_count = 0
 
         self.cur_position = np.zeros(3, dtype=np.float32)
@@ -506,6 +515,8 @@ class DensoEnv(gym.Env):
         # print("after publish arm action cur_position = ", self.cur_position)
         self.frame_count += 1
         ob = self._get_obs()
+        if self.record_data:
+            self.save_training_frame()
         reward = self.compute_reward(ob)
         # self.save_training_frame()
         # print(f"reward in denso_env = {reward}")
@@ -1334,6 +1345,34 @@ class DensoEnv(gym.Env):
         # time.sleep(2.0)
         # self.get_im()
 
+    def mark_episode_start_for_recording(self):
+        self._cur_ep_start = int(self.frame_count)
+        return self._cur_ep_start
+
+    def end_episode_and_collect(self):
+        if self._cur_ep_start is None:
+            return None
+        end_frame = int(self.frame_count) - 1
+        if end_frame < int(self._cur_ep_start):
+            return None
+        return int(self._cur_ep_start), end_frame
+
+    def write_recording_metadata(self, exp_name, successes_needed, success_count, episode_records):
+        metadata = {
+            "exp_name": exp_name,
+            "successes_needed": int(successes_needed),
+            "success_count": int(success_count),
+            "frame_root": self.frame_save_path,
+            "total_frames": int(self.frame_count),
+            "num_episodes": len(episode_records),
+            "episode_ranges": episode_records,
+            "created_at": datetime.now().isoformat(),
+        }
+        os.makedirs(self.frame_save_path, exist_ok=True)
+        metadata_path = os.path.join(self.frame_save_path, "recording_metadata.json")
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+        return metadata_path
 
     def save_training_frame(self):
         try:

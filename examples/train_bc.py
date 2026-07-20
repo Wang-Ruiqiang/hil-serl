@@ -1,41 +1,40 @@
 #!/usr/bin/env python3
 
 import glob
+import os
+import sys
 import time
-import os, sys, threading, queue, termios, tty, select
+
+import cv2
 import jax
 import jax.numpy as jnp
 import numpy as np
 import tqdm
 from absl import app, flags
 from flax.training import checkpoints
-import os
 import pickle as pkl
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
+from natsort import natsorted
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
 sys.path.insert(0, project_root)
-
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped
-import threading
-from std_msgs.msg import Float64MultiArray
-from sensor_msgs.msg import JointState
 
 from serl_launcher.agents.continuous.bc import BCAgent
 
 from serl_launcher.utils.launcher import (
     make_bc_agent,
-    make_trainer_config,
     make_wandb_logger,
 )
 
-# print(sys.path)
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 
 from experiments.mappings import NEW_MAPPING
 from experiments.config import DefaultTrainingConfig
-from examples.utils import read_utils
+from examples.utils.runtime import (
+    KeyReader,
+    MULTI_STAGE_EXP_NAMES,
+    STOP_COMMAND_EXP_NAMES,
+    print_green,
+)
 
 
 FLAGS = flags.FLAGS
@@ -44,14 +43,19 @@ flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folde
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_string("bc_checkpoint_path", None, "Path to save checkpoints.")
+flags.DEFINE_string("bc_checkpoint_path_pick", None, "Path to the stage-1 pick checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 0, "Number of trajectories to evaluate.")
 flags.DEFINE_integer("eval_checkpoint_step", 60000, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("train_steps", 2000000, "Number of pretraining steps.")
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
-flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
+flags.DEFINE_multi_string("demo_path", None, "Path to demo pkl file(s) or directories.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
-
-robot_urdf_path = "/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/urdf/denso_robot_with_ati_4.urdf"
+flags.DEFINE_string("wandb_project", "bc_hil_rl_comparison", "WandB project name.")
+flags.DEFINE_string(
+    "wandb_description",
+    None,
+    "WandB run descriptor. Defaults to <date>_<exp_name>_bc_demo_buffer.",
+)
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -63,106 +67,151 @@ num_devices = len(devices)
 sharding = jax.sharding.PositionalSharding(devices)
 
 
-def print_green(x):
-    return print("\033[92m {}\033[00m".format(x))
-
-
-def print_yellow(x):
-    return print("\033[93m {}\033[00m".format(x))
-
-
 ##############################################################################
 
-class KeyReader(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.q = queue.Queue()
-        self._stop = threading.Event()
-        self.fd = sys.stdin.fileno()
-        self.old = termios.tcgetattr(self.fd)
-        tty.setcbreak(self.fd)  # 立即读取，无需回车
 
-    def run(self):
-        try:
-            while not self._stop.is_set():
-                if sys.stdin in select.select([sys.stdin], [], [], 0.01)[0]:
-                    ch = sys.stdin.read(1)
-                    self.q.put(ch)
-        finally:
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
-
-    def get_key_nowait(self):
-        try:
-            return self.q.get_nowait()
-        except queue.Empty:
-            return None
-
-    def stop(self):
-        self._stop.set()
+def _iter_demo_files(paths):
+    demo_files = []
+    for path in paths or []:
+        path = os.path.expanduser(path)
+        if os.path.isdir(path):
+            path_pkls = glob.glob(os.path.join(path, "*.pkl"))
+            if not path_pkls and os.path.isdir(os.path.join(path, "demo_buffer")):
+                path = os.path.join(path, "demo_buffer")
+                path_pkls = glob.glob(os.path.join(path, "*.pkl"))
+            demo_files.extend(path_pkls)
+        else:
+            matches = glob.glob(path)
+            demo_files.extend(matches if matches else [path])
+    return natsorted(set(demo_files))
 
 
-# def eval(
-#     env,
-#     bc_agent: BCAgent,
-#     sampling_rng,
-# ):
-#     """
-#     This is the actor loop, which runs when "--actor" is set to True.
-#     """
-#     print("evaluating")
-#     ckpt = checkpoints.restore_checkpoint(
-#         os.path.abspath(FLAGS.bc_checkpoint_path),
-#         bc_agent.state,
-#         step=eval_checkpoint_step,
-#     )
+def _load_pickle_stream(path):
+    transitions = []
+    with open(path, "rb") as f:
+        while True:
+            try:
+                data = pkl.load(f)
+            except EOFError:
+                break
+            transitions.extend(data)
+    return transitions
 
-#     print_green(f"Loaded previous checkpoint at step {eval_checkpoint_step}.")
 
-#     bc_agent = bc_agent.replace(state=ckpt)
+def _resize_image_to_shape(image, target_shape):
+    if image.shape == target_shape:
+        return image
 
-#     success_counter = 0
-#     time_list = []
-#     # data, _= read_utils.read_data(robot_urdf_path, True)
-#     data_count = 0
-    
-#     obs, _ = env.reset()
-#     done = False
-#     start_time = time.time()
-#     while not done:
-#         sampling_rng, key = jax.random.split(sampling_rng)
+    target_h, target_w = target_shape[-3], target_shape[-2]
+    if image.ndim == 4:
+        resized = [
+            cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            for frame in image
+        ]
+        image = np.stack(resized, axis=0)
+    elif image.ndim == 3:
+        image = cv2.resize(image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+    else:
+        raise ValueError(f"Unsupported image shape {image.shape}; expected 3D or 4D image.")
 
-#         print("obs state = ", obs["state"])
-#         # obs = data[data_count]["observations"]
+    return image.astype(np.uint8, copy=False)
 
-#         # print("obs_read state = ", obs["state"])
-        
-#         actions = bc_agent.sample_actions(observations=obs, seed=key)
-#         actions = np.asarray(jax.device_get(actions))
-#         actions = np.array(actions, copy=True)
-        
-#         # ori_index = [3, 0, 1, 2]
-#         # tcp_ori = actions[3:7]
-#         # actions[3:7] = tcp_ori[ori_index]
-#         # actions[:3], actions[3:7] = kinematics_utils.apply_transformation(actions[:3], actions[3:7], palm_lower2denso_end_tf)
-        
-#         # actions_read = data[data_count]["actions"]
 
-#         next_obs, reward, done, truncated, info = env.step(actions)
-#         obs = next_obs
-#         if done:
-#             if reward:
-#                 dt = time.time() - start_time
-#                 time_list.append(dt)
-#                 print(dt)
-#             success_counter += reward
-#             print(reward)
-#         data_count += 1
-#         # if data_count >= len(data):
-#         #     print("eval failed")
-#         #     break
+def _normalize_transition_images(transition, observation_space, image_keys):
+    transition = transition.copy()
+    for obs_name in ("observations", "next_observations"):
+        transition[obs_name] = transition[obs_name].copy()
+        for image_key in image_keys:
+            if image_key not in transition[obs_name]:
+                continue
+            target_shape = observation_space[image_key].shape
+            transition[obs_name][image_key] = _resize_image_to_shape(
+                transition[obs_name][image_key],
+                target_shape,
+            )
+    return transition
+
+
+def _count_demo_episodes(transitions):
+    num_episodes = 0
+    num_successes = 0
+    episode_return = 0.0
+    for transition in transitions:
+        episode_return += float(transition.get("rewards", 0.0))
+        if transition.get("dones", False):
+            num_episodes += 1
+            if episode_return > 0.0:
+                num_successes += 1
+            episode_return = 0.0
+    return num_episodes, num_successes
+
+
+def _dated_run_name():
+    return f"{time.strftime('%Y-%m-%d')}_{FLAGS.exp_name}_bc_demo_buffer"
+
+
+def _is_multi_stage_task():
+    return FLAGS.exp_name in MULTI_STAGE_EXP_NAMES
+
+
+def _sample_bc_action(agent, obs, key, *, argmax):
+    actions = agent.sample_actions(
+        observations=jax.device_put(obs),
+        argmax=argmax,
+        seed=key,
+    )
+    actions = np.asarray(jax.device_get(actions)).copy()
+    actions[..., 3:6] = 0.0
+    return actions
+
+
+def _restore_bc_checkpoint(agent, path, *, step=None, label="BC checkpoint"):
+    assert path is not None, f"{label} path is required."
+    ckpt = checkpoints.restore_checkpoint(os.path.abspath(path), agent.state, step=step)
+    print_green(f"Loaded {label}{'' if step is None else f' at step {step}'}: {path}")
+    return agent.replace(state=ckpt)
+
+
+def _latest_checkpoint_step(path):
+    if path is None or not os.path.exists(path):
+        return 0
+
+    latest_ckpt = checkpoints.latest_checkpoint(os.path.abspath(path))
+    if latest_ckpt is None:
+        return 0
+
+    basename = os.path.basename(latest_ckpt)
+    if not basename.startswith("checkpoint_"):
+        return 0
+    return int(basename.replace("checkpoint_", ""))
+
+
+def _run_stage1_until_complete(agent_pick, env, obs, key):
+    actions = _sample_bc_action(agent_pick, obs, key, argmax=True)
+    next_obs, reward, done, truncated, info = env.step(actions)
+    is_pick_task = info.get("is_pick", True)
+    if not is_pick_task:
+        print_green("stage-1 pick task done")
+        return next_obs, True
+    return next_obs, False
+
+
+def _reset_eval_env(env, episode):
+    if FLAGS.exp_name in STOP_COMMAND_EXP_NAMES:
+        env.unwrapped.stop_cur_command()
+    if FLAGS.exp_name == "tube_insertion":
+        env.open_hand(steps=20, step_time=0.05)
+        time.sleep(1.5)
+    elif FLAGS.exp_name == "tennis_ball_pick":
+        env.move_up()
+    if FLAGS.save_video:
+        env.unwrapped.save_video_recording(episode)
+    input("reset env")
+    return env.reset()[0]
 
 
 def eval(env, bc_agent: BCAgent, sampling_rng):
+    key_reader = None
     try:
         print("in eval mode")
         mode = "S1_INFERENCE"
@@ -177,14 +226,17 @@ def eval(env, bc_agent: BCAgent, sampling_rng):
         # )
         # agent = bc_agent.replace(state=ckpt)
 
-        if FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap":
-            print_green("Loaded previous checkpoint at step 32000.")
-            ckpt_pick = checkpoints.restore_checkpoint(
-                os.path.abspath(FLAGS.bc_checkpoint_path_pick),
-                agent.state,
+        agent_pick = None
+        if _is_multi_stage_task():
+            assert (
+                FLAGS.bc_checkpoint_path_pick is not None
+            ), "bc_checkpoint_path_pick is required for multi-stage eval."
+            agent_pick = _restore_bc_checkpoint(
+                bc_agent,
+                FLAGS.bc_checkpoint_path_pick,
                 step=32000,
+                label="stage-1 BC checkpoint",
             )
-            agent_pick = agent.replace(state=ckpt_pick)
         
         obs, _ = env.reset()
         key_reader = KeyReader()
@@ -205,45 +257,14 @@ def eval(env, bc_agent: BCAgent, sampling_rng):
             
             while not done:
                 sampling_rng, key = jax.random.split(sampling_rng)
-                if (FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "twist_bottle_cap") and mode == "S1_INFERENCE":
-                    # -------- 阶段1：只用 agent_s1 做推理，不写入训练 buffer --------
-                    actions = agent_pick.sample_actions(
-                        observations=jax.device_put(obs),
-                        argmax=True,    
-                        seed=key
-                    )
-                    actions = np.asarray(jax.device_get(actions)).copy()
-
-                    next_obs, reward, done, truncated, info = env.step(actions)
-                    obs = next_obs
-                    if "is_pick" in info:
-                        is_pick_task = info["is_pick"]
-                    else:
-                        is_pick_task = True
-
-                    # ==== 判定任务1完成（你可替换为自己的条件）====
-                    if not is_pick_task:
-                        print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                if _is_multi_stage_task() and mode == "S1_INFERENCE":
+                    obs, stage1_done = _run_stage1_until_complete(agent_pick, env, obs, key)
+                    if stage1_done:
                         mode = "S2_TRAIN"
-                        # 可在此清零统计（可选）
-                        intervention_count = 0
-                        intervention_steps = 0
-                        already_intervened = False
-                        continue
-                    else:
-                        # 任务1未完成就继续 S1 推理
-                        continue
+                    continue
 
                 print_green(f"obs[state] =  {obs['state']}")
-                actions = agent.sample_actions(
-                    observations=jax.device_put(obs),
-                    argmax=False,
-                    seed=key
-                )
-                
-                # actions = np.asarray(jax.device_get(actions))
-                actions = np.asarray(jax.device_get(actions)).copy()
-                actions[..., 3:6] = 0.0
+                actions = _sample_bc_action(agent, obs, key, argmax=False)
 
                 print("actions = ", actions)
 
@@ -272,18 +293,8 @@ def eval(env, bc_agent: BCAgent, sampling_rng):
                     ckpt_step += 20000
                     done_by_manual = False
 
-                    if FLAGS.exp_name == "tennis_ball_pick" or FLAGS.exp_name == "tennis_ball_place" or FLAGS.exp_name == "lid_grip":
-                        env.unwrapped.stop_cur_command()
-                    if FLAGS.exp_name == "tube_insertion":
-                        env.open_hand(steps=20, step_time=0.05)
-                        time.sleep(1.5)
-                    elif FLAGS.exp_name == "tennis_ball_pick":
-                        env.move_up()
-                    if FLAGS.save_video:
-                        env.unwrapped.save_video_recording(episode)
                     mode = "S1_INFERENCE"
-                    input("reset env")
-                    obs, _ = env.reset()
+                    obs = _reset_eval_env(env, episode)
 
         print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
         print(f"average time: {np.mean(time_list)}")
@@ -292,9 +303,8 @@ def eval(env, bc_agent: BCAgent, sampling_rng):
     except KeyboardInterrupt:
         pass
     finally:
-        # env.save_all_data_on_exit()
-        # env.close()
-        return
+        if key_reader is not None:
+            key_reader.stop()
 
 ##############################################################################
 
@@ -303,6 +313,7 @@ def train(
     bc_agent: BCAgent,
     bc_replay_buffer,
     config: DefaultTrainingConfig,
+    start_step=0,
     wandb_logger=None,
 ):
 
@@ -316,7 +327,9 @@ def train(
     
     # Pretrain BC policy to get started
     for step in tqdm.tqdm(
-        range(FLAGS.train_steps),
+        range(start_step, FLAGS.train_steps),
+        initial=start_step,
+        total=FLAGS.train_steps,
         dynamic_ncols=True,
         desc="bc_pretraining",
     ):
@@ -337,18 +350,20 @@ def train(
             checkpoints.save_checkpoint(
                 os.path.abspath(FLAGS.bc_checkpoint_path), bc_agent.state, step=step, keep=100
             )
-    print_green("bc pretraining done and saved checkpoint")
+    print_green("bc pretraining done")
 
 
 ##############################################################################
 
 
 def main(_):
+    assert FLAGS.exp_name in NEW_MAPPING, "Experiment folder not found."
     config = NEW_MAPPING[FLAGS.exp_name]()
 
     assert config.batch_size % num_devices == 0
-    assert FLAGS.exp_name in NEW_MAPPING, "Experiment folder not found."
     eval_mode = FLAGS.eval_n_trajs > 0
+    run_name = FLAGS.wandb_description or _dated_run_name()
+    bc_checkpoint_path = FLAGS.bc_checkpoint_path or run_name
  
     env = config.get_environment(
         fake_env=not eval_mode,
@@ -362,10 +377,6 @@ def main(_):
     action_std =  [0.09939767, 0.20337829, 0.08846061 ]
 
     if not eval_mode:
-        assert not os.path.isdir(
-            os.path.join(FLAGS.bc_checkpoint_path, f"checkpoint_{FLAGS.train_steps}")
-        )
-
         bc_replay_buffer = MemoryEfficientReplayBufferDataStore(
             env.observation_space,
             env.action_space,
@@ -375,39 +386,61 @@ def main(_):
 
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="bc_ball_pick-4-6",
-            description=FLAGS.exp_name,
+            project=FLAGS.wandb_project,
+            description=run_name,
             debug=FLAGS.debug,
         )
+        FLAGS.bc_checkpoint_path = bc_checkpoint_path
+        print_green(f"BC checkpoint path: {FLAGS.bc_checkpoint_path}")
+        print_green(f"WandB run name: {run_name}")
 
 
         # all_actions = []  # 存储所有动作
         assert FLAGS.demo_path is not None
-        for path in FLAGS.demo_path:
-            # with open(path, "rb") as f:
-            #     transitions = []
-            #     while True:
-            #         try:
-            #             transitions.extend(pkl.load(f))  # 读取并扩展列表
-            #         except EOFError:
-            #             break  # 读取结束
-            #     for transition in transitions:
-            #         bc_replay_buffer.insert(transition)
-             with open(path, "rb") as f:
-                transitions = pkl.load(f)
-                for transition in transitions:
-                    bc_replay_buffer.insert(transition)
+        demo_files = _iter_demo_files(FLAGS.demo_path)
+        assert demo_files, f"No demo pkl files found from --demo_path={FLAGS.demo_path}"
+        total_transitions = 0
+        total_episodes = 0
+        total_successes = 0
+        for path in demo_files:
+            transitions = _load_pickle_stream(path)
+            num_episodes, num_successes = _count_demo_episodes(transitions)
+            total_transitions += len(transitions)
+            total_episodes += num_episodes
+            total_successes += num_successes
+            print_green(
+                f"Loaded {len(transitions)} transitions, "
+                f"{num_successes}/{num_episodes} successful demos from {path}"
+            )
+            for transition in transitions:
+                transition = _normalize_transition_images(
+                    transition,
+                    env.observation_space,
+                    config.image_keys,
+                )
+                bc_replay_buffer.insert(transition)
+        print_green(
+            f"Loaded demo summary: {total_transitions} transitions, "
+            f"{total_successes}/{total_episodes} successful demos"
+        )
 
         if FLAGS.bc_checkpoint_path is not None and os.path.exists(
             os.path.join(FLAGS.bc_checkpoint_path, "demo_buffer")
         ):
-            for file in glob.glob(
-                os.path.join(FLAGS.bc_checkpoint_path, "demo_buffer/*.pkl")
-            ):
-                with open(file, "rb") as f:
-                    transitions = pkl.load(f)
-                    for transition in transitions:
-                        bc_replay_buffer.insert(transition)
+            for file in _iter_demo_files([os.path.join(FLAGS.bc_checkpoint_path, "demo_buffer")]):
+                transitions = _load_pickle_stream(file)
+                num_episodes, num_successes = _count_demo_episodes(transitions)
+                print_green(
+                    f"Loaded resume demo buffer: {len(transitions)} transitions, "
+                    f"{num_successes}/{num_episodes} successful demos from {file}"
+                )
+                for transition in transitions:
+                    transition = _normalize_transition_images(
+                        transition,
+                        env.observation_space,
+                        config.image_keys,
+                    )
+                    bc_replay_buffer.insert(transition)
         print_green(f"bc_replay_buffer size: {len(bc_replay_buffer)}")
 
         # all_actions = np.array(all_actions)
@@ -429,11 +462,27 @@ def main(_):
             jax.tree_util.tree_map(jnp.array, bc_agent), sharding.replicate()
     )   
 
+        start_step = _latest_checkpoint_step(FLAGS.bc_checkpoint_path)
+        if start_step > 0:
+            bc_agent = _restore_bc_checkpoint(
+                bc_agent,
+                FLAGS.bc_checkpoint_path,
+                step=start_step,
+                label="BC resume checkpoint",
+            )
+            start_step += 1
+            print_green(f"Resuming BC training from step {start_step}.")
+
+        assert (
+            start_step < FLAGS.train_steps
+        ), f"Latest checkpoint step {start_step - 1} is already >= train_steps={FLAGS.train_steps}."
+
         # learner loop
         print_green("starting learner loop")
         train(
             bc_agent=bc_agent,
             bc_replay_buffer=bc_replay_buffer,
+            start_step=start_step,
             wandb_logger=wandb_logger,
             config=config,
         )

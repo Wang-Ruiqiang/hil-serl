@@ -1,4 +1,4 @@
-import os, sys
+import os
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -92,7 +92,15 @@ class TrainConfig(DefaultTrainingConfig):
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=True):
+    def get_environment(
+        self,
+        fake_env=False,
+        save_video=False,
+        classifier=False,
+        enable_tactile=True,
+        record_data=False,
+        frame_save_path=None,
+    ):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
 
@@ -112,6 +120,8 @@ class TrainConfig(DefaultTrainingConfig):
             fake_env=fake_env,
             save_video=save_video,
             config=env_config,
+            record_data=record_data,
+            frame_save_path=frame_save_path,
         )
         # env = GripperCloseEnv(env)
         if not fake_env:

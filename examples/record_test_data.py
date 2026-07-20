@@ -110,8 +110,8 @@ def main(_):
                 if not os.path.isdir(current_frame_path) or not os.path.isdir(next_frame_path):
                     continue
 
-                obs, is_record_success = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
-                next_obs, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
+                obs, is_record_success, _ = read_utils.get_frame_data(current_frame_path, FLAGS.robot_urdf_path)
+                next_obs, _, _ = read_utils.get_frame_data(next_frame_path, FLAGS.robot_urdf_path)
                 reward = comupute_reward(obs, classifier)
                 done = reward or terminate
 

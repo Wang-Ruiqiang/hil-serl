@@ -1,8 +1,5 @@
-import copy
 import time
-from scipy.spatial.transform import Rotation as R
 import numpy as np
-import requests
 from typing import OrderedDict
 import gymnasium as gym
 

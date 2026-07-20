@@ -101,7 +101,15 @@ class TrainConfig(DefaultTrainingConfig):
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
 
-    def get_environment(self, fake_env=False, save_video=False, classifier=False, enable_tactile=False):
+    def get_environment(
+        self,
+        fake_env=False,
+        save_video=False,
+        classifier=False,
+        enable_tactile=False,
+        record_data=False,
+        frame_save_path=None,
+    ):
         env_config = EnvConfig()
         env_config.ENABLE_TACTILE = enable_tactile
         if enable_tactile:
@@ -123,6 +131,8 @@ class TrainConfig(DefaultTrainingConfig):
             fake_env=fake_env,
             save_video=save_video,
             config=env_config,
+            record_data=record_data,
+            frame_save_path=frame_save_path,
         )
         # env = GripperCloseEnv(env)
         if not fake_env:
@@ -192,7 +202,4 @@ class TrainConfig(DefaultTrainingConfig):
                 # return reward
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
-        
-        if not fake_env:
-            env = KeyboardIntervention(env)
         return env

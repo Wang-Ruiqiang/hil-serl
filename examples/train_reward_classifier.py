@@ -1,193 +1,237 @@
+#!/usr/bin/env python3
+
 import glob
-import os, sys
+import os
 import pickle as pkl
-import jax
-from jax import numpy as jnp
+from collections import OrderedDict
+
 import flax.linen as nn
-from flax.training import checkpoints
+import gymnasium as gym
+import jax
 import numpy as np
 import optax
-from tqdm import tqdm
 from absl import app, flags
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
+from flax.training import checkpoints
+from jax import numpy as jnp
+from tqdm import tqdm
 
 from serl_launcher.data.data_store import ReplayBuffer
+from serl_launcher.networks.reward_classifier import create_classifier
 from serl_launcher.utils.train_utils import concat_batches
 from serl_launcher.vision.data_augmentations import batched_random_crop
-from serl_launcher.networks.reward_classifier import create_classifier
-
-
-from experiments.mappings import NEW_MAPPING
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
-flags.DEFINE_integer("is_pick_task", 1, "evaluate pick or place task.")
-flags.DEFINE_integer("is_place_task", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("is_tube_pick", 0, "evaluate pick or place task.")
-flags.DEFINE_integer("enable_tactile", 0, "evaluate pick or place task.")
+flags.DEFINE_enum("classifier_task", "", ["", "pick", "place", "lid_grip", "bottle_twist", "tube_pick", "tube_insertion"], "Classifier stage.")
+flags.DEFINE_integer("is_pick_task", 1, "Deprecated tennis-ball pick flag.")
+flags.DEFINE_integer("is_place_task", 0, "Deprecated tennis-ball place flag.")
+flags.DEFINE_integer("is_tube_pick", 0, "Deprecated tube-pick flag.")
+flags.DEFINE_integer("enable_tactile", 0, "Whether tactile_data is included.")
+flags.DEFINE_multi_string("image_key", None, "Override classifier image keys.")
+flags.DEFINE_string("data_dir", "", "Directory containing *success*.pkl and *failure*.pkl.")
+flags.DEFINE_string("checkpoint_dir", "", "Output checkpoint directory.")
+
+
+def _classifier_task():
+    if FLAGS.classifier_task:
+        return FLAGS.classifier_task
+    if FLAGS.exp_name == "twist_bottle_cap":
+        return "bottle_twist"
+    if FLAGS.exp_name == "lid_grip":
+        return "lid_grip"
+    if FLAGS.exp_name == "tube_insertion":
+        return "tube_pick" if FLAGS.is_tube_pick else "tube_insertion"
+    if FLAGS.exp_name == "tennis_ball_pick":
+        return "place" if FLAGS.is_place_task else "pick"
+    return FLAGS.exp_name
+
+
+def _data_dir_name():
+    task = _classifier_task()
+    suffix = "_no_tactile" if not FLAGS.enable_tactile else ""
+    return f"classifier_data_{task}{suffix}"
+
+
+def _checkpoint_dir_name():
+    task = _classifier_task()
+    tactile = bool(FLAGS.enable_tactile)
+    if FLAGS.exp_name == "tennis_ball_pick":
+        name = "classifier_ckpt_ball_place" if task == "place" else "classifier_ckpt_ball_pick"
+        return os.path.join("tennis_ball_pick_classifier", f"{name}{'' if tactile else '_no_tactile'}")
+    if FLAGS.exp_name == "tube_insertion":
+        name = "classifier_ckpt_tube_pick" if task == "tube_pick" else "classifier_ckpt_tube_insertion"
+        return os.path.join("tube_insertion_classifier", f"{name}{'' if tactile else '_no_tactile'}")
+    if FLAGS.exp_name == "twist_bottle_cap":
+        name = "classifier_ckpt_bottle_twist"
+        return f"{name}{'' if tactile else '_no_tactile'}"
+    if FLAGS.exp_name == "lid_grip":
+        name = "classifier_ckpt_lid_grip"
+        return f"{name}{'' if tactile else '_no_tactile'}"
+    return f"classifier_ckpt_{task}{'' if tactile else '_no_tactile'}"
+
+
+def _resolve_examples_path(path, default_name):
+    examples_dir = os.path.dirname(os.path.abspath(__file__))
+    if path:
+        return os.path.abspath(os.path.expanduser(path))
+    return os.path.join(examples_dir, default_name)
+
+
+def _resolve_default_data_dir():
+    examples_dir = os.path.dirname(os.path.abspath(__file__))
+    if FLAGS.data_dir:
+        return os.path.abspath(os.path.expanduser(FLAGS.data_dir))
+    default_name = _data_dir_name()
+    reward_classifier_dir = os.path.join(examples_dir, "reward_classifier", default_name)
+    legacy_dir = os.path.join(examples_dir, default_name)
+    return reward_classifier_dir if os.path.exists(reward_classifier_dir) else legacy_dir
+
+
+def _load_pickle_stream(path):
+    data = []
+    with open(path, "rb") as f:
+        while True:
+            try:
+                data.extend(pkl.load(f))
+            except EOFError:
+                break
+    return data
+
+
+def _infer_image_keys(observation):
+    if FLAGS.image_key:
+        return list(FLAGS.image_key)
+    preferred_order = ("front_camera", "wrist_camera", "tactile_data", "front_classifier")
+    image_keys = [key for key in preferred_order if key in observation]
+    image_keys.extend(
+        key
+        for key, value in observation.items()
+        if key not in image_keys
+        and key != "state"
+        and getattr(np.asarray(value), "ndim", 0) >= 3
+    )
+    if not image_keys:
+        raise ValueError(f"Could not infer image keys from observation keys: {list(observation.keys())}")
+    return image_keys
+
+
+def _space_from_array(value, *, add_history_dim=False):
+    value = np.asarray(value)
+    shape = value.shape
+    if add_history_dim:
+        shape = (1, *shape)
+    if value.dtype == np.uint8:
+        return gym.spaces.Box(
+            low=np.zeros(shape, dtype=np.uint8),
+            high=np.full(shape, 255, dtype=np.uint8),
+            dtype=np.uint8,
+        )
+    dtype = np.float32 if np.issubdtype(value.dtype, np.floating) else value.dtype
+    return gym.spaces.Box(
+        low=np.full(shape, -np.inf, dtype=dtype),
+        high=np.full(shape, np.inf, dtype=dtype),
+        dtype=dtype,
+    )
+
+
+def _make_spaces_from_transition(transition):
+    obs_spaces = OrderedDict()
+    for key, value in transition["observations"].items():
+        value = np.asarray(value)
+        add_history_dim = value.ndim in (1, 3)
+        obs_spaces[key] = _space_from_array(value, add_history_dim=add_history_dim)
+    action = np.asarray(transition["actions"], dtype=np.float32)
+    action_space = gym.spaces.Box(
+        low=np.full(action.shape, -np.inf, dtype=np.float32),
+        high=np.full(action.shape, np.inf, dtype=np.float32),
+        dtype=np.float32,
+    )
+    return gym.spaces.Dict(obs_spaces), action_space
+
+
+def _load_classifier_data(data_dir):
+    success_paths = glob.glob(os.path.join(data_dir, "*success*.pkl"))
+    failure_paths = glob.glob(os.path.join(data_dir, "*failure*.pkl"))
+    if not success_paths:
+        raise FileNotFoundError(f"No success pkl files found in {data_dir}")
+    if not failure_paths:
+        raise FileNotFoundError(f"No failure pkl files found in {data_dir}")
+    success_data = []
+    for path in success_paths:
+        success_data.extend(_load_pickle_stream(path))
+    failure_data = []
+    for path in failure_paths:
+        failure_data.extend(_load_pickle_stream(path))
+    if not success_data:
+        raise ValueError(f"No success transitions loaded from {data_dir}")
+    if not failure_data:
+        raise ValueError(f"No failure transitions loaded from {data_dir}")
+    return success_data, failure_data, success_paths, failure_paths
 
 
 def main(_):
-    assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
-    config = NEW_MAPPING[FLAGS.exp_name]()
-    env = config.get_environment(fake_env=True, save_video=False, classifier=False, enable_tactile=FLAGS.enable_tactile)
-
     devices = jax.local_devices()
     sharding = jax.sharding.PositionalSharding(devices)
-    
-    # stack_observation_space = space_stack(observation_space, 1)
-    
-    # Create buffer for positive transitions
-    # print("env.action_space shape= ", env.action_space.shape)
-    # print("env.observation_space shape= ", env.observation_space["state"].shape)
+
+    data_dir = _resolve_default_data_dir()
+    success_data, failure_data, success_paths, failure_paths = _load_classifier_data(data_dir)
+    image_keys = _infer_image_keys(success_data[0]["observations"])
+    observation_space, action_space = _make_spaces_from_transition(success_data[0])
+
+    print(f"[source] data_dir={data_dir}")
+    print(f"[source] classifier_task={_classifier_task()}")
+    print(f"[source] success_files={len(success_paths)} failure_files={len(failure_paths)}")
+    print(f"[source] success={len(success_data)} failure={len(failure_data)}")
+    print(f"[source] image_keys={image_keys}")
+    print(f"[source] state_shape={observation_space['state'].shape}")
+
     pos_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
-        capacity=10000,
+        observation_space=observation_space,
+        action_space=action_space,
+        capacity=max(len(success_data), 1),
         include_label=True,
     )
-    
-    if FLAGS.exp_name == "twist_bottle_cap":
-        if FLAGS.enable_tactile:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*success*.pkl"))
-        else:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist_no_tactile", "*success*.pkl"))
-    elif FLAGS.exp_name == "lid_grip":
-        if FLAGS.enable_tactile:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip", "*success*.pkl"))
-        else:
-            success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip_no_tactile", "*success*.pkl"))
-    elif FLAGS.exp_name == "tube_insertion":
-        if FLAGS.enable_tactile:
-            if FLAGS.is_tube_pick:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick", "*success*.pkl"))
-            else:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion", "*success*.pkl"))
-        else:
-            if FLAGS.is_tube_pick:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick_no_tactile", "*success*.pkl"))
-            else:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion_no_tactile", "*success*.pkl"))
-    elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.enable_tactile:
-            if FLAGS.is_place_task:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*success*.pkl"))
-            elif FLAGS.is_pick_task:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*success*.pkl"))
-        else:
-            if FLAGS.is_place_task:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place_no_tactile", "*success*.pkl"))
-            elif FLAGS.is_pick_task:
-                success_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick_no_tactile", "*success*.pkl"))
+    for transition in success_data:
+        transition["labels"] = 1
+        pos_buffer.insert(transition)
 
-    for path in success_paths:
-        success_data = []
-        with open(path, "rb") as f:
-            while True:
-                try:
-                    success_data.extend(pkl.load(f))
-                except EOFError:  # 读取完毕
-                        break
-            
-            for trans in success_data:
-                trans["labels"] = 1
-                # print("trans keys= ",trans["observations"].keys())
-                # print("trans tactile_data shape=", trans["observations"]["tactile_data"].shape)
-                pos_buffer.insert(trans)
-            
-    pos_iterator = pos_buffer.get_iterator(
-        sample_args={
-            "batch_size": FLAGS.batch_size // 2,
-        },
-        device=sharding.replicate(),
-    )
-    
-    # Create buffer for negative transitions
     neg_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
-        capacity=10000,
+        observation_space=observation_space,
+        action_space=action_space,
+        capacity=max(len(failure_data), 1),
         include_label=True,
     )
+    for transition in failure_data:
+        transition["labels"] = 0
+        neg_buffer.insert(transition)
 
-    if FLAGS.exp_name == "twist_bottle_cap":
-        if FLAGS.enable_tactile:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist", "*failure*.pkl"))
-        else:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_bottle_twist_no_tactile", "*failure*.pkl"))
-    elif FLAGS.exp_name == "lid_grip":
-        if FLAGS.enable_tactile:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip", "*failure*.pkl"))
-        else:
-            failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_lid_grip_no_tactile", "*failure*.pkl"))
-    elif FLAGS.exp_name == "tube_insertion":
-        if FLAGS.enable_tactile:
-            if FLAGS.is_tube_pick:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick", "*failure*.pkl"))
-            else:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion", "*failure*.pkl"))
-        else:
-            if FLAGS.is_tube_pick:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_pick_no_tactile", "*failure*.pkl"))
-            else:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_tube_insertion_no_tactile", "*failure*.pkl"))
-    elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.enable_tactile:
-            if FLAGS.is_place_task:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place", "*failure*.pkl"))
-            elif FLAGS.is_pick_task:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick", "*failure*.pkl"))
-        else:
-            if FLAGS.is_place_task:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_place_no_tactile", "*failure*.pkl"))
-            elif FLAGS.is_pick_task:
-                failure_paths = glob.glob(os.path.join(os.getcwd(), "classifier_data_pick_no_tactile", "*failure*.pkl"))
-
-    for path in failure_paths:
-         failure_data = []
-         with open(path, "rb") as f:
-            while True:
-                try:
-                    failure_data.extend(pkl.load(f))
-                except EOFError:  # 读取完毕
-                    break
-            for trans in failure_data:
-                trans["labels"] = 0
-                neg_buffer.insert(trans)
-            
-    neg_iterator = neg_buffer.get_iterator(
-        sample_args={
-            "batch_size": FLAGS.batch_size // 2,
-        },
+    pos_iterator = pos_buffer.get_iterator(
+        sample_args={"batch_size": FLAGS.batch_size // 2},
         device=sharding.replicate(),
     )
-
-    print(f"failed buffer size: {len(neg_buffer)}")
-    print(f"success buffer size: {len(pos_buffer)}")
+    neg_iterator = neg_buffer.get_iterator(
+        sample_args={"batch_size": FLAGS.batch_size // 2},
+        device=sharding.replicate(),
+    )
 
     rng = jax.random.PRNGKey(0)
     rng, key = jax.random.split(rng)
-    pos_sample = next(pos_iterator)
-    neg_sample = next(neg_iterator)
-    sample = concat_batches(pos_sample, neg_sample, axis=0)
-    print("config.classifier_keys = ", config.classifier_keys)
-
-    rng, key = jax.random.split(rng)
-    classifier = create_classifier(key, 
-                                   sample["observations"], 
-                                   config.classifier_keys,
-                                   )
+    sample = concat_batches(next(pos_iterator), next(neg_iterator), axis=0)
+    classifier = create_classifier(key, sample["observations"], image_keys)
 
     def data_augmentation_fn(rng, observations):
-        for pixel_key in config.classifier_keys:
+        for pixel_key in image_keys:
+            num_batch_dims = 2 if observations[pixel_key].ndim == 5 else 1
             observations = observations.copy(
                 add_or_replace={
                     pixel_key: batched_random_crop(
-                        observations[pixel_key], rng, padding=4, num_batch_dims=2
+                        observations[pixel_key],
+                        rng,
+                        padding=4,
+                        num_batch_dims=num_batch_dims,
                     )
                 }
             )
@@ -197,137 +241,45 @@ def main(_):
     def train_step(state, batch, key):
         def loss_fn(params):
             logits = state.apply_fn(
-                {"params": params}, batch["observations"], rngs={"dropout": key}, train=True
+                {"params": params},
+                batch["observations"],
+                rngs={"dropout": key},
+                train=True,
             )
             return optax.sigmoid_binary_cross_entropy(logits, batch["labels"]).mean()
 
-        grad_fn = jax.value_and_grad(loss_fn)
-        loss, grads = grad_fn(state.params)
+        loss, grads = jax.value_and_grad(loss_fn)(state.params)
         logits = state.apply_fn(
-            {"params": state.params}, batch["observations"], train=False, rngs={"dropout": key}
+            {"params": state.params},
+            batch["observations"],
+            train=False,
+            rngs={"dropout": key},
         )
         train_accuracy = jnp.mean((nn.sigmoid(logits) >= 0.95) == batch["labels"])
-
         return state.apply_gradients(grads=grads), loss, train_accuracy
 
     for epoch in tqdm(range(FLAGS.num_epochs)):
-        # Sample equal number of positive and negative examples
-        pos_sample = next(pos_iterator)
-        neg_sample = next(neg_iterator)
-        # Merge and create labels
-        batch = concat_batches(
-            pos_sample, neg_sample, axis=0
-        )
+        batch = concat_batches(next(pos_iterator), next(neg_iterator), axis=0)
         rng, key = jax.random.split(rng)
-        obs = data_augmentation_fn(key, batch["observations"])
         batch = batch.copy(
             add_or_replace={
-                "observations": obs,
+                "observations": data_augmentation_fn(key, batch["observations"]),
                 "labels": batch["labels"][..., None],
             }
         )
-            
         rng, key = jax.random.split(rng)
         classifier, train_loss, train_accuracy = train_step(classifier, batch, key)
+        print(f"Epoch: {epoch + 1}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}")
 
-        print(
-            f"Epoch: {epoch+1}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}"
-        )
+    checkpoint_dir = _resolve_examples_path(FLAGS.checkpoint_dir, _checkpoint_dir_name())
+    checkpoints.save_checkpoint(
+        checkpoint_dir,
+        classifier,
+        step=FLAGS.num_epochs,
+        overwrite=True,
+    )
+    print(f"[done] checkpoint_dir={checkpoint_dir}")
 
-    if FLAGS.exp_name == "twist_bottle_cap":
-        if FLAGS.enable_tactile:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_bottle_twist/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
-        else:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_bottle_twist_no_tactile/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
-    elif FLAGS.exp_name == "lid_grip":
-        if FLAGS.enable_tactile:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_lid_grip/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
-        else:
-            checkpoints.save_checkpoint(
-                os.path.join(os.getcwd(), "classifier_ckpt_lid_grip_no_tactile/"),
-                classifier,
-                step=FLAGS.num_epochs,
-                overwrite=True,
-            )
-    elif FLAGS.exp_name == "tube_insertion":
-        if FLAGS.enable_tactile:
-            if FLAGS.is_tube_pick:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_tube_pick/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-            else:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_tube_insertion/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-        else:
-            if FLAGS.is_tube_pick:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_tube_pick_no_tactile/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-            else:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_tube_insertion_no_tactile/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-    elif FLAGS.exp_name == "tennis_ball_pick":
-        if FLAGS.enable_tactile:
-            if FLAGS.is_place_task:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_ball_place/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-            elif FLAGS.is_pick_task:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_ball_pick/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-        else:
-            if FLAGS.is_place_task:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_ball_place_no_tactile/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-            elif FLAGS.is_pick_task:
-                checkpoints.save_checkpoint(
-                    os.path.join(os.getcwd(), "classifier_ckpt_ball_pick_no_tactile/"),
-                    classifier,
-                    step=FLAGS.num_epochs,
-                    overwrite=True,
-                )
-    # env.close()
-    
 
 if __name__ == "__main__":
     app.run(main)
