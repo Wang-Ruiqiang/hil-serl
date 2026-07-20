@@ -39,9 +39,23 @@ class DefaultTrainingConfig:
     # front_camera_mask. Plain vision+tactile SAC ignores these values.
 
     # Enable a small trainable mask feature head on top of front_camera
-    # features. Its output is used for fused-feature visualization and
-    # mask_grounding_loss.
+    # features. By convention, the head uses front_camera_mask1 when available
+    # so it can learn target-focused RGB features. Its logits are also the map
+    # supervised by mask_grounding_loss.
     use_mask_feature_head: bool = True
+
+    # If False, mask suppression, mask feature head, and mask grounding are active
+    # whenever their masks are present. This is the tennis_ball_pick behavior.
+    #
+    # If True, the encoder reads the final three state entries as phase one-hot:
+    #   [1, 0, 0] = pick / mask1 target
+    #   [0, 1, 0] = place / mask2 target
+    #   [0, 0, 1] = no selected target
+    # In pick phase, mask2 suppression, mask feature head, and mask grounding are
+    # enabled. In place phase, those RGB-shaping losses/heads are gated off so
+    # the RGB branch falls back to raw ResNet features. The mask CNN still uses
+    # front_camera_mask, i.e. the currently selected target mask.
+    mask_pick_place_phase_control: bool = False
 
     # Strength of the trainable mask feature gate. The learned gate can both
     # amplify selected regions and suppress less useful regions.
@@ -55,14 +69,24 @@ class DefaultTrainingConfig:
     # capacity setting; most tasks should leave it at the default.
     mask_feature_hidden_dim: int = 128
 
-    # Encode the selected binary mask with a small CNN and concatenate that
-    # vector as an additional policy/critic modality.
+    # Encode a binary mask with a small CNN and concatenate the resulting vector
+    # as an additional policy/critic modality. The mask CNN uses front_camera_mask
+    # when available, so pick-and-place can pass the currently selected target
+    # (ball during pick, box during place). If front_camera_mask is absent, it
+    # falls back to the same mask used by the mask feature head.
     use_mask_encoder: bool = True
     mask_encoder_latent_dim: int = 64
 
     # Weight for the auxiliary loss that pulls the trainable mask feature map into
-    # front_camera_mask. 0 disables this auxiliary supervision.
+    # mask_grounding_key. 0 disables this auxiliary supervision.
     mask_grounding_weight: float = 0.0
+
+    # Observation key used as the target mask for CGL / mask grounding. For
+    # tennis_ball_pick and tennis_ball_pick_and_place this should stay as
+    # front_camera_mask1, so the mask feature head is supervised to focus on the
+    # ball. When mask_pick_place_phase_control=True, this loss is automatically
+    # applied only in pick phase.
+    mask_grounding_key: str = "front_camera_mask"
 
     # Optional step-based decay for mask_grounding_weight. This lets the mask
     # strongly shape mask features early, then reduce its influence after the

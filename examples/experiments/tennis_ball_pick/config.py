@@ -112,6 +112,7 @@ class TrainConfig(DefaultTrainingConfig):
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
+    mask_pick_place_phase_control = False
     mask_suppress_beta = 1.0
     use_mask_feature_head = True
     mask_feature_gate_alpha = 0.9

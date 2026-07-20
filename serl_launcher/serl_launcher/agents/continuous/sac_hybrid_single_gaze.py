@@ -200,10 +200,25 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         ).astype(attention_map.dtype)
         return mask
 
+    def _pick_phase_gate_per_sample(self, observations, batch_size: int, dtype):
+        if not self.config.get("mask_pick_place_phase_control", False):
+            return jnp.ones((batch_size,), dtype=dtype)
+        state = observations.get("state")
+        if state is None:
+            return jnp.ones((batch_size,), dtype=dtype)
+        state = jnp.asarray(state)
+        if state.shape[-1] < 3:
+            return jnp.ones((batch_size,), dtype=dtype)
+        if state.ndim == 3:
+            phase = state[:, -1, -3:]
+        else:
+            phase = state[:, -3:]
+        return phase[..., 0].astype(dtype)
+
     def _mask_grounding_loss(self, observations, attention_map):
         key = self.config["mask_grounding_key"]
+        batch_size = attention_map.shape[0]
         if key not in observations:
-            batch_size = attention_map.shape[0]
             zeros = jnp.zeros((batch_size,), dtype=attention_map.dtype)
             return zeros, zeros, zeros, zeros, zeros
 
@@ -218,6 +233,12 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         )
         mask_sum = jnp.sum(mask_flat, axis=-1, keepdims=True)
         valid_mask = (mask_sum[:, 0] > 0).astype(attention_map.dtype)
+        phase_gate = self._pick_phase_gate_per_sample(
+            observations,
+            batch_size,
+            attention_map.dtype,
+        )
+        valid_mask = valid_mask * phase_gate
         gaze_distribution = mask_flat / jnp.maximum(mask_sum, 1e-8)
         cgl_loss = jnp.sum(
             gaze_distribution
@@ -502,6 +523,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         mask_feature_hidden_dim: int = 128,
         use_mask_encoder: bool = True,
         mask_encoder_latent_dim: int = 64,
+        mask_pick_place_phase_control: bool = False,
         return_raw_attention: bool = False,
         return_mask_encoder_attention: bool = False,
         mask_grounding_weight: float = 0.0,
@@ -519,11 +541,27 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             kwargs.get("critic_optimizer_kwargs", {"learning_rate": 3e-4}),
         )
 
-        mask_target_pairs = (
-            (("front_camera", "front_camera_mask1"),)
+        image_keys = tuple(image_keys)
+        head_mask_key = (
+            "front_camera_mask1"
             if "front_camera_mask1" in image_keys
-            else (("front_camera", "front_camera_mask"),)
+            else "front_camera_mask"
             if "front_camera_mask" in image_keys
+            else None
+        )
+        mask_cnn_key = (
+            "front_camera_mask"
+            if "front_camera_mask" in image_keys
+            else head_mask_key
+        )
+        mask_target_pairs = (
+            (("front_camera", head_mask_key),)
+            if head_mask_key in image_keys
+            else ()
+        )
+        mask_encoder_pairs = (
+            (("front_camera", mask_cnn_key),)
+            if mask_cnn_key in image_keys
             else ()
         )
         mask_suppress_pairs = (
@@ -532,11 +570,14 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             else ()
         )
         mask_target_keys = {mask_key for _, mask_key in mask_target_pairs}
+        mask_encoder_keys = {mask_key for _, mask_key in mask_encoder_pairs}
         mask_suppress_keys = {mask_key for _, mask_key in mask_suppress_pairs}
         encoder_image_keys = [
             key
             for key in image_keys
-            if key not in mask_target_keys and key not in mask_suppress_keys
+            if key not in mask_target_keys
+            and key not in mask_encoder_keys
+            and key not in mask_suppress_keys
         ]
 
         if encoder_type == "resnet":
@@ -585,6 +626,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             # pass that camera key through the launcher/config instead of front_camera.
             attention_image_key=gaze_attention_image_key,
             mask_target_pairs=mask_target_pairs,
+            mask_encoder_pairs=mask_encoder_pairs,
             mask_suppress_pairs=mask_suppress_pairs,
             mask_suppress_beta=mask_suppress_beta,
             use_mask_feature_head=use_mask_feature_head,
@@ -593,6 +635,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             mask_feature_hidden_dim=mask_feature_hidden_dim,
             use_mask_encoder=use_mask_encoder,
             mask_encoder_latent_dim=mask_encoder_latent_dim,
+            mask_pick_place_phase_control=mask_pick_place_phase_control,
             return_raw_attention=return_raw_attention,
             return_mask_encoder_attention=return_mask_encoder_attention,
         )

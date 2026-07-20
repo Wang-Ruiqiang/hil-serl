@@ -24,6 +24,7 @@ class EncodingWrapper(nn.Module):
     image_keys: Iterable[str] = ("image",)
     attention_image_key: Optional[str] = "front_camera"
     mask_target_pairs: Tuple[Tuple[str, str], ...] = ()
+    mask_encoder_pairs: Tuple[Tuple[str, str], ...] = ()
     mask_suppress_pairs: Tuple[Tuple[str, str], ...] = ()
     mask_suppress_beta: float = 1.0
     use_mask_feature_head: bool = False
@@ -32,6 +33,7 @@ class EncodingWrapper(nn.Module):
     mask_feature_min_gate: float = 0.1
     use_mask_encoder: bool = True
     mask_encoder_latent_dim: int = 64
+    mask_pick_place_phase_control: bool = False
     return_raw_attention: bool = False
     return_mask_encoder_attention: bool = False
     # state_weights: Optional[Iterable[float]] = None
@@ -88,6 +90,27 @@ class EncodingWrapper(nn.Module):
         suppress_gate = 1.0 - self.mask_suppress_beta * mask
         suppress_gate = jnp.clip(suppress_gate, 0.0, 1.0)
         return spatial_features * suppress_gate
+
+    def _pick_phase_gate(self, observations, dtype=jnp.float32):
+        if not self.mask_pick_place_phase_control:
+            return jnp.asarray(1.0, dtype=dtype)
+        state = observations.get("state")
+        if state is None:
+            return jnp.asarray(1.0, dtype=dtype)
+        state = jnp.asarray(state)
+        if state.shape[-1] < 3:
+            return jnp.asarray(1.0, dtype=dtype)
+        if state.ndim >= 3:
+            phase = state[:, -1, -3:] if state.ndim == 3 else state[..., -1, -3:]
+        else:
+            phase = state[..., -3:]
+        return phase[..., 0].astype(dtype)
+
+    def _broadcast_gate(self, gate, target):
+        gate = jnp.asarray(gate, dtype=target.dtype)
+        while gate.ndim < target.ndim:
+            gate = gate[..., None]
+        return gate
 
     def _mask_encoder_feature(
         self,
@@ -208,8 +231,13 @@ class EncodingWrapper(nn.Module):
         selected_attention_map = None
         selected_cgl_attention_map = None
         mask_target_pairs = dict(self.mask_target_pairs)
+        mask_encoder_pairs = dict(self.mask_encoder_pairs)
         mask_suppress_pairs = dict(self.mask_suppress_pairs)
-        mask_keys = set(mask_target_pairs.values()) | set(mask_suppress_pairs.values())
+        mask_keys = (
+            set(mask_target_pairs.values())
+            | set(mask_encoder_pairs.values())
+            | set(mask_suppress_pairs.values())
+        )
         for image_key in self.image_keys:
             if image_key in mask_keys:
                 continue
@@ -239,15 +267,32 @@ class EncodingWrapper(nn.Module):
                 raw_attention_map = jnp.mean(jnp.square(spatial_features), axis=-1)
                 suppressed_spatial_features = spatial_features
                 if suppress_mask_key is not None and suppress_mask_key in observations:
-                    suppressed_spatial_features = self._suppress_spatial_feature(
+                    pick_phase_gate = self._pick_phase_gate(
+                        observations,
+                        dtype=spatial_features.dtype,
+                    )
+                    pick_phase_spatial_gate = self._broadcast_gate(
+                        pick_phase_gate,
+                        spatial_features,
+                    )
+                    suppress_input_features = self._suppress_spatial_feature(
                         spatial_features,
                         observations[suppress_mask_key],
+                    )
+                    suppressed_spatial_features = (
+                        pick_phase_spatial_gate * suppress_input_features
+                        + (1.0 - pick_phase_spatial_gate) * spatial_features
                     )
                 mask_feature_map = None
                 mask_head_global_feature = None
                 mask_head_task_features = None
+                pick_phase_gate = None
                 attention_spatial_features = suppressed_spatial_features
                 if self.use_mask_feature_head and image_key in mask_target_pairs:
+                    pick_phase_gate = self._pick_phase_gate(
+                        observations,
+                        dtype=spatial_features.dtype,
+                    )
                     (
                         mask_head_global_feature,
                         mask_head_task_features,
@@ -257,6 +302,19 @@ class EncodingWrapper(nn.Module):
                         image.shape[-1],
                         name=f"mask_feature_head_{image_key}",
                     )
+                    spatial_head_gate = self._broadcast_gate(
+                        pick_phase_gate,
+                        mask_head_task_features,
+                    )
+                    mask_head_task_features = (
+                        spatial_head_gate * mask_head_task_features
+                        + (1.0 - spatial_head_gate) * suppressed_spatial_features
+                    )
+                    vector_head_gate = self._broadcast_gate(
+                        pick_phase_gate,
+                        mask_head_global_feature,
+                    )
+                    mask_head_global_feature = vector_head_gate * mask_head_global_feature
                     # Keep the mask2-suppressed raw branch for hand/arm context,
                     # and add the mask-head branch for target-focused features.
                     # This spatial blend is only used for attention visualization;
@@ -305,11 +363,21 @@ class EncodingWrapper(nn.Module):
                 if mask_head_global_feature is not None:
                     fused_features.append(mask_head_global_feature)
                 if fused_features:
-                    image = self._fuse_feature_list(
+                    fused_image = self._fuse_feature_list(
                         fused_features,
                         image.shape[-1],
                         name=f"mask_visual_fusion_{image_key}",
                     )
+                    if pick_phase_gate is None:
+                        image = fused_image
+                    else:
+                        output_head_gate = self._broadcast_gate(
+                            pick_phase_gate,
+                            fused_image,
+                        )
+                        image = output_head_gate * fused_image + (
+                            1.0 - output_head_gate
+                        ) * image
                 if stop_gradient:
                     image = jax.lax.stop_gradient(image)
 
@@ -317,11 +385,11 @@ class EncodingWrapper(nn.Module):
 
             if (
                 self.use_mask_encoder
-                and image_key in mask_target_pairs
-                and mask_target_pairs[image_key] in observations
+                and image_key in mask_encoder_pairs
+                and mask_encoder_pairs[image_key] in observations
             ):
                 mask_encoder_output = self._mask_encoder_feature(
-                    observations[mask_target_pairs[image_key]],
+                    observations[mask_encoder_pairs[image_key]],
                     name=f"mask_encoder_{image_key}",
                     return_spatial_attention=(
                         return_attention and self.return_mask_encoder_attention

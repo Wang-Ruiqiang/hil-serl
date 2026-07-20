@@ -629,6 +629,10 @@ def main(_):
     )
     if FLAGS.use_gaze_target_mask:
         agent_kwargs["mask_suppress_beta"] = config.mask_suppress_beta
+        if hasattr(config, "mask_pick_place_phase_control"):
+            agent_kwargs["mask_pick_place_phase_control"] = (
+                config.mask_pick_place_phase_control
+            )
         agent_kwargs["use_mask_feature_head"] = config.use_mask_feature_head
         agent_kwargs["mask_feature_gate_alpha"] = config.mask_feature_gate_alpha
         agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate

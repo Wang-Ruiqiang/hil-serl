@@ -106,6 +106,8 @@ class TrainConfig(DefaultTrainingConfig):
     pick_shaping_reward = 0.2
     pick_reward_threshold = 0.95
     place_reward_threshold = 0.93
+    mask_pick_place_phase_control = True
+    mask_suppress_beta = 1.0
     use_mask_feature_head = True
     mask_feature_gate_alpha = 1.0
     mask_feature_min_gate = 0.1
@@ -113,6 +115,7 @@ class TrainConfig(DefaultTrainingConfig):
     use_mask_encoder = True
     mask_encoder_latent_dim = 64
     mask_grounding_weight = 0.01
+    mask_grounding_key = "front_camera_mask1"
     mask_grounding_decay_step = 5000
     mask_grounding_decay_weight = 0.002
     mask_grounding_threshold = 0.05
@@ -127,7 +130,13 @@ class TrainConfig(DefaultTrainingConfig):
         if enable_tactile:
             image_keys.append("tactile_data")
         if use_gaze_target_mask:
-            image_keys.append("front_camera_mask")
+            image_keys.extend(
+                [
+                    "front_camera_mask",
+                    "front_camera_mask1",
+                    "front_camera_mask2",
+                ]
+            )
         return image_keys
 
     def get_classifier_keys(self, enable_tactile=True):

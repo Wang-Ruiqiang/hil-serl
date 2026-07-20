@@ -794,8 +794,11 @@ def render_attention_probability_panel(image_rgb, attention_map, title, extra_li
 
 
 def panel_base_image(obs, attention_key, attention_kind):
-    if attention_kind == "mask_encoder_feature" and "front_camera_mask1" in obs:
-        return obs["front_camera_mask1"]
+    if attention_kind == "mask_encoder_feature":
+        if "front_camera_mask" in obs:
+            return obs["front_camera_mask"]
+        if "front_camera_mask1" in obs:
+            return obs["front_camera_mask1"]
     return obs[attention_key]
 
 
@@ -826,9 +829,14 @@ def create_attention_agent(
         mask_feature_hidden_dim=FLAGS.mask_feature_hidden_dim,
         use_mask_encoder=FLAGS.use_mask_encoder,
         mask_encoder_latent_dim=FLAGS.mask_encoder_latent_dim,
+        mask_pick_place_phase_control=getattr(
+            config,
+            "mask_pick_place_phase_control",
+            False,
+        ),
         return_raw_attention=return_raw_attention,
         return_mask_encoder_attention=return_mask_encoder_attention,
-        mask_grounding_key="front_camera_mask1",
+        mask_grounding_key=getattr(config, "mask_grounding_key", "front_camera_mask1"),
     )
 
 
@@ -960,6 +968,10 @@ def main(_):
     print_green(f"attention_keys={attention_keys}")
     print_green(f"mask_selection_mode={mask_selection_mode}")
     print_green(f"mask_suppress_beta={FLAGS.mask_suppress_beta}")
+    print_green(
+        "mask_pick_place_phase_control="
+        f"{getattr(config, 'mask_pick_place_phase_control', False)}"
+    )
     print_green(f"use_mask_feature_head={FLAGS.use_mask_feature_head}")
     print_green(f"use_mask_encoder={FLAGS.use_mask_encoder}")
     print_green(f"has_recorded_mask1={has_recorded_mask1}")
@@ -971,6 +983,7 @@ def main(_):
     print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
     print_green(f"mask_feature_hidden_dim={FLAGS.mask_feature_hidden_dim}")
     print_green(f"mask_encoder_latent_dim={FLAGS.mask_encoder_latent_dim}")
+    print_green(f"mask_grounding_key={getattr(config, 'mask_grounding_key', 'front_camera_mask1')}")
     print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
     print_green(
         "viewer_mask_grounding_cell_threshold="
