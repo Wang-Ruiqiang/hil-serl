@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from pathlib import Path
 
 import gymnasium as gym
 import cv2
@@ -16,6 +17,19 @@ from serl_launcher.utils.gaze_utils import (
     infer_heatmap_shape,
     load_gaze_predictor,
     update_env_gaze_prediction_overlay,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_GAZE_PREDICTOR_PATH = str(
+    REPO_ROOT / "examples" / "gaze_data_process" / "gaze_heatmap_ckpt"
+)
+DEFAULT_MASK_PREDICTOR_PATH = str(
+    REPO_ROOT
+    / "examples"
+    / "gaze_data_process"
+    / "SAM_process"
+    / "mask_predictor_ckpt"
+    / "best.pt"
 )
 
 
@@ -36,10 +50,8 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         gaze_target_mask_key="front_camera_mask",
         mask1_key="front_camera_mask1",
         mask2_key="front_camera_mask2",
-        gaze_predictor_checkpoint_path="examples/gaze_data_process/gaze_heatmap_ckpt",
-        mask_predictor_checkpoint_path=(
-            "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
-        ),
+        gaze_predictor_checkpoint_path=DEFAULT_GAZE_PREDICTOR_PATH,
+        mask_predictor_checkpoint_path=DEFAULT_MASK_PREDICTOR_PATH,
         mask_selection_mode="gaze",
         pick_classifier_checkpoint_path="examples/reward_classifier/classifier_ckpt_ball_pick",
         pick_classifier_threshold=0.95,
@@ -211,7 +223,15 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
             preferred_key=self.source_image_key,
         )
 
-        if self.mask_selection_mode == "pick_classifier":
+        if self.mask_selection_mode in ("pick_only", "place_only"):
+            selected_index = 0 if self.mask_selection_mode == "pick_only" else 1
+            fields = compute_index_target_mask_fields(
+                obs,
+                self.mask_predictor,
+                heatmap_shape,
+                selected_mask_index=selected_index,
+            )
+        elif self.mask_selection_mode == "pick_classifier":
             classifier_checked = False
             if self.pick_latched:
                 pick_prob = self.last_pick_classifier_prob

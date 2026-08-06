@@ -216,7 +216,11 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         return phase[..., 0].astype(dtype)
 
     def _mask_grounding_loss(self, observations, attention_map):
-        key = self.config["mask_grounding_key"]
+        key = (
+            "front_camera_mask1"
+            if "front_camera_mask1" in observations
+            else "front_camera_mask"
+        )
         batch_size = attention_map.shape[0]
         if key not in observations:
             zeros = jnp.zeros((batch_size,), dtype=attention_map.dtype)
@@ -262,15 +266,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             jnp.where(valid_mask > 0, mask_feature_entropy, 0.0),
             valid_mask,
         )
-
-    def _effective_mask_grounding_weight(self, train_step):
-        base_weight = float(self.config["mask_grounding_weight"])
-        decay_step = int(self.config["mask_grounding_decay_step"])
-        decay_weight = float(self.config["mask_grounding_decay_weight"])
-        if train_step is None or decay_step <= 0:
-            return base_weight
-        train_step = jnp.asarray(train_step, dtype=jnp.int32)
-        return jnp.where(train_step >= decay_step, decay_weight, base_weight)
 
     def _critic_td_loss(self, batch, params: Params, rng: PRNGKey):
         batch_size = batch["rewards"].shape[0]
@@ -395,7 +390,6 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         weighted_gaze_aux_loss = gaze_weight * gaze_aux_loss
         gaze_to_td_ratio = weighted_gaze_aux_loss / (reference_td_loss + 1e-8)
 
-        mask_grounding_weight = self._effective_mask_grounding_weight(train_step)
         (
             mask_cgl_loss_per_sample,
             mask_grounding_coverage,
@@ -408,17 +402,10 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             jnp.sum(mask_cgl_loss_per_sample * valid_mask) / valid_mask_count
         )
         mask_grounding_loss = mask_cgl_loss
-        mask_grounding_loss = jnp.where(
-            mask_grounding_weight > 0.0,
-            mask_grounding_loss,
-            jnp.asarray(0.0, dtype=reference_td_loss.dtype),
-        )
-        weighted_mask_grounding_loss = mask_grounding_weight * mask_grounding_loss
-        mask_grounding_to_td_ratio = weighted_mask_grounding_loss / (
-            reference_td_loss + 1e-8
-        )
+        mask_grounding_aux_loss = mask_grounding_loss
+        mask_grounding_to_td_ratio = mask_grounding_aux_loss / (reference_td_loss + 1e-8)
 
-        visual_aux_loss = weighted_gaze_aux_loss + weighted_mask_grounding_loss
+        visual_aux_loss = weighted_gaze_aux_loss + mask_grounding_aux_loss
 
         info = {
             "visual_aux_loss": visual_aux_loss,
@@ -433,11 +420,8 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             "mask_grounding_loss": mask_grounding_loss,
             "mask_grounding_cgl_loss": mask_cgl_loss,
             "mask_grounding_mass_loss": mask_cgl_loss,
-            "mask_grounding_weight": jnp.asarray(
-                mask_grounding_weight,
-                dtype=reference_td_loss.dtype,
-            ),
-            "weighted_mask_grounding_loss": weighted_mask_grounding_loss,
+            "weighted_mask_grounding_loss": mask_grounding_aux_loss,
+            "mask_grounding_aux_loss": mask_grounding_aux_loss,
             "mask_grounding_to_td_ratio": mask_grounding_to_td_ratio,
             "mask_grounding_coverage": (
                 jnp.sum(mask_grounding_coverage) / valid_mask_count
@@ -454,17 +438,19 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         return visual_aux_loss, info
 
     def loss_fns(self, batch, train_step=None):
-        return {
+        losses = {
             "critic": partial(self.critic_loss_fn, batch, train_step=train_step),
-            "visual_aux": partial(
-                self.visual_aux_loss_fn,
-                batch,
-                train_step=train_step,
-            ),
             "grasp_critic": partial(self.grasp_critic_loss_fn, batch),
             "actor": partial(self.policy_loss_fn, batch),
             "temperature": partial(self.temperature_loss_fn, batch),
         }
+        if self.config.get("use_visual_aux", False):
+            losses["visual_aux"] = partial(
+                self.visual_aux_loss_fn,
+                batch,
+                train_step=train_step,
+            )
+        return losses
 
     @partial(jax.jit, static_argnames=("pmap_axis", "networks_to_update"))
     def update(
@@ -516,30 +502,32 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         gaze_valid_threshold: float = 1e-8,
         gaze_region_radius: int = 1,
         gaze_attention_image_key: str = "front_camera",
-        mask_suppress_beta: float = 1.0,
-        use_mask_feature_head: bool = True,
         mask_feature_gate_alpha: float = 1.0,
         mask_feature_min_gate: float = 0.1,
-        mask_feature_hidden_dim: int = 128,
-        use_mask_encoder: bool = True,
-        mask_encoder_latent_dim: int = 64,
         mask_pick_place_phase_control: bool = False,
         return_raw_attention: bool = False,
         return_mask_encoder_attention: bool = False,
-        mask_grounding_weight: float = 0.0,
-        mask_grounding_decay_step: int = 0,
-        mask_grounding_decay_weight: float = 0.0,
-        mask_grounding_key: str = "front_camera_mask",
-        mask_grounding_threshold: float = 0.05,
-        mask_grounding_cell_threshold: float = 0.01,
         **kwargs,
     ):
         policy_network_kwargs["activate_final"] = True
         critic_network_kwargs["activate_final"] = True
-        kwargs.setdefault(
-            "visual_aux_optimizer_kwargs",
-            kwargs.get("critic_optimizer_kwargs", {"learning_rate": 3e-4}),
-        )
+        use_pretrained_resnet_mask_pipeline = encoder_type == "resnet-pretrained"
+        mask_suppress_beta = 1.0 if use_pretrained_resnet_mask_pipeline else 0.0
+        use_mask_feature_head = use_pretrained_resnet_mask_pipeline
+        mask_feature_hidden_dim = 128
+        use_mask_encoder = True
+        mask_encoder_latent_dim = 64
+        mask_grounding_threshold = 0.05
+        mask_grounding_cell_threshold = 0.04
+        use_visual_aux = use_pretrained_resnet_mask_pipeline
+        if use_visual_aux:
+            kwargs.setdefault(
+                "visual_aux_optimizer_kwargs",
+                kwargs.get("critic_optimizer_kwargs", {"learning_rate": 3e-4}),
+            )
+        else:
+            # A pure ViT run must not even create a visual-aux optimizer.
+            kwargs.pop("visual_aux_optimizer_kwargs", None)
 
         image_keys = tuple(image_keys)
         head_mask_key = (
@@ -556,7 +544,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         )
         mask_target_pairs = (
             (("front_camera", head_mask_key),)
-            if head_mask_key in image_keys
+            if use_mask_feature_head and head_mask_key in image_keys
             else ()
         )
         mask_encoder_pairs = (
@@ -566,16 +554,23 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
         )
         mask_suppress_pairs = (
             (("front_camera", "front_camera_mask2"),)
-            if "front_camera_mask2" in image_keys
+            if use_pretrained_resnet_mask_pipeline
+            and "front_camera_mask2" in image_keys
             else ()
         )
         mask_target_keys = {mask_key for _, mask_key in mask_target_pairs}
         mask_encoder_keys = {mask_key for _, mask_key in mask_encoder_pairs}
         mask_suppress_keys = {mask_key for _, mask_key in mask_suppress_pairs}
+        mask_observation_keys = {
+            key
+            for key in image_keys
+            if key in {"front_camera_mask", "front_camera_mask1", "front_camera_mask2"}
+        }
         encoder_image_keys = [
             key
             for key in image_keys
-            if key not in mask_target_keys
+            if key not in mask_observation_keys
+            and key not in mask_target_keys
             and key not in mask_encoder_keys
             and key not in mask_suppress_keys
         ]
@@ -608,6 +603,25 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                     num_spatial_blocks=8,
                     bottleneck_dim=256,
                     pretrained_encoder=pretrained_encoder,
+                    name=f"encoder_{image_key}",
+                )
+                for image_key in encoder_image_keys
+            }
+        elif encoder_type in ("vit", "vit-small"):
+            from serl_launcher.vision.vit import ViTImageEncoder
+
+            encoders = {
+                image_key: ViTImageEncoder(
+                    patch_size=(16, 16),
+                    hidden_dim=192,
+                    num_layers=4,
+                    num_heads=6,
+                    mlp_dim=384,
+                    bottleneck_dim=256,
+                    pooling_method="mean",
+                    dropout_rate=0.0,
+                    attention_dropout_rate=0.0,
+                    normalize_method="unit",
                     name=f"encoder_{image_key}",
                 )
                 for image_key in encoder_image_keys
@@ -693,16 +707,18 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             gaze_heatmap_size=gaze_heatmap_size,
             gaze_valid_threshold=gaze_valid_threshold,
             gaze_region_radius=gaze_region_radius,
-            mask_grounding_weight=mask_grounding_weight,
-            mask_grounding_decay_step=mask_grounding_decay_step,
-            mask_grounding_decay_weight=mask_grounding_decay_weight,
-            mask_grounding_key=mask_grounding_key,
+            mask_suppress_beta=mask_suppress_beta,
+            use_mask_feature_head=use_mask_feature_head,
+            mask_feature_hidden_dim=mask_feature_hidden_dim,
+            use_mask_encoder=use_mask_encoder,
+            mask_encoder_latent_dim=mask_encoder_latent_dim,
             mask_grounding_threshold=mask_grounding_threshold,
             mask_grounding_cell_threshold=mask_grounding_cell_threshold,
+            use_visual_aux=use_visual_aux,
             **kwargs,
         )
 
-        if "pretrained" in encoder_type:
+        if encoder_type == "resnet-pretrained":
             from serl_launcher.utils.train_utils import load_resnet10_params
 
             agent = load_resnet10_params(agent, encoder_image_keys)

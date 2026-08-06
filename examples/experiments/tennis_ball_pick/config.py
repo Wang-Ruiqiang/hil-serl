@@ -60,6 +60,17 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
+    RESET_JOINT = np.array([
+        -0.18156941995945866,
+        0.1296803145320053,
+        0.0,
+        -1.9407152154140208,
+        0.0,
+        2.1285232352375885,
+        -0.23116278766225817,
+    ], dtype=np.float32)
+    RESET_JOINT_DURATION = 4.0
+    RESET_JOINT_STEPS = 80
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
@@ -110,6 +121,7 @@ class TrainConfig(DefaultTrainingConfig):
     buffer_period = 1000
     checkpoint_period = 1000
     steps_per_update = 100
+    # Set to "vit" to train a lightweight ViT encoder for RGB/tactile images.
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
     mask_pick_place_phase_control = False
@@ -120,17 +132,13 @@ class TrainConfig(DefaultTrainingConfig):
     mask_feature_hidden_dim = 128
     use_mask_encoder = True
     mask_encoder_latent_dim = 64
-    mask_grounding_weight = 0.05
-    mask_grounding_decay_step = 1000
-    mask_grounding_decay_weight = 0.02
-    mask_grounding_key = "front_camera_mask1"
     mask_grounding_threshold = 0.05
     mask_grounding_cell_threshold = 0.04
 
     def get_image_keys(
         self,
         enable_tactile=True,
-        use_gaze_target_mask=False,
+        use_gaze_target_mask=True,
     ):
         image_keys = ["front_camera"]
         if enable_tactile:
@@ -153,10 +161,16 @@ class TrainConfig(DefaultTrainingConfig):
         enable_tactile=True,
         record_data=False,
         record_gaze=False,
-        use_gaze_target_mask=False,
-        gaze_predictor_checkpoint_path="examples/gaze_data_process/gaze_heatmap_ckpt",
-        mask_predictor_checkpoint_path=(
-            "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
+        gaze_predictor_checkpoint_path=str(
+            REPO_ROOT / "examples" / "gaze_data_process" / "gaze_heatmap_ckpt"
+        ),
+        mask_predictor_checkpoint_path=str(
+            REPO_ROOT
+            / "examples"
+            / "gaze_data_process"
+            / "SAM_process"
+            / "mask_predictor_ckpt"
+            / "best.pt"
         ),
         mask_selection_mode="gaze",
         pick_classifier_checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
@@ -173,7 +187,7 @@ class TrainConfig(DefaultTrainingConfig):
 
         self.image_keys = self.get_image_keys(
             enable_tactile,
-            use_gaze_target_mask,
+            use_gaze_target_mask=True,
         )
         self.classifier_keys = self.get_classifier_keys(enable_tactile)
             
@@ -191,18 +205,17 @@ class TrainConfig(DefaultTrainingConfig):
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
-        if use_gaze_target_mask:
-            env = GazeDerivedObservationWrapper(
-                env,
-                use_gaze_target_mask=use_gaze_target_mask,
-                gaze_predictor_checkpoint_path=gaze_predictor_checkpoint_path,
-                mask_predictor_checkpoint_path=mask_predictor_checkpoint_path,
-                mask_selection_mode=mask_selection_mode,
-                pick_classifier_checkpoint_path=pick_classifier_checkpoint_path,
-                pick_classifier_threshold=pick_classifier_threshold,
-                gaze_target_mask_dilation=gaze_target_mask_dilation,
-                log_fn=print,
-            )
+        env = GazeDerivedObservationWrapper(
+            env,
+            use_gaze_target_mask=True,
+            gaze_predictor_checkpoint_path=gaze_predictor_checkpoint_path,
+            mask_predictor_checkpoint_path=mask_predictor_checkpoint_path,
+            mask_selection_mode=mask_selection_mode,
+            pick_classifier_checkpoint_path=pick_classifier_checkpoint_path,
+            pick_classifier_threshold=pick_classifier_threshold,
+            gaze_target_mask_dilation=gaze_target_mask_dilation,
+            log_fn=print,
+        )
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             sample = env.observation_space.sample()
@@ -238,7 +251,7 @@ class TrainConfig(DefaultTrainingConfig):
                 print("sigmoid(reward_classifier(obs)) = ", prob)
                 # added check for z position to further robustify classifier, but should work without as well
                 # return int(sigmoid(classifier(obs)).item() > 0.95)
-                return int(prob > 0.8)
+                return int(prob > 1)
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

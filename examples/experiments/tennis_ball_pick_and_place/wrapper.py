@@ -42,41 +42,51 @@ class RAMEnv(FrankaEnv):
         pos[2] += 0.02
         ori = self.cur_orientation.copy()
         nextpos = np.concatenate((pos, ori), axis=0)
-        self.ros_interface.publish_arm_action(nextpos)
+        self.ros_interface.arm_interpolate_and_publish(
+            self.curpos,
+            nextpos,
+            step_time=0.02,
+            steps=100,
+        )
         time.sleep(2.0)
         self.get_im()
 
     def reset(self, joint_reset=False, **kwargs):
         print("RAMEnv reset")
+        self.data_count = 0
+        self.last_gripper_act = time.time()
+        if self.save_video:
+            self.save_video_recording(self.video_count)
 
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-        # print("self.curr_leap_hand_pos reset before= ", self.curr_leap_hand_pos)
         self._send_leap_hand_command(self.gripper_open_joint, steps=20, step_time=0.05)
         time.sleep(1)
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
-        # print("self.curr_leap_hand_pos reset = ", self.curr_leap_hand_pos)
+
+        # Reset and RL actions both use the Cartesian /target_pose path.
         cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
         self.curpos = np.concatenate((cur_position, cur_orientation), axis=0)
-        # init_pos = np.array([x_init, y_init, z_init])
-        init_pos = np.array([0.55977625898067087, -0.090797684551726014, 0.4022486952647027])
+        init_pos = np.array(
+            [0.55977625898067087, -0.090797684551726014, 0.4022486952647027],
+            dtype=np.float32,
+        )
         init_ori = np.array([0, 1, 0, 0], dtype=np.float32)
         init_arm_action = np.concatenate([init_pos, init_ori])
-        self.ros_interface.arm_interpolate_and_publish(self.curpos, init_arm_action, 0.02, 200)
-
+        self.ros_interface.arm_interpolate_and_publish(
+            self.curpos,
+            init_arm_action,
+            step_time=0.02,
+            steps=200,
+        )
         self._close_open_pose_init(self.curr_leap_hand_pos)
-
         time.sleep(5)
 
-        self.cmd_pose = np.concatenate([init_pos.copy(), init_ori.copy()], axis=0)
-
+        self.cmd_pose = init_arm_action.copy()
+        self.nextpos = self.cmd_pose.copy()
         self.curr_path_length = 0
-        # self.ros_interface.reset_cur_pose()
         self._update_cur_position(init_arm_action, wait_threshold=0.05)
-        # print("self.cur_position = ", self.cur_position)
-        # self.save_training_frame()
         obs = self._get_obs()
-        # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         self.terminate = False
         return obs, {}
     

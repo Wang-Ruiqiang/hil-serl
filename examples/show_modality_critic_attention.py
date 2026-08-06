@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import ast
 from pathlib import Path
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -23,14 +24,14 @@ for path in (
 
 DEFAULT_FRAME_ROOT = (
     "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-7-14-0"
+    "tennis_ball_pick-7-14-1"
 )
 DEFAULT_CHECKPOINT_PATH = str(
     REPO_ROOT
     / "examples"
     / "experiments"
-    / "tennis_ball_pick"
-    / "2026-7-14_0_ball_pick_rl_run"
+    / "tennis_ball_pick_and_place"
+    / "2026-8-3_0_ball_pick_and_place_vit_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
@@ -55,7 +56,7 @@ from serl_launcher.utils.launcher import make_gaze_sac_pixel_agent_hybrid_single
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick_and_place", "Experiment name.")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("frame_root", DEFAULT_FRAME_ROOT, "Recorded frame root.")
 flags.DEFINE_string("checkpoint_path", DEFAULT_CHECKPOINT_PATH, "Checkpoint directory.")
@@ -81,24 +82,26 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_enum(
     "mask_selection_mode",
-    "auto",
-    ["auto", "recorded_gaze", "force_mask1", "force_mask2"],
+    "pick_only",
+    [
+        "auto",
+        "recorded_gaze",
+        "pick_only",
+        "place_only",
+        "phase_ranges",
+    ],
     "How this offline viewer builds front_camera_mask.",
+)
+flags.DEFINE_string(
+    "phase_ranges_path",
+    "",
+    "JSON file with offline phase frame ranges. Supports {'place': [[start, end]], "
+    "{'pick': [[start, end]], 'place': [[start, end]]}, or [[start, end]] for place.",
 )
 flags.DEFINE_string(
     "mask_predictor_checkpoint_path",
     str(REPO_ROOT / "examples" / "gaze_data_process" / "SAM_process" / "mask_predictor_ckpt" / "best.pt"),
-    "Mask predictor checkpoint used by force_mask1/force_mask2 modes.",
-)
-flags.DEFINE_float(
-    "mask_suppress_beta",
-    1.0,
-    "Feature-space suppression strength for front_camera_mask2.",
-)
-flags.DEFINE_boolean(
-    "use_mask_feature_head",
-    True,
-    "Render the trainable mask feature head instead of raw ResNet feature energy.",
+    "Mask predictor checkpoint used by pick_only/place_only modes.",
 )
 flags.DEFINE_float(
     "mask_feature_gate_alpha",
@@ -109,21 +112,6 @@ flags.DEFINE_float(
     "mask_feature_min_gate",
     0.1,
     "Minimum multiplicative gate for non-selected RGB features.",
-)
-flags.DEFINE_integer(
-    "mask_feature_hidden_dim",
-    128,
-    "Hidden channel count for the trainable mask feature head.",
-)
-flags.DEFINE_boolean(
-    "use_mask_encoder",
-    True,
-    "Encode front_camera_mask1 with a small CNN and concatenate it as an extra modality.",
-)
-flags.DEFINE_integer(
-    "mask_encoder_latent_dim",
-    64,
-    "Output dimension of the small CNN mask encoder.",
 )
 flags.DEFINE_boolean(
     "show_mask_encoder_feature",
@@ -527,11 +515,77 @@ def apply_predicted_mask_to_obs(obs, mask_predictor, selected_index, target_shap
     return obs, fields.get("selected_mask_slot", f"mask{selected_index + 1}")
 
 
+def apply_recorded_mask_selection_to_obs(obs, frame_dir: Path, selected_index, target_shape):
+    obs = dict(obs)
+    selected_slot = f"mask{int(selected_index) + 1}"
+    for slot_name, image_key in (
+        ("mask1", "front_camera_mask1"),
+        ("mask2", "front_camera_mask2"),
+    ):
+        if image_key not in obs:
+            obs[image_key] = read_mask_image(frame_dir, slot_name, target_shape)
+    obs["front_camera_mask"] = obs.get(
+        f"front_camera_mask{int(selected_index) + 1}",
+        read_mask_image(frame_dir, selected_slot, target_shape),
+    )
+    obs = set_phase_in_obs(obs, selected_index)
+    return obs, selected_slot
+
+
+def normalize_phase_ranges(raw_ranges):
+    if raw_ranges is None:
+        return []
+    ranges = []
+    for item in raw_ranges:
+        if isinstance(item, dict):
+            start = item.get("start", item.get("from"))
+            end = item.get("end", item.get("to"))
+        else:
+            start, end = item[:2]
+        ranges.append((int(start), int(end)))
+    return ranges
+
+
+def load_phase_ranges(path):
+    if not path:
+        return {"pick": [], "place": [], "none": []}
+    path = Path(path).expanduser().resolve()
+    with path.open("r") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        data = {"place": data}
+    return {
+        "pick": normalize_phase_ranges(data.get("pick")),
+        "place": normalize_phase_ranges(data.get("place")),
+        "none": normalize_phase_ranges(data.get("none")),
+    }
+
+
+def frame_in_ranges(fid, ranges):
+    return any(start <= fid <= end for start, end in ranges)
+
+
+def phase_ranges_selected_index(fid, ranges):
+    if frame_in_ranges(fid, ranges.get("place", [])):
+        return 1
+    if frame_in_ranges(fid, ranges.get("pick", [])):
+        return 0
+    if frame_in_ranges(fid, ranges.get("none", [])):
+        return 2
+    return 0
+
+
 def resolve_mask_selection_mode(exp_name):
     if FLAGS.mask_selection_mode != "auto":
+        if FLAGS.mask_selection_mode == "force_mask1":
+            print_green("[warn] mask_selection_mode=force_mask1 is deprecated; use pick_only.")
+            return "pick_only"
+        if FLAGS.mask_selection_mode == "force_mask2":
+            print_green("[warn] mask_selection_mode=force_mask2 is deprecated; use place_only.")
+            return "place_only"
         return FLAGS.mask_selection_mode
     if exp_name == "tennis_ball_pick":
-        return "force_mask1"
+        return "pick_only"
     return "recorded_gaze"
 
 
@@ -802,12 +856,31 @@ def panel_base_image(obs, attention_key, attention_kind):
     return obs[attention_key]
 
 
+def is_vit_encoder(config):
+    return getattr(config, "encoder_type", "") in ("vit", "vit-small")
+
+
+def effective_mask_suppress_beta(config):
+    return 1.0 if getattr(config, "encoder_type", "") == "resnet-pretrained" else 0.0
+
+
+def effective_use_mask_feature_head(config):
+    return getattr(config, "encoder_type", "") == "resnet-pretrained"
+
+
+def attention_kind_name(config, attention_key, *, return_raw_attention):
+    if is_vit_encoder(config) and return_raw_attention:
+        return "vit_patch_feature"
+    if attention_key == "front_camera" and not return_raw_attention:
+        return "fused_feature"
+    return "raw_feature"
+
+
 def create_attention_agent(
     config,
     sample_obs,
     attention_key,
     *,
-    use_mask_feature_head,
     return_raw_attention,
     return_mask_encoder_attention=False,
 ):
@@ -822,13 +895,8 @@ def create_attention_agent(
         gaze_heatmap_size=(FLAGS.image_size, FLAGS.image_size),
         gaze_region_radius=0,
         gaze_attention_image_key=attention_key,
-        mask_suppress_beta=FLAGS.mask_suppress_beta,
-        use_mask_feature_head=use_mask_feature_head,
         mask_feature_gate_alpha=FLAGS.mask_feature_gate_alpha,
         mask_feature_min_gate=FLAGS.mask_feature_min_gate,
-        mask_feature_hidden_dim=FLAGS.mask_feature_hidden_dim,
-        use_mask_encoder=FLAGS.use_mask_encoder,
-        mask_encoder_latent_dim=FLAGS.mask_encoder_latent_dim,
         mask_pick_place_phase_control=getattr(
             config,
             "mask_pick_place_phase_control",
@@ -836,8 +904,74 @@ def create_attention_agent(
         ),
         return_raw_attention=return_raw_attention,
         return_mask_encoder_attention=return_mask_encoder_attention,
-        mask_grounding_key=getattr(config, "mask_grounding_key", "front_camera_mask1"),
     )
+
+
+def resolve_checkpoint_path():
+    checkpoint_root = Path(FLAGS.checkpoint_path).expanduser().resolve()
+    if not checkpoint_root.exists():
+        raise FileNotFoundError(
+            f"checkpoint_path does not exist: {checkpoint_root}\n"
+            "Please pass the exact run directory that contains checkpoint_* folders."
+        )
+    if not checkpoint_root.is_dir():
+        raise NotADirectoryError(
+            f"checkpoint_path is not a directory: {checkpoint_root}"
+        )
+
+    step = None if FLAGS.checkpoint_step < 0 else FLAGS.checkpoint_step
+    if step is None:
+        resolved_checkpoint = checkpoints.latest_checkpoint(str(checkpoint_root))
+        if resolved_checkpoint is None:
+            raise FileNotFoundError(
+                f"No checkpoint found under: {checkpoint_root}\n"
+                "Expected at least one checkpoint_* directory/file. "
+                "Use --checkpoint_path=<run_dir> or --skip_restore=True."
+            )
+        return checkpoint_root, resolved_checkpoint, step
+
+    resolved_checkpoint = checkpoint_root / f"checkpoint_{step}"
+    if not resolved_checkpoint.exists():
+        raise FileNotFoundError(
+            f"Requested checkpoint step does not exist: {resolved_checkpoint}\n"
+            "Check --checkpoint_step or use --checkpoint_step=-1 for latest."
+        )
+    return checkpoint_root, str(resolved_checkpoint), step
+
+
+def critic_input_dim_from_agent(agent):
+    try:
+        kernel = agent.state.params["modules_critic"]["network"]["VmapMLP_0"][
+            "Dense_0"
+        ]["kernel"]
+    except Exception:
+        return None
+    shape = tuple(np.asarray(kernel).shape)
+    return int(shape[-2]) if len(shape) >= 2 else None
+
+
+def actor_input_dim_from_agent(agent):
+    try:
+        kernel = agent.state.params["modules_actor"]["network"]["Dense_0"]["kernel"]
+    except Exception:
+        return None
+    shape = tuple(np.asarray(kernel).shape)
+    return int(shape[-2]) if len(shape) >= 2 else None
+
+
+def checkpoint_param_shape(checkpoint_dir, param_path):
+    metadata_path = Path(checkpoint_dir) / "_METADATA"
+    if not metadata_path.exists():
+        return None
+    metadata = json.loads(metadata_path.read_text()).get("tree_metadata", {})
+    for key, value in metadata.items():
+        try:
+            parsed_key = ast.literal_eval(key)
+        except Exception:
+            continue
+        if parsed_key == param_path:
+            return tuple(value["value_metadata"]["write_shape"])
+    return None
 
 
 def restore_agent(agent, *, label, allow_fallback=False):
@@ -847,23 +981,48 @@ def restore_agent(agent, *, label, allow_fallback=False):
             "with loaded ResNet backbone only."
         )
         return agent
-    step = None if FLAGS.checkpoint_step < 0 else FLAGS.checkpoint_step
-    if step is None:
-        resolved_checkpoint = checkpoints.latest_checkpoint(
-            os.path.abspath(FLAGS.checkpoint_path)
-        )
-    else:
-        resolved_checkpoint = os.path.join(
-            os.path.abspath(FLAGS.checkpoint_path),
-            f"checkpoint_{step}",
-        )
+    checkpoint_root, resolved_checkpoint, step = resolve_checkpoint_path()
+    current_critic_dim = critic_input_dim_from_agent(agent)
+    current_actor_dim = actor_input_dim_from_agent(agent)
+    ckpt_critic_shape = checkpoint_param_shape(
+        resolved_checkpoint,
+        (
+            "params",
+            "modules_critic",
+            "network",
+            "VmapMLP_0",
+            "Dense_0",
+            "kernel",
+        ),
+    )
+    ckpt_actor_shape = checkpoint_param_shape(
+        resolved_checkpoint,
+        ("params", "modules_actor", "network", "Dense_0", "kernel"),
+    )
     print_green(
         f"restoring {label} checkpoint="
         f"{resolved_checkpoint if resolved_checkpoint is not None else 'None'}"
     )
+    print_green(
+        f"restore dims {label}: "
+        f"current_actor_in={current_actor_dim} ckpt_actor_shape={ckpt_actor_shape} "
+        f"current_critic_in={current_critic_dim} ckpt_critic_shape={ckpt_critic_shape}"
+    )
+    if (
+        ckpt_critic_shape is not None
+        and current_critic_dim is not None
+        and int(ckpt_critic_shape[-2]) != int(current_critic_dim)
+    ):
+        raise ValueError(
+            "Checkpoint/model critic input dimension mismatch before restore: "
+            f"label={label} current={current_critic_dim} "
+            f"checkpoint={ckpt_critic_shape[-2]} checkpoint_path={resolved_checkpoint}. "
+            "This means the viewer was launched with a different experiment/config "
+            "or structural flags than the checkpoint was trained with."
+        )
     try:
         restored_state = checkpoints.restore_checkpoint(
-            os.path.abspath(FLAGS.checkpoint_path),
+            str(checkpoint_root),
             agent.state,
             step=step,
         )
@@ -948,6 +1107,15 @@ def main(_):
     ]
     if not attention_keys:
         raise ValueError(f"No valid attention_keys in {FLAGS.attention_keys}")
+    phase_control_enabled = bool(
+        getattr(config, "mask_pick_place_phase_control", False)
+    )
+    if mask_selection_mode == "place_only" and not phase_control_enabled:
+        raise ValueError(
+            "mask_selection_mode=place_only requires an experiment with "
+            "mask_pick_place_phase_control=True. Did you mean "
+            "--exp_name=tennis_ball_pick_and_place?"
+        )
 
     frame_root = Path(FLAGS.frame_root).expanduser().resolve()
     output_dir = Path(FLAGS.output_dir).expanduser().resolve()
@@ -955,35 +1123,42 @@ def main(_):
     frame_dirs = list_frame_dirs(frame_root)
     if not frame_dirs:
         raise FileNotFoundError(f"No frame_* dirs found under {frame_root}")
+    resolved_checkpoint = None
+    if not FLAGS.skip_restore:
+        _checkpoint_root, resolved_checkpoint, _checkpoint_step = resolve_checkpoint_path()
     has_recorded_mask1 = has_any_recorded_mask(frame_dirs, "mask1")
     show_mask_encoder_feature = bool(
         FLAGS.show_mask_encoder_feature
-        and FLAGS.use_mask_encoder
         and has_recorded_mask1
     )
 
     print_green(f"frame_root={frame_root}")
     print_green(f"checkpoint_path={Path(FLAGS.checkpoint_path).expanduser().resolve()}")
+    if resolved_checkpoint is not None:
+        print_green(f"resolved_checkpoint={resolved_checkpoint}")
     print_green(f"image_keys={config.image_keys}")
     print_green(f"attention_keys={attention_keys}")
     print_green(f"mask_selection_mode={mask_selection_mode}")
-    print_green(f"mask_suppress_beta={FLAGS.mask_suppress_beta}")
+    if mask_selection_mode == "phase_ranges":
+        print_green(f"phase_ranges_path={FLAGS.phase_ranges_path}")
+    print_green(f"encoder_type={config.encoder_type}")
+    print_green(f"mask_suppress_beta={effective_mask_suppress_beta(config)}")
     print_green(
         "mask_pick_place_phase_control="
-        f"{getattr(config, 'mask_pick_place_phase_control', False)}"
+        f"{phase_control_enabled}"
     )
-    print_green(f"use_mask_feature_head={FLAGS.use_mask_feature_head}")
-    print_green(f"use_mask_encoder={FLAGS.use_mask_encoder}")
+    print_green(f"use_mask_feature_head={effective_use_mask_feature_head(config)}")
+    print_green("use_mask_encoder=True")
     print_green(f"has_recorded_mask1={has_recorded_mask1}")
     print_green(f"show_mask_encoder_feature={show_mask_encoder_feature}")
-    if FLAGS.show_mask_encoder_feature and FLAGS.use_mask_encoder and not has_recorded_mask1:
+    if FLAGS.show_mask_encoder_feature and not has_recorded_mask1:
         print_green("No recorded mask1 files found; skipping mask_encoder_feature panels.")
     print_green(f"compare_raw_mask_feature={FLAGS.compare_raw_mask_feature}")
     print_green(f"mask_feature_gate_alpha={FLAGS.mask_feature_gate_alpha}")
     print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
-    print_green(f"mask_feature_hidden_dim={FLAGS.mask_feature_hidden_dim}")
-    print_green(f"mask_encoder_latent_dim={FLAGS.mask_encoder_latent_dim}")
-    print_green(f"mask_grounding_key={getattr(config, 'mask_grounding_key', 'front_camera_mask1')}")
+    print_green("mask_feature_hidden_dim=128")
+    print_green("mask_encoder_latent_dim=64")
+    print_green("mask_grounding_key=auto(front_camera_mask1 else front_camera_mask)")
     print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
     print_green(
         "viewer_mask_grounding_cell_threshold="
@@ -992,9 +1167,17 @@ def main(_):
     print_green(f"attention_display_mode={FLAGS.attention_display_mode}")
     print_green(f"frames={len(frame_dirs)} output_dir={output_dir}")
 
+    phase_ranges = (
+        load_phase_ranges(FLAGS.phase_ranges_path)
+        if mask_selection_mode == "phase_ranges"
+        else None
+    )
+    if mask_selection_mode == "phase_ranges":
+        print_green(f"phase_ranges={phase_ranges}")
+
     sample_obs, _, _ = read_frame_observation_and_action(frame_dirs[0], config.image_keys)
     mask_predictor = None
-    if mask_selection_mode in ("force_mask1", "force_mask2"):
+    if mask_selection_mode in ("pick_only", "place_only"):
         mask_predictor = load_mask_predictor(
             sample_obs,
             config.image_keys,
@@ -1002,7 +1185,7 @@ def main(_):
             preferred_key="front_camera",
             log_fn=print_green,
         )
-        selected_index = 0 if mask_selection_mode == "force_mask1" else 1
+        selected_index = 0 if mask_selection_mode == "pick_only" else 1
         sample_obs, _ = apply_predicted_mask_to_obs(
             sample_obs,
             mask_predictor,
@@ -1010,25 +1193,34 @@ def main(_):
             (FLAGS.image_size, FLAGS.image_size),
         )
     attention_specs = []
+    use_mask_feature_head = effective_use_mask_feature_head(config)
     for attention_key in attention_keys:
         if FLAGS.compare_raw_mask_feature:
+            return_raw_attention = True
             attention_specs.append(
                 {
                     "key": attention_key,
-                    "kind": "raw_feature",
-                    "use_mask_feature_head": FLAGS.use_mask_feature_head,
-                    "return_raw_attention": True,
+                    "kind": attention_kind_name(
+                        config,
+                        attention_key,
+                        return_raw_attention=return_raw_attention,
+                    ),
+                    "return_raw_attention": return_raw_attention,
                     "return_mask_encoder_attention": False,
                     "allow_restore_fallback": False,
                 }
             )
-        if attention_key == "front_camera" and FLAGS.use_mask_feature_head:
+        if attention_key == "front_camera" and use_mask_feature_head:
+            return_raw_attention = False
             attention_specs.append(
                 {
                     "key": attention_key,
-                    "kind": "fused_feature",
-                    "use_mask_feature_head": True,
-                    "return_raw_attention": False,
+                    "kind": attention_kind_name(
+                        config,
+                        attention_key,
+                        return_raw_attention=return_raw_attention,
+                    ),
+                    "return_raw_attention": return_raw_attention,
                     "return_mask_encoder_attention": False,
                     "allow_restore_fallback": False,
                 }
@@ -1041,19 +1233,22 @@ def main(_):
                 {
                     "key": attention_key,
                     "kind": "mask_encoder_feature",
-                    "use_mask_feature_head": FLAGS.use_mask_feature_head,
                     "return_raw_attention": False,
                     "return_mask_encoder_attention": True,
                     "allow_restore_fallback": False,
                 }
             )
         elif not FLAGS.compare_raw_mask_feature:
+            return_raw_attention = True
             attention_specs.append(
                 {
                     "key": attention_key,
-                    "kind": "raw_feature",
-                    "use_mask_feature_head": FLAGS.use_mask_feature_head,
-                    "return_raw_attention": True,
+                    "kind": attention_kind_name(
+                        config,
+                        attention_key,
+                        return_raw_attention=return_raw_attention,
+                    ),
+                    "return_raw_attention": return_raw_attention,
                     "return_mask_encoder_attention": False,
                     "allow_restore_fallback": False,
                 }
@@ -1071,7 +1266,6 @@ def main(_):
             config,
             sample_obs,
             attention_key,
-            use_mask_feature_head=spec["use_mask_feature_head"],
             return_raw_attention=spec["return_raw_attention"],
             return_mask_encoder_attention=spec["return_mask_encoder_attention"],
         )
@@ -1117,11 +1311,19 @@ def main(_):
                     frame_dir,
                     config.image_keys,
                 )
-                if mask_selection_mode in ("force_mask1", "force_mask2"):
-                    selected_index = 0 if mask_selection_mode == "force_mask1" else 1
+                if mask_selection_mode in ("pick_only", "place_only"):
+                    selected_index = 0 if mask_selection_mode == "pick_only" else 1
                     obs, selected_slot = apply_predicted_mask_to_obs(
                         obs,
                         mask_predictor,
+                        selected_index,
+                        (FLAGS.image_size, FLAGS.image_size),
+                    )
+                elif mask_selection_mode == "phase_ranges":
+                    selected_index = phase_ranges_selected_index(fid, phase_ranges)
+                    obs, selected_slot = apply_recorded_mask_selection_to_obs(
+                        obs,
+                        frame_dir,
                         selected_index,
                         (FLAGS.image_size, FLAGS.image_size),
                     )

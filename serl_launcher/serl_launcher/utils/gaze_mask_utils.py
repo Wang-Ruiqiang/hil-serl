@@ -188,6 +188,49 @@ def _dilate_binary_mask(mask, radius: int):
     return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
 
 
+def _morph_binary_mask(mask, radius: int, op):
+    mask = np.asarray(mask, dtype=bool)
+    if radius <= 0:
+        return mask
+    kernel_size = int(radius) * 2 + 1
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_size, kernel_size),
+    )
+    return cv2.morphologyEx(mask.astype(np.uint8), op, kernel, iterations=1).astype(bool)
+
+
+def _keep_largest_component(mask, min_area_px: int = 0):
+    mask = np.asarray(mask, dtype=bool)
+    if not np.any(mask):
+        return mask
+    labels_count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8),
+        connectivity=8,
+    )
+    if labels_count <= 1:
+        return mask
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    largest_label = int(np.argmax(areas)) + 1
+    if int(areas[largest_label - 1]) < int(min_area_px):
+        return np.zeros_like(mask, dtype=bool)
+    return labels == largest_label
+
+
+def _postprocess_slot_mask(mask, slot_name: str):
+    """Clean predictable slot-specific mask artifacts without changing mask semantics."""
+    mask = np.asarray(mask, dtype=bool)
+    if slot_name != "mask2":
+        return mask.astype(np.float32)
+
+    # mask2 is the basket/place target. The predictor often produces tiny
+    # detached fragments, so remove small islands while keeping the main target.
+    mask = _morph_binary_mask(mask, radius=1, op=cv2.MORPH_OPEN)
+    mask = _morph_binary_mask(mask, radius=2, op=cv2.MORPH_CLOSE)
+    mask = _keep_largest_component(mask, min_area_px=64)
+    return mask.astype(np.float32)
+
+
 def _mask_bbox(mask):
     ys, xs = np.where(np.asarray(mask, dtype=bool))
     if xs.size == 0 or ys.size == 0:
@@ -343,8 +386,10 @@ def select_gaze_target_mask(
             key=lambda index: float(mask_probs[index, gaze_y, gaze_x]),
         )
 
+    selected_slot = f"mask{selected_index + 1}"
     selected = binary_masks[selected_index].astype(np.float32)
     selected = _resize_2d(selected, target_shape, method="nearest")
+    selected = _postprocess_slot_mask(selected, selected_slot)
     info["selected_mask_index"] = selected_index
     info["gaze_hit_mask"] = True
     selected = selected.astype(np.float32)
@@ -429,15 +474,16 @@ def compute_index_target_mask_fields(
     ):
         return fields
 
-    selected_mask = (mask_probs[selected_mask_index] >= float(threshold)).astype(
-        np.float32
-    )
-    selected_mask = _resize_2d(selected_mask, tuple(target_shape), method="nearest")
     selected_slot = (
         mask_predictor.mask_slots[selected_mask_index]
         if selected_mask_index < len(mask_predictor.mask_slots)
         else f"mask{selected_mask_index + 1}"
     )
+    selected_mask = (mask_probs[selected_mask_index] >= float(threshold)).astype(
+        np.float32
+    )
+    selected_mask = _resize_2d(selected_mask, tuple(target_shape), method="nearest")
+    selected_mask = _postprocess_slot_mask(selected_mask, selected_slot)
     fields["gaze_target_mask"] = selected_mask.astype(np.float32)
     fields["selected_mask_index"] = selected_mask_index
     fields["selected_mask_slot"] = selected_slot
@@ -467,13 +513,14 @@ def compute_all_index_target_mask_fields(
         return fields_by_slot
 
     for index in range(mask_probs.shape[0]):
-        selected_mask = (mask_probs[index] >= float(threshold)).astype(np.float32)
-        selected_mask = _resize_2d(selected_mask, tuple(target_shape), method="nearest")
         selected_slot = (
             mask_predictor.mask_slots[index]
             if index < len(mask_predictor.mask_slots)
             else f"mask{index + 1}"
         )
+        selected_mask = (mask_probs[index] >= float(threshold)).astype(np.float32)
+        selected_mask = _resize_2d(selected_mask, tuple(target_shape), method="nearest")
+        selected_mask = _postprocess_slot_mask(selected_mask, selected_slot)
         fields_by_slot[selected_slot] = {
             "gaze_target_mask": selected_mask.astype(np.float32),
             "selected_mask_index": index,

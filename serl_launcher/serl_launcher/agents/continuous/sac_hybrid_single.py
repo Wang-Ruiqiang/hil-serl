@@ -598,6 +598,25 @@ class SACAgentHybridSingleArm(flax.struct.PyTreeNode):
                 )
                 for image_key in image_keys
             }
+        elif encoder_type in ("vit", "vit-small"):
+            from serl_launcher.vision.vit import ViTImageEncoder
+
+            encoders = {
+                image_key: ViTImageEncoder(
+                    patch_size=(16, 16),
+                    hidden_dim=192,
+                    num_layers=4,
+                    num_heads=6,
+                    mlp_dim=384,
+                    bottleneck_dim=256,
+                    pooling_method="mean",
+                    dropout_rate=0.0,
+                    attention_dropout_rate=0.0,
+                    normalize_method="unit",
+                    name=f"encoder_{image_key}",
+                )
+                for image_key in image_keys
+            }
         else:
             raise NotImplementedError(f"Unknown encoder type: {encoder_type}")
 

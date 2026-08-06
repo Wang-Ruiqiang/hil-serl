@@ -12,5 +12,4 @@ python "$ROOT/examples/train_rlpd.py" "$@" \
     --mask_predictor_checkpoint_path="$ROOT/examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt" \
     --mask_selection_mode=pick_classifier \
     --pick_classifier_checkpoint_path="$ROOT/examples/reward_classifier/classifier_ckpt_ball_pick" \
-    --use_gaze_target_mask=True \
     --learner

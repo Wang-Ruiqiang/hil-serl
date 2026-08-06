@@ -22,12 +22,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Name of experiment corresponding to folder.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick_and_place", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
-flags.DEFINE_boolean("record_data", True, "Save robot/camera/tactile frame data while recording demos.")
+flags.DEFINE_boolean("record_data", False, "Save robot/camera/tactile frame data while recording demos.")
 flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames while recording demos.")
 flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
+flags.DEFINE_boolean(
+    "ignore_max_episode_length",
+    True,
+    "Disable task MAX_EPISODE_LENGTH while recording demos.",
+)
 flags.DEFINE_string(
     "frame_save_path",
     "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-2",
@@ -180,6 +185,16 @@ def main(_):
     else:
         print(f"[record_demos] mode=default for exp_name={FLAGS.exp_name}.")
     config = NEW_MAPPING[FLAGS.exp_name]()
+    if FLAGS.ignore_max_episode_length:
+        config_module = sys.modules.get(config.__class__.__module__)
+        env_config_cls = getattr(config_module, "EnvConfig", None)
+        if env_config_cls is not None and hasattr(env_config_cls, "MAX_EPISODE_LENGTH"):
+            old_max_length = env_config_cls.MAX_EPISODE_LENGTH
+            env_config_cls.MAX_EPISODE_LENGTH = 0
+            print(
+                "[record_demos] ignore max episode length: "
+                f"MAX_EPISODE_LENGTH {old_max_length} -> 0"
+            )
     env_kwargs = dict(
         fake_env=False,
         save_video=False,

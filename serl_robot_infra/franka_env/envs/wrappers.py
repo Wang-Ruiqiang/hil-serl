@@ -37,57 +37,98 @@ class HumanClassifierWrapper(gym.Wrapper):
     
 class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
     """
-    This wrapper uses the camera images to compute the reward,
-    which is not part of the observation space
+    Camera-based reward wrapper for tennis-ball tasks.
+
+    Supported classifier outputs:
+    - tennis_ball_pick: scalar 0/1 reward.
+    - tennis_ball_pick_and_place: scalar 0/1 place reward.
     """
 
-    def __init__(self, env: Env, reward_classifier_func, target_hz = None):
+    SUPPORTED_EXPS = {"tennis_ball_pick", "tennis_ball_pick_and_place"}
+
+    def __init__(self, env: Env, reward_classifier_func, target_hz=None):
         super().__init__(env)
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
-        self.is_pick = True
         self.config = env.config
+        self.exp_name = self.config.EXP_NAME
+        self.is_pick = True
+        if self.exp_name not in self.SUPPORTED_EXPS:
+            raise ValueError(
+                "MultiCameraBinaryRewardClassifierWrapper currently supports only "
+                f"{sorted(self.SUPPORTED_EXPS)}, got {self.exp_name}."
+            )
 
     def compute_reward(self, obs):
         if self.reward_classifier_func is not None:
             return self.reward_classifier_func(obs, self.is_pick)
         return 0
 
+    def _parse_classifier_output(self, classifier_output, info):
+        if not isinstance(classifier_output, dict):
+            return classifier_output, False, False
+
+        reward = classifier_output.get("reward", 0)
+        pick_success = bool(classifier_output.get("pick_success", False))
+        place_success = bool(classifier_output.get("place_success", False))
+        for key, value in classifier_output.items():
+            if key != "reward":
+                info[key] = value
+        return reward, pick_success, place_success
+
+    def _step_pick(self, env_done, reward):
+        task_success = bool(reward >= 1)
+        done = bool(env_done or task_success)
+        reward = 1 if task_success else 0
+        return reward, done, task_success
+
+    def _step_pick_and_place(self, env_done, reward, pick_success, place_success):
+        if self.is_pick:
+            if pick_success:
+                self.is_pick = False
+            task_success = False
+            done = bool(env_done)
+            reward = 0
+            return reward, done, task_success
+
+        task_success = bool(reward >= 1 or place_success)
+        done = bool(env_done or task_success)
+        reward = 1 if task_success else 0
+        return reward, done, task_success
+
     def step(self, action):
         start_time = time.time()
-        obs, rew, done, truncated, info = self.env.step(action)
-        rew = self.compute_reward(obs)
-        if self.config.EXP_NAME == "tube_insertion":
-            done = rew == 1
-            self.is_pick = self.is_pick and not (rew == 0.2)
-        elif self.config.EXP_NAME == "tennis_ball_place":
-            done = (rew == 1) and (not self.is_pick)
-            self.is_pick = self.is_pick and not (rew == 1)
-        elif self.config.EXP_NAME == "twist_bottle_cap":
-            done = (rew == 1) and (not self.is_pick)
-            self.is_pick = self.is_pick and not (rew == 1)
-        elif self.config.EXP_NAME == "tennis_ball_pick_and_place":
-            is_pick_reward = 0 < rew < 1
-            done = (rew >= 1) and (not self.is_pick)
-            self.is_pick = self.is_pick and not is_pick_reward
-            
+        obs, env_rew, env_done, truncated, info = self.env.step(action)
+        classifier_output = self.compute_reward(obs)
+        classifier_reward, pick_success, place_success = self._parse_classifier_output(
+            classifier_output,
+            info,
+        )
+
+        if self.exp_name == "tennis_ball_pick":
+            rew, done, task_success = self._step_pick(env_done, classifier_reward)
         else:
-            done = done or (rew > 0)
-            
-        info['succeed'] = bool(rew == 1)
-        info['is_pick'] = self.is_pick
+            rew, done, task_success = self._step_pick_and_place(
+                env_done,
+                classifier_reward,
+                pick_success,
+                place_success,
+            )
+
+        info["succeed"] = task_success
+        info["is_pick"] = self.is_pick
+        info["classifier_reward"] = classifier_reward
+        info["rl_reward"] = rew
+        info.setdefault("env_reward", env_rew)
         if self.target_hz is not None:
-            time.sleep(max(0, 1/self.target_hz - (time.time() - start_time)))
-        
-        if self.config.EXP_NAME != "tennis_ball_pick_and_place":
-            rew = rew if rew >= 1 else 0
+            time.sleep(max(0, 1 / self.target_hz - (time.time() - start_time)))
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
-        if self.config.EXP_NAME == "tennis_ball_place" or self.config.EXP_NAME == "twist_bottle_cap" or self.config.EXP_NAME == "tube_insertion":
-            self.is_pick = True
+        self.is_pick = True
         obs, info = self.env.reset(**kwargs)
-        info['succeed'] = False
+        info["succeed"] = False
+        info["is_pick"] = self.is_pick
         return obs, info
     
     

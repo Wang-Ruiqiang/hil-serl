@@ -60,16 +60,27 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     TARGET_POSE = np.array([1.55513753, -0.14267503, 0.18153528, -0.03244228, 0.99039508, 0.12396424, -0.05194187])
+    RESET_JOINT = np.array([
+        -0.1662740508,
+        0.0850178096,
+        0.0055932945,
+        -2.0390907424,
+        -0.0005582517,
+        2.1241071588,
+        -0.1604075928,
+    ], dtype=np.float32)
+    RESET_JOINT_DURATION = 4.0
+    RESET_JOINT_STEPS = 80
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
-    ACTION_SCALE = (0.007, 0.007, 0.007)
+    ACTION_SCALE = (0.006, 0.006, 0.006)
     CMD_POSE_RESYNC_THRESHOLD = 0.05
     DISPLAY_IMAGE = True
     GAZE_DISPLAY_MARKERS = True
     GAZE_RS_SAVE_WIDTH = 640
     GAZE_RS_SAVE_HEIGHT = 480
-    MAX_EPISODE_LENGTH = 100
+    MAX_EPISODE_LENGTH = 250
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
 
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
@@ -101,30 +112,24 @@ class TrainConfig(DefaultTrainingConfig):
     buffer_period = 1000
     checkpoint_period = 1000
     steps_per_update = 100
-    encoder_type = "resnet-pretrained"
+    # Lightweight ViT encoder for RGB/tactile images. Mask images still use the
+    # small mask CNN path.
+    # encoder_type = "resnet-pretrained"
+    encoder_type = "vit"
     setup_mode = "single-arm-fixed-gripper"
-    pick_shaping_reward = 0.2
-    pick_reward_threshold = 0.95
-    place_reward_threshold = 0.93
+    pick_reward_threshold = 0.8
+    place_reward_threshold = 0.65
     mask_pick_place_phase_control = True
-    mask_suppress_beta = 1.0
-    use_mask_feature_head = True
-    mask_feature_gate_alpha = 1.0
-    mask_feature_min_gate = 0.1
-    mask_feature_hidden_dim = 128
-    use_mask_encoder = True
-    mask_encoder_latent_dim = 64
-    mask_grounding_weight = 0.01
-    mask_grounding_key = "front_camera_mask1"
-    mask_grounding_decay_step = 5000
-    mask_grounding_decay_weight = 0.002
-    mask_grounding_threshold = 0.05
-    mask_grounding_cell_threshold = 0.01
+    # Vision defaults are derived from encoder_type in train_rlpd.py:
+    # - vit: pure ViT RGB/tactile + mask small-CNN modality.
+    # - resnet-pretrained: ResNet + mask suppression/head/fusion + visual aux.
+    mask_feature_gate_alpha = 0.9
+    mask_feature_min_gate = 0.4
 
     def get_image_keys(
         self,
         enable_tactile=True,
-        use_gaze_target_mask=False,
+        use_gaze_target_mask=True,
     ):
         image_keys = ["front_camera"]
         if enable_tactile:
@@ -153,14 +158,20 @@ class TrainConfig(DefaultTrainingConfig):
         enable_tactile=True,
         record_data=False,
         record_gaze=False,
-        use_gaze_target_mask=False,
-        gaze_predictor_checkpoint_path="examples/gaze_data_process/gaze_heatmap_ckpt",
-        mask_predictor_checkpoint_path=(
-            "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
+        gaze_predictor_checkpoint_path=str(
+            REPO_ROOT / "examples" / "gaze_data_process" / "gaze_heatmap_ckpt"
         ),
-        mask_selection_mode="gaze",
+        mask_predictor_checkpoint_path=str(
+            REPO_ROOT
+            / "examples"
+            / "gaze_data_process"
+            / "SAM_process"
+            / "mask_predictor_ckpt"
+            / "best.pt"
+        ),
+        mask_selection_mode="pick_classifier",
         pick_classifier_checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
-        pick_classifier_threshold=0.95,
+        pick_classifier_threshold=0.8,
         gaze_target_mask_dilation=0,
         frame_save_path=None,
     ):
@@ -173,7 +184,7 @@ class TrainConfig(DefaultTrainingConfig):
 
         self.image_keys = self.get_image_keys(
             enable_tactile,
-            use_gaze_target_mask,
+            use_gaze_target_mask=True,
         )
         self.classifier_keys = self.get_classifier_keys(enable_tactile)
             
@@ -191,18 +202,17 @@ class TrainConfig(DefaultTrainingConfig):
         # env = RelativeFrame(env)
         # env = Quat2EulerWrapper(env)
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
-        if use_gaze_target_mask:
-            env = GazeDerivedObservationWrapper(
-                env,
-                use_gaze_target_mask=use_gaze_target_mask,
-                gaze_predictor_checkpoint_path=gaze_predictor_checkpoint_path,
-                mask_predictor_checkpoint_path=mask_predictor_checkpoint_path,
-                mask_selection_mode=mask_selection_mode,
-                pick_classifier_checkpoint_path=pick_classifier_checkpoint_path,
-                pick_classifier_threshold=pick_classifier_threshold,
-                gaze_target_mask_dilation=gaze_target_mask_dilation,
-                log_fn=print,
-            )
+        env = GazeDerivedObservationWrapper(
+            env,
+            use_gaze_target_mask=True,
+            gaze_predictor_checkpoint_path=gaze_predictor_checkpoint_path,
+            mask_predictor_checkpoint_path=mask_predictor_checkpoint_path,
+            mask_selection_mode=mask_selection_mode,
+            pick_classifier_checkpoint_path=pick_classifier_checkpoint_path,
+            pick_classifier_threshold=pick_classifier_threshold,
+            gaze_target_mask_dilation=gaze_target_mask_dilation,
+            log_fn=print,
+        )
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
         if classifier:
             sample = env.observation_space.sample()
@@ -215,7 +225,7 @@ class TrainConfig(DefaultTrainingConfig):
                 print(
                     f"[debug] sample[{image_key}] "
                     f"shape={image_sample.shape}, dtype={image_sample.dtype}"
-                )
+            )
             if enable_tactile:
                 pick_reward_classifier = load_classifier_func(
                     key=jax.random.PRNGKey(0),
@@ -249,10 +259,22 @@ class TrainConfig(DefaultTrainingConfig):
                 if is_pick:
                     pick_prob = sigmoid(pick_reward_classifier(obs)).item()
                     print("sigmoid(pick_reward_classifier(obs)) = ", pick_prob)
-                    return self.pick_shaping_reward if pick_prob > self.pick_reward_threshold else 0
+                    pick_success = pick_prob > self.pick_reward_threshold
+                    return {
+                        "reward": 0,
+                        "pick_success": pick_success,
+                        "place_success": False,
+                        "pick_prob": pick_prob,
+                    }
                 place_prob = sigmoid(place_reward_classifier(obs)).item()
                 print("sigmoid(place_reward_classifier(obs)) = ", place_prob)
-                return int(place_prob > self.place_reward_threshold)
+                place_success = place_prob > self.place_reward_threshold
+                return {
+                    "reward": int(place_success),
+                    "pick_success": False,
+                    "place_success": place_success,
+                    "place_prob": place_prob,
+                }
 
             env = MultiCameraBinaryRewardClassifierWrapper(env, reward_func)
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)

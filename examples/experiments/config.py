@@ -20,7 +20,12 @@ class DefaultTrainingConfig:
     log_period: int = 1000
     eval_period: int = 2000
 
-    # "resnet" for ResNet10 from scratch and "resnet-pretrained" for frozen ResNet10 with pretrained weights
+    # Visual encoder backbone for non-mask image keys.
+    #   "resnet": train ResNet10 from scratch.
+    #   "resnet-pretrained": frozen ImageNet ResNet10 + trainable readout head.
+    #   "vit" / "vit-small": trainable lightweight ViT-style image encoder.
+    # Mask images, when present, go through the gaze agent's small mask CNN,
+    # not through this visual encoder.
     encoder_type: str = "resnet-pretrained"
     demo_path: str = None
     checkpoint_period: int = 0
@@ -33,75 +38,6 @@ class DefaultTrainingConfig:
     classifier_keys: List[str] = None
     proprio_keys: List[str] = None
     state_weights: List[float] | None = None
-
-    # Gaze/mask-conditioned visual feature settings.
-    # These only affect the gaze/mask SAC agent when observations include
-    # front_camera_mask. Plain vision+tactile SAC ignores these values.
-
-    # Enable a small trainable mask feature head on top of front_camera
-    # features. By convention, the head uses front_camera_mask1 when available
-    # so it can learn target-focused RGB features. Its logits are also the map
-    # supervised by mask_grounding_loss.
-    use_mask_feature_head: bool = True
-
-    # If False, mask suppression, mask feature head, and mask grounding are active
-    # whenever their masks are present. This is the tennis_ball_pick behavior.
-    #
-    # If True, the encoder reads the final three state entries as phase one-hot:
-    #   [1, 0, 0] = pick / mask1 target
-    #   [0, 1, 0] = place / mask2 target
-    #   [0, 0, 1] = no selected target
-    # In pick phase, mask2 suppression, mask feature head, and mask grounding are
-    # enabled. In place phase, those RGB-shaping losses/heads are gated off so
-    # the RGB branch falls back to raw ResNet features. The mask CNN still uses
-    # front_camera_mask, i.e. the currently selected target mask.
-    mask_pick_place_phase_control: bool = False
-
-    # Strength of the trainable mask feature gate. The learned gate can both
-    # amplify selected regions and suppress less useful regions.
-    mask_feature_gate_alpha: float = 1.0
-
-    # Lower bound for the trainable gate multiplier. Smaller values suppress
-    # non-selected regions harder; larger values preserve more global context.
-    mask_feature_min_gate: float = 0.1
-
-    # Hidden channel count inside the trainable mask feature head. This is a model
-    # capacity setting; most tasks should leave it at the default.
-    mask_feature_hidden_dim: int = 128
-
-    # Encode a binary mask with a small CNN and concatenate the resulting vector
-    # as an additional policy/critic modality. The mask CNN uses front_camera_mask
-    # when available, so pick-and-place can pass the currently selected target
-    # (ball during pick, box during place). If front_camera_mask is absent, it
-    # falls back to the same mask used by the mask feature head.
-    use_mask_encoder: bool = True
-    mask_encoder_latent_dim: int = 64
-
-    # Weight for the auxiliary loss that pulls the trainable mask feature map into
-    # mask_grounding_key. 0 disables this auxiliary supervision.
-    mask_grounding_weight: float = 0.0
-
-    # Observation key used as the target mask for CGL / mask grounding. For
-    # tennis_ball_pick and tennis_ball_pick_and_place this should stay as
-    # front_camera_mask1, so the mask feature head is supervised to focus on the
-    # ball. When mask_pick_place_phase_control=True, this loss is automatically
-    # applied only in pick phase.
-    mask_grounding_key: str = "front_camera_mask"
-
-    # Optional step-based decay for mask_grounding_weight. This lets the mask
-    # strongly shape mask features early, then reduce its influence after the
-    # mask feature head has learned a stable target region. Set step <= 0 to disable.
-    mask_grounding_decay_step: int = 0
-    mask_grounding_decay_weight: float = 0.0
-
-    # Threshold used after resizing front_camera_mask to the critic attention
-    # resolution when computing mask_grounding_loss.
-    mask_grounding_threshold: float = 0.05
-
-    # Minimum high-resolution mask occupancy required to mark one low-resolution
-    # attention cell as positive. For example, 0.01 means at least 1% of the
-    # source pixels in that attention cell must belong to the mask.
-    mask_grounding_cell_threshold: float = 0.01
 
     # "single-arm-learned-gripper", "dual-arm-learned-gripper" for with learned gripper, 
     # "single-arm-fixed-gripper", "dual-arm-fixed-gripper" for without learned gripper (i.e. pregrasped)

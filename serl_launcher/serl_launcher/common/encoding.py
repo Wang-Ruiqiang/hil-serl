@@ -320,7 +320,9 @@ class EncodingWrapper(nn.Module):
                     # This spatial blend is only used for attention visualization;
                     # the RL input below fuses the two pooled vector branches.
                     attention_spatial_features = (
-                        suppressed_spatial_features + mask_head_task_features
+                        spatial_head_gate
+                        * (suppressed_spatial_features + mask_head_task_features)
+                        + (1.0 - spatial_head_gate) * spatial_features
                     )
                 if return_attention:
                     attention_map = raw_attention_map

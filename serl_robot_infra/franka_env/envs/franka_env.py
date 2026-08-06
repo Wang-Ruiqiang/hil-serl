@@ -22,6 +22,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import threading
 from franka_env.camera.video_capture import VideoCapture
 from franka_env.camera.rs_capture import RSCapture
@@ -84,6 +85,10 @@ class DefaultEnvConfig:
     }
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((7,))
+    RESET_JOINT: np.ndarray = np.zeros((7,))
+    RESET_JOINT_DURATION: float = 4.0
+    RESET_JOINT_STEPS: int = 80
+    RESET_OPEN_HAND: bool = True
     REWARD_THRESHOLD: np.ndarray = np.zeros((6,))
     ACTION_SCALE = np.zeros((3,))
     CMD_POSE_RESYNC_THRESHOLD: float = 0.05
@@ -121,6 +126,11 @@ class ROSNodeInterface(Node):
             '/target_pose',
             10
         )
+        self.joint_target_pub = self.create_publisher(
+            JointTrajectory,
+            '/joint_pose',
+            10,
+        )
 
         self.publisher_hand = self.create_publisher(
             JointState, 
@@ -138,7 +148,7 @@ class ROSNodeInterface(Node):
 
         self.joint_sub = self.create_subscription(
             JointState,
-            '/joint_states',  # 接收机械臂关节角
+            '/franka/joint_states',  # 接收机械臂关节角
             self.joint_callback,
             10
         )
@@ -157,9 +167,44 @@ class ROSNodeInterface(Node):
         # 数据存储
         self.current_joints = None
         self.current_hand_joints = None
+        self.joint_position = None
 
         self.cur_position = np.zeros(3, dtype=np.float32)
         self.cur_orientation = np.array([0, 1, 0, 0], dtype=np.float32)
+
+    def publish_joint_target(self, start_joint, target_joint, duration):
+        """Publish a complete position trajectory to pose-tracking Servo."""
+        start_joint = np.asarray(start_joint, dtype=np.float32).reshape(-1)
+        target_joint = np.asarray(target_joint, dtype=np.float32).reshape(-1)
+        if start_joint.shape != (7,) or target_joint.shape != (7,):
+            raise ValueError(
+                f"Expected 7 start/target joints, got {start_joint.shape} and {target_joint.shape}"
+            )
+
+        duration = max(float(duration), 0.02)
+        msg = JointTrajectory()
+        msg.joint_names = [
+            "fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4",
+            "fr3_joint5", "fr3_joint6", "fr3_joint7",
+        ]
+
+        # Provide samples at the Servo publish period so its Butterworth
+        # smoother has a real trajectory to process instead of only two points.
+        steps = max(2, int(np.ceil(duration / 0.0334)))
+        for index in range(steps + 1):
+            alpha = index / steps
+            point = JointTrajectoryPoint()
+            point.positions = (
+                start_joint + alpha * (target_joint - start_joint)
+            ).astype(float).tolist()
+            point.time_from_start.sec = int(np.floor(duration * alpha))
+            point.time_from_start.nanosec = int(
+                (duration * alpha - np.floor(duration * alpha)) * 1e9
+            )
+            if index == 0:
+                point.time_from_start.nanosec = 1
+            msg.points.append(point)
+        self.joint_target_pub.publish(msg)
 
 
     def robot_ee_callback(self, msg):
@@ -193,7 +238,7 @@ class ROSNodeInterface(Node):
         self.joint_position = np.array(ordered_joint_positions, dtype=np.float32)
 
         # 设置事件为“数据已接收”
-        # self.joint_event.set()
+        self.joint_event.set()
 
 
     def publish_arm_action(self, pose):
@@ -299,6 +344,10 @@ class ROSNodeInterface(Node):
     
 
     def get_current_joint(self, timeout=5.0):
+        if self.joint_position is None:
+            self.joint_event.wait(timeout=float(timeout))
+        if self.joint_position is None:
+            raise TimeoutError("Timed out waiting for /joint_states FR3 joint positions.")
         return self.joint_position
 
     def get_current_leap_position(self):
@@ -325,6 +374,13 @@ class FrankaEnv(gym.Env):
     ):
         self.action_scale = config.ACTION_SCALE
         self._TARGET_POSE = config.TARGET_POSE
+        self.reset_joint = np.asarray(
+            getattr(config, "RESET_JOINT", np.zeros((7,))),
+            dtype=np.float32,
+        )
+        self.reset_joint_duration = float(getattr(config, "RESET_JOINT_DURATION", 4.0))
+        self.reset_joint_steps = int(getattr(config, "RESET_JOINT_STEPS", 80))
+        self.reset_open_hand = bool(getattr(config, "RESET_OPEN_HAND", True))
         # self._RESET_POSE = config.RESET_POSE
         self._REWARD_THRESHOLD = config.REWARD_THRESHOLD
         self.url = config.SERVER_URL
@@ -591,11 +647,46 @@ class FrankaEnv(gym.Env):
                     print(f"[DM-TAC] failed to disconnect {sensor_name}: {exc}")
 
 
+    def _move_to_joint_target(
+        self,
+        target_joint,
+        duration,
+    ):
+        target_joint = np.asarray(target_joint, dtype=np.float32).reshape(-1)
+        if target_joint.shape != (7,):
+            raise ValueError(f"Expected 7 target joints, got {target_joint.shape}")
+
+        start_joint = np.asarray(
+            self.ros_interface.get_current_joint(),
+            dtype=np.float32,
+        ).reshape(-1)
+        print(
+            "[reset] joint_target start=", np.round(start_joint, 4),
+            "target=", np.round(target_joint, 4),
+            "duration=", f"{float(duration):.2f}s",
+            flush=True,
+        )
+        self.ros_interface.publish_joint_target(
+            start_joint,
+            target_joint,
+            duration,
+        )
+        # Publishing is asynchronous. Wait on the measured joint state here,
+        # rather than sleeping for the nominal trajectory duration.
+        self._update_cur_position(
+            joint_target=target_joint,
+            timeout=max(float(duration) + 2.0, 10.0),
+            wait_threshold=0.05,
+            joint_wait_tolerance=0.03,
+            wait=True,
+        )
+
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
         action = np.clip(action, self.action_space.low, self.action_space.high)
         self.current_action = action.copy()
+
         self.cur_position, self.cur_orientation = self.ros_interface.get_current_robot_ee()
         self.curpos = np.concatenate((self.cur_position, self.cur_orientation), axis=0)
         # self.nextpos = self.curpos.copy()
@@ -631,9 +722,10 @@ class FrankaEnv(gym.Env):
         #     Rotation.from_euler("xyz", rpy_delta * self.action_scale[1])
         #     * Rotation.from_quat(self.cur_orientation)
         # ).as_quat()
-        self.nextpos[3:] = self.cur_orientation.copy()
-
-        self.nextpos[3:] = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        if self.exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
+            self.nextpos[3:] = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        else:
+            self.nextpos[3:] = self.cur_orientation.copy()
 
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
@@ -645,8 +737,14 @@ class FrankaEnv(gym.Env):
 
         # print("target_hand_pos = ", target_hand_pos)
 
-        self.ros_interface.arm_interpolate_and_publish(self.cmd_pose, self.nextpos, 0.007, 10)
-        # self.ros_interface.publish_arm_action(self.nextpos)
+        # RL actions use Cartesian pose Servo. Joint-position control is
+        # reserved for task-specific reset methods.
+        self.ros_interface.arm_interpolate_and_publish(
+            self.cmd_pose,
+            self.nextpos,
+            0.007,
+            10,
+        )
         self.cmd_pose = self.nextpos.copy()
 
         if -0.3 > grip_action or grip_action > 0.3:
@@ -1427,14 +1525,42 @@ class FrankaEnv(gym.Env):
             time.sleep(0.01)
     
 
+    def _go_to_reset_joint(self):
+        if self.reset_joint.shape[0] != 7:
+            raise ValueError(f"RESET_JOINT must have 7 values, got {self.reset_joint}")
+        if self.reset_open_hand:
+            self._send_leap_hand_command(np.asarray(self.gripper_open_joint, dtype=np.float32))
+            time.sleep(0.3)
+
+        print(
+            "[reset_joint] target="
+            f"{np.array2string(self.reset_joint, precision=4)} "
+            f"duration={self.reset_joint_duration:.2f}s"
+        )
+        self._move_to_joint_target(
+            self.reset_joint,
+            duration=self.reset_joint_duration,
+        )
+        self._update_cur_position(wait=False)
+        self.cmd_pose = np.concatenate(
+            [
+                np.asarray(self.cur_position, dtype=np.float32),
+                np.asarray(self.cur_orientation, dtype=np.float32),
+            ],
+            axis=0,
+        )
+        self.nextpos = self.cmd_pose.copy()
+
     def reset(self, joint_reset=False, **kwargs):
         print("franka_env reset")
         self.data_count = 0
         self.last_gripper_act = time.time()
         # requests.post(self.url + "update_param", json=self.config.COMPLIANCE_PARAM)
         if self.save_video:
-            self.save_video_recording()
+            self.save_video_recording(self.video_count)
 
+        # Task-specific wrappers own reset strategy. FrankaEnv only provides
+        # lower-level helpers such as _go_to_reset_joint().
         # self._recover()
         # self.go_to_reset(joint_reset=joint_reset)
         # self._recover()
@@ -1552,35 +1678,71 @@ class FrankaEnv(gym.Env):
             time.sleep(step_time)
             
 
-    def _update_cur_position(self, arm_action=None, timeout=10.0, wait_threshold=0.05, wait=True):
+    def _update_cur_position(
+        self,
+        arm_action=None,
+        joint_target=None,
+        timeout=10.0,
+        wait_threshold=0.05,
+        joint_wait_tolerance=0.03,
+        wait=True,
+    ):
         """
-        Internal function to get the latest state of the robot and its gripper.
+        Read robot state and optionally wait for EE/joint targets.
+
+        ``arm_action`` checks Cartesian position. ``joint_target`` checks the
+        measured seven-joint vector. When both are supplied, both conditions
+        must be satisfied.
         """
         start = time.time()
         self.cur_position, self.cur_orientation = self.ros_interface.get_current_robot_ee()
-        # joint_position = self.ros_interface.get_current_joint()
-        # self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
+        self.joint_position = np.asarray(
+            self.ros_interface.get_current_joint(),
+            dtype=np.float32,
+        ).copy()
 
         hand_joint_msg = self.ros_interface.get_current_leap_position()
         self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
         # print("in _update_cur_position curr_leap_hand_pos = ", self.curr_leap_hand_pos)
 
-        if wait and arm_action is not None:
-            diff = np.asarray(arm_action[:3], dtype=np.float32) - np.asarray(self.cur_position, dtype=np.float32)
-        else:
-            diff = np.zeros(3, dtype=np.float32)
+        arm_action = None if arm_action is None else np.asarray(arm_action, dtype=np.float32)
+        joint_target = None if joint_target is None else np.asarray(joint_target, dtype=np.float32).reshape(7)
 
-        while wait and np.max(np.abs(diff)) > wait_threshold:
+        def current_errors():
+            pose_error = (
+                np.max(np.abs(arm_action[:3] - self.cur_position))
+                if arm_action is not None
+                else 0.0
+            )
+            joint_error = (
+                np.max(np.abs(joint_target - self.joint_position))
+                if joint_target is not None
+                else 0.0
+            )
+            return float(pose_error), float(joint_error)
+
+        pose_error, joint_error = current_errors()
+        while wait and (
+            pose_error > float(wait_threshold)
+            or joint_error > float(joint_wait_tolerance)
+        ):
             if time.time() - start > timeout:
-                print("[WARN] 等待机械臂到位超时")
+                print(
+                    "[WARN] robot target wait timed out "
+                    f"pose_error={pose_error:.4f} "
+                    f"joint_error={joint_error:.4f}",
+                    flush=True,
+                )
                 break
             time.sleep(0.02)
             self.cur_position, self.cur_orientation = self.ros_interface.get_current_robot_ee()
-            # joint_position = self.ros_interface.get_current_joint()
-            # self.joint_position = np.asarray(joint_position, dtype=np.float32).copy()
+            self.joint_position = np.asarray(
+                self.ros_interface.get_current_joint(),
+                dtype=np.float32,
+            ).copy()
             hand_joint_msg = self.ros_interface.get_current_leap_position()
             self.curr_leap_hand_pos = np.asarray(hand_joint_msg, dtype=np.float32).copy()
-            diff = np.asarray(arm_action[:3], dtype=np.float32) - np.asarray(self.cur_position, dtype=np.float32)
+            pose_error, joint_error = current_errors()
         
         # if self.exp_name =="twist_bottle_cap":
         #     self.hand_state = self.gripper_unwrapped_phase
@@ -1658,18 +1820,14 @@ class FrankaEnv(gym.Env):
             if hasattr(self, "displayer"):
                 self.displayer.join(timeout=1.0)
 
-        # Ensure ROS executor and node are cleaned up to avoid threading errors
-        if hasattr(self, "_ros_spin_stop"):
-            self._ros_spin_stop.set()
+        # Shut down the executor before joining its spin thread. Otherwise the
+        # spin loop can keep scheduling callbacks while Python is exiting.
+        if hasattr(self, "executor"):
+            self.executor.shutdown()
 
-        # 2) 等 spin thread 退出来（先 join）
         if hasattr(self, "executor_thread") and self.executor_thread.is_alive():
             self.executor_thread.join(timeout=2)
             print("executor_thread alive?", self.executor_thread.is_alive(), flush=True)
-
-        # 3) 再 shutdown executor + node + rclpy
-        if hasattr(self, "executor"):
-            self.executor.shutdown()
 
         if hasattr(self, "ros_interface"):
             self.ros_interface.destroy_node()

@@ -13,6 +13,7 @@ from absl import app, flags
 from flax.training import checkpoints
 import copy
 import pickle as pkl
+from pathlib import Path
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
 
@@ -26,7 +27,6 @@ from agentlace.data.data_store import QueuedDataStore
 
 from serl_launcher.utils.launcher import (
     make_gaze_sac_pixel_agent_hybrid_single_arm,
-    make_sac_pixel_agent_hybrid_single_arm,
     make_trainer_config,
     make_wandb_logger,
 )
@@ -34,6 +34,7 @@ from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SUPPORTED_EXPS = {"tennis_ball_pick", "tennis_ball_pick_and_place"}
 
@@ -44,29 +45,31 @@ flags.DEFINE_boolean("actor", False, "Whether this is an actor.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 38000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
-flags.DEFINE_boolean(
-    "use_gaze_target_mask",
-    True,
-    "Add gaze-selected mask plus phase one-hot to observations.",
-)
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
-    "examples/gaze_data_process/gaze_heatmap_ckpt",
+    str(REPO_ROOT / "examples" / "gaze_data_process" / "gaze_heatmap_ckpt"),
     "Checkpoint directory for the frozen gaze heatmap predictor used by the actor.",
 )
 flags.DEFINE_string(
     "mask_predictor_checkpoint_path",
-    "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt",
+    str(
+        REPO_ROOT
+        / "examples"
+        / "gaze_data_process"
+        / "SAM_process"
+        / "mask_predictor_ckpt"
+        / "best.pt"
+    ),
     "Checkpoint file for the frozen RGB mask predictor used by front_camera_mask.",
 )
 flags.DEFINE_enum(
     "mask_selection_mode",
     "pick_classifier",
-    ["gaze", "pick_classifier"],
+    ["gaze", "pick_classifier", "pick_only", "place_only"],
     "How front_camera_mask chooses mask1/mask2.",
 )
 flags.DEFINE_string(
@@ -76,7 +79,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_float(
     "pick_classifier_threshold",
-    1.00,
+    0.8,
     "Pick classifier probability threshold. Below uses mask1; above uses mask2.",
 )
 flags.DEFINE_integer(
@@ -137,6 +140,10 @@ class KeyReader(threading.Thread):
             return self.q.get_nowait()
         except queue.Empty:
             return None
+
+    def drain(self):
+        while self.get_key_nowait() is not None:
+            pass
 
     def stop(self):
         self._stop.set()
@@ -217,9 +224,24 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
     if FLAGS.eval_checkpoint_step:
         try:
             print("in eval mode")
+            if not FLAGS.checkpoint_path:
+                raise ValueError("--checkpoint_path is required in eval mode.")
+            checkpoint_dir = os.path.abspath(FLAGS.checkpoint_path)
+            if not os.path.isdir(checkpoint_dir):
+                raise FileNotFoundError(
+                    f"Eval checkpoint directory does not exist: {checkpoint_dir}"
+                )
+            checkpoint_step_dir = os.path.join(
+                checkpoint_dir, f"checkpoint_{FLAGS.eval_checkpoint_step}"
+            )
+            if not os.path.isdir(checkpoint_step_dir):
+                raise FileNotFoundError(
+                    "Eval checkpoint step does not exist: "
+                    f"{checkpoint_step_dir}"
+                )
             print_green(f"Loaded previous checkpoint at step {FLAGS.eval_checkpoint_step}.")
             ckpt = checkpoints.restore_checkpoint(
-                os.path.abspath(FLAGS.checkpoint_path),
+                checkpoint_dir,
                 agent.state,
                 step=FLAGS.eval_checkpoint_step,
             )
@@ -286,7 +308,9 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                             env.unwrapped.move_up()
                         if FLAGS.save_video:
                             env.unwrapped.save_video_recording(episode)
+                        key_reader.drain()
                         input("reset env")
+                        key_reader.drain()
                         obs, _ = env.reset()
 
             print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
@@ -296,7 +320,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
         except KeyboardInterrupt:
             return
         finally:
-            return
+            if hasattr(env, "close"):
+                env.close()
 
     start_step = 0
     if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path):
@@ -338,91 +363,115 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
     intervention_count = 0
     intervention_steps = 0
     episode_index = 0
+    key_reader = KeyReader()
+    key_reader.start()
 
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
-    for step in pbar:
-        if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
-            buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
-            demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
-            os.makedirs(buffer_path, exist_ok=True)
-            os.makedirs(demo_buffer_path, exist_ok=True)
-            with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
-                pkl.dump(transitions, f)
-                transitions = []
-            with open(os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb") as f:
-                pkl.dump(demo_transitions, f)
-                demo_transitions = []
+    try:
+        for step in pbar:
+            if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
+                buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
+                demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
+                os.makedirs(buffer_path, exist_ok=True)
+                os.makedirs(demo_buffer_path, exist_ok=True)
+                with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
+                    pkl.dump(transitions, f)
+                    transitions = []
+                with open(os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb") as f:
+                    pkl.dump(demo_transitions, f)
+                    demo_transitions = []
 
-        timer.tick("total")
-        with timer.context("sample_actions"):
-            print_green(f"obs[state] =  {obs['state']}")
-            sampling_rng, key = jax.random.split(sampling_rng)
-            actions = agent.sample_actions(
-                observations=jax.device_put(obs),
-                argmax=True,
-                seed=key,
-            )
-            actions = zero_action_rpy(jax.device_get(actions))
-            maybe_display_actor_feature_overlay(agent, env, obs, actions, step)
+            timer.tick("total")
+            with timer.context("sample_actions"):
+                print_green(f"obs[state] =  {obs['state']}")
+                sampling_rng, key = jax.random.split(sampling_rng)
+                actions = agent.sample_actions(
+                    observations=jax.device_put(obs),
+                    argmax=True,
+                    seed=key,
+                )
+                actions = zero_action_rpy(jax.device_get(actions))
+                maybe_display_actor_feature_overlay(agent, env, obs, actions, step)
 
-        with timer.context("step_env"):
-            next_obs, reward, done, truncated, info = env.step(actions)
+            with timer.context("step_env"):
+                next_obs, reward, done, truncated, info = env.step(actions)
 
-            if "intervene_action" in info:
-                actions = zero_action_rpy(info.pop("intervene_action"))
-                intervention_steps += 1
-                if not already_intervened:
-                    intervention_count += 1
-                already_intervened = True
-            else:
-                already_intervened = False
-                actions = zero_action_rpy(actions)
+                key = key_reader.get_key_nowait()
+                while key is not None:
+                    if key == "1":
+                        done = True
+                        reward = 1.0
+                        info = dict(info)
+                        info["succeed"] = True
+                        info["manual_success"] = True
+                    elif key == "2":
+                        done = True
+                        reward = 0.0
+                        info = dict(info)
+                        info["succeed"] = False
+                        info["manual_failure"] = True
+                    key = key_reader.get_key_nowait()
 
-            print("actions = ", actions)
-            running_return += reward
-            transition = dict(
-                observations=obs,
-                next_observations=next_obs,
-                actions=actions,
-                rewards=reward,
-                masks=1.0 - done,
-                dones=done,
-            )
-            transition["grasp_penalty"] = np.float32(info.get("grasp_penalty", 0.0))
-            transition["robot_arm_penalty"] = np.float32(
-                info.get("robot_arm_penalty", 0.0)
-            )
+                if "intervene_action" in info:
+                    actions = zero_action_rpy(info.pop("intervene_action"))
+                    intervention_steps += 1
+                    if not already_intervened:
+                        intervention_count += 1
+                    already_intervened = True
+                else:
+                    already_intervened = False
+                    actions = zero_action_rpy(actions)
 
-            data_store.insert(transition)
-            transitions.append(copy.deepcopy(transition))
-            if already_intervened:
-                intvn_data_store.insert(transition)
-                demo_transitions.append(copy.deepcopy(transition))
+                print("actions = ", actions)
+                running_return += reward
+                transition = dict(
+                    observations=obs,
+                    next_observations=next_obs,
+                    actions=actions,
+                    rewards=reward,
+                    masks=1.0 - done,
+                    dones=done,
+                )
+                transition["grasp_penalty"] = np.float32(info.get("grasp_penalty", 0.0))
+                transition["robot_arm_penalty"] = np.float32(
+                    info.get("robot_arm_penalty", 0.0)
+                )
 
-            obs = next_obs
-            if done:
-                print_green(f" task done = {done}")
-                info["episode"]["intervention_count"] = intervention_count
-                info["episode"]["intervention_steps"] = intervention_steps
-                client.request("send-stats", {"environment": info})
-                pbar.set_description(f"last return: {running_return}")
-                running_return = 0.0
-                intervention_count = 0
-                intervention_steps = 0
-                already_intervened = False
-                client.update()
+                data_store.insert(transition)
+                transitions.append(copy.deepcopy(transition))
+                if already_intervened:
+                    intvn_data_store.insert(transition)
+                    demo_transitions.append(copy.deepcopy(transition))
 
-                if FLAGS.save_video:
-                    env.unwrapped.save_video_recording(episode_index)
-                episode_index += 1
-                if FLAGS.exp_name == "tennis_ball_pick" and reward:
-                    env.unwrapped.move_up()
-                input("reset env")
-                obs, _ = env.reset()
+                obs = next_obs
+                if done:
+                    print_green(f" task done = {done}")
+                    info.setdefault("episode", {})
+                    info["episode"]["intervention_count"] = intervention_count
+                    info["episode"]["intervention_steps"] = intervention_steps
+                    client.request("send-stats", {"environment": info})
+                    pbar.set_description(f"last return: {running_return}")
+                    running_return = 0.0
+                    intervention_count = 0
+                    intervention_steps = 0
+                    already_intervened = False
+                    client.update()
 
-        timer.tock("total")
-        if step % config.log_period == 0:
-            client.request("send-stats", {"timer": timer.get_average_times()})
+                    if FLAGS.save_video:
+                        env.unwrapped.save_video_recording(episode_index)
+                    episode_index += 1
+                    if FLAGS.exp_name == "tennis_ball_pick" and reward:
+                        env.unwrapped.move_up()
+                    key_reader.drain()
+                    input("reset env")
+                    key_reader.drain()
+                    obs, _ = env.reset()
+
+            timer.tock("total")
+            if step % config.log_period == 0:
+                client.request("send-stats", {"timer": timer.get_average_times()})
+    finally:
+        key_reader.stop()
 
 ##############################################################################
 
@@ -502,7 +551,8 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     else:
         train_critic_networks_to_update = frozenset({"critic", "grasp_critic"})
         train_networks_to_update = frozenset({"critic", "grasp_critic", "actor", "temperature"})
-        if FLAGS.use_gaze_target_mask:
+        use_visual_aux = bool(agent.config.get("use_visual_aux", False))
+        if use_visual_aux:
             train_critic_networks_to_update = train_critic_networks_to_update | frozenset(
                 {"visual_aux"}
             )
@@ -513,7 +563,7 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     for step in tqdm.tqdm(
         range(start_step, config.max_steps), dynamic_ncols=True, desc="learner"
     ):
-        update_kwargs = {"train_step": step} if FLAGS.use_gaze_target_mask else {}
+        update_kwargs = {"train_step": step}
         # run n-1 critic updates and 1 critic + actor update.
         # This makes training on GPU faster by reducing the large batch transfer time from CPU to GPU
         for critic_step in range(config.cta_ratio - 1):
@@ -553,13 +603,12 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
                 f"td={info_scalar('visual_aux_reference_td_loss'):.4g} "
                 f"total={info_scalar('mask_grounding_loss'):.4g} "
                 f"cgl={info_scalar('mask_grounding_cgl_loss'):.4g} "
-                f"weighted={info_scalar('weighted_mask_grounding_loss'):.4g} "
-                f"ratio={info_scalar('mask_grounding_to_td_ratio'):.4g} "
+                f"aux={info_scalar('mask_grounding_aux_loss'):.4g} "
+                f"aux/td={info_scalar('mask_grounding_to_td_ratio'):.4g} "
                 f"inside={info_scalar('mask_grounding_coverage'):.3f} "
                 f"outside={info_scalar('mask_grounding_outside_mass'):.3f} "
                 f"entropy={info_scalar('mask_feature_entropy'):.3f} "
-                f"valid={info_scalar('mask_grounding_valid_fraction'):.3f} "
-                f"weight={info_scalar('mask_grounding_weight'):.4g}"
+                f"valid={info_scalar('mask_grounding_valid_fraction'):.3f}"
             )
 
         if step % config.log_period == 0:
@@ -594,8 +643,6 @@ def main(_):
         classifier=True,
         enable_tactile=FLAGS.enable_tactile,
     )
-    if "use_gaze_target_mask" in inspect.signature(config.get_environment).parameters:
-        env_kwargs["use_gaze_target_mask"] = FLAGS.use_gaze_target_mask
     env_signature = inspect.signature(config.get_environment).parameters
     if "gaze_predictor_checkpoint_path" in env_signature:
         env_kwargs["gaze_predictor_checkpoint_path"] = FLAGS.gaze_predictor_checkpoint_path
@@ -613,11 +660,7 @@ def main(_):
     env = RecordEpisodeStatistics(env)
     sample_obs = env.observation_space.sample()
     state_dim = sample_obs["state"].shape[-1]
-    agent_factory = (
-        make_gaze_sac_pixel_agent_hybrid_single_arm
-        if FLAGS.use_gaze_target_mask
-        else make_sac_pixel_agent_hybrid_single_arm
-    )
+    agent_factory = make_gaze_sac_pixel_agent_hybrid_single_arm
 
     agent_kwargs = dict(
         seed=FLAGS.seed,
@@ -627,27 +670,16 @@ def main(_):
         encoder_type=config.encoder_type,
         discount=config.discount,
     )
-    if FLAGS.use_gaze_target_mask:
-        agent_kwargs["mask_suppress_beta"] = config.mask_suppress_beta
-        if hasattr(config, "mask_pick_place_phase_control"):
-            agent_kwargs["mask_pick_place_phase_control"] = (
-                config.mask_pick_place_phase_control
-            )
-        agent_kwargs["use_mask_feature_head"] = config.use_mask_feature_head
-        agent_kwargs["mask_feature_gate_alpha"] = config.mask_feature_gate_alpha
-        agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate
-        agent_kwargs["mask_feature_hidden_dim"] = config.mask_feature_hidden_dim
-        agent_kwargs["use_mask_encoder"] = config.use_mask_encoder
-        agent_kwargs["mask_encoder_latent_dim"] = config.mask_encoder_latent_dim
-        agent_kwargs["mask_grounding_weight"] = config.mask_grounding_weight
-        agent_kwargs["mask_grounding_decay_step"] = config.mask_grounding_decay_step
-        agent_kwargs["mask_grounding_decay_weight"] = config.mask_grounding_decay_weight
-        agent_kwargs["mask_grounding_key"] = config.mask_grounding_key
-        agent_kwargs["mask_grounding_threshold"] = config.mask_grounding_threshold
-        agent_kwargs["mask_grounding_cell_threshold"] = (
-            config.mask_grounding_cell_threshold
+    if hasattr(config, "mask_pick_place_phase_control"):
+        agent_kwargs["mask_pick_place_phase_control"] = (
+            config.mask_pick_place_phase_control
         )
+    if hasattr(config, "mask_feature_gate_alpha"):
+        agent_kwargs["mask_feature_gate_alpha"] = config.mask_feature_gate_alpha
+    if hasattr(config, "mask_feature_min_gate"):
+        agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate
     agent: SACAgent = agent_factory(**agent_kwargs)
+    print(f"[vision_config] encoder_type={config.encoder_type} mask_observation=True")
     include_robot_arm_penalty = True
     include_grasp_penalty = True
 
@@ -685,7 +717,7 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-7-14",
+            project="tennis_ball_pick-and-place-vit-8-5",
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,

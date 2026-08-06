@@ -12,6 +12,7 @@ from absl import app, flags
 from flax.training import checkpoints
 import copy
 import pickle as pkl
+from pathlib import Path
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from natsort import natsorted
 
@@ -42,6 +43,7 @@ from experiments.mappings import NEW_MAPPING
 from examples.utils import read_utils
 
 FLAGS = flags.FLAGS
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("seed", 42, "Random seed.")
@@ -62,12 +64,19 @@ flags.DEFINE_boolean(
 )
 flags.DEFINE_string(
     "gaze_predictor_checkpoint_path",
-    "examples/gaze_data_process/gaze_heatmap_ckpt",
+    str(REPO_ROOT / "examples" / "gaze_data_process" / "gaze_heatmap_ckpt"),
     "Checkpoint directory for the frozen gaze heatmap predictor used by the actor.",
 )
 flags.DEFINE_string(
     "mask_predictor_checkpoint_path",
-    "examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt",
+    str(
+        REPO_ROOT
+        / "examples"
+        / "gaze_data_process"
+        / "SAM_process"
+        / "mask_predictor_ckpt"
+        / "best.pt"
+    ),
     "Checkpoint file for the frozen RGB mask predictor used by front_camera_mask.",
 )
 flags.DEFINE_enum(
@@ -676,7 +685,6 @@ def main(_):
         agent_kwargs["task_attention_alpha"] = config.task_attention_alpha
         agent_kwargs["task_attention_min_gate"] = config.task_attention_min_gate
         agent_kwargs["task_attention_hidden_dim"] = config.task_attention_hidden_dim
-        agent_kwargs["mask_grounding_weight"] = config.mask_grounding_weight
         agent_kwargs["mask_grounding_threshold"] = config.mask_grounding_threshold
     agent: SACAgent = agent_factory(**agent_kwargs)
     include_robot_arm_penalty = True

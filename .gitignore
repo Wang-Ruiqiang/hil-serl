@@ -6,6 +6,12 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 
+# Python packaging / ROS 2 (colcon) build artifacts
+*.egg-info/
+/build/
+/install/
+/log/
+
 *.log
 sdk_log.log
 
@@ -14,11 +20,18 @@ sdk_log.log
 *.npy
 *.h5
 *.hdf5
+*.pickle
+*.pt
+*.pth
+*.ckpt
+*.safetensors
 
 *.mp4
 *.avi
 *.mov
 *.mkv
+*.webm
+*.m4v
 
 examples/**/checkpoint_*/
 examples/**/checkpoints/
@@ -37,6 +50,7 @@ examples/demo_data/*
 examples/demo_data copy/*
 examples/test_data/*
 examples/experiments/tennis_ball_pick/202*
+examples/experiments/tennis_ball_pick_and_place/202*
 examples/experiments/twist_bottle_cap/202*
 examples/experiments/tube_insertion/202*
 examples/experiments/twist_bottle_cap/videos/*
@@ -57,5 +71,5 @@ examples/gaze_data_process/gaze_point_ckpt/*
 examples/reward_classifier/classifier_data*/
 examples/reward_classifier/classifier_ckpt*/
 examples/modality_critic_attention_outputs/*
-scripts/*
 docs/reports/*
+/scripts/*

@@ -29,11 +29,11 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick-6-23-1",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
     ],
     "Recorded data root(s) containing frame_xxx folders and recording_metadata.json.",
 )
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
+flags.DEFINE_string("exp_name", "tennis_ball_pick_and_place", "Experiment name.")
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")
 flags.DEFINE_string(
     "gaze_json_name",
