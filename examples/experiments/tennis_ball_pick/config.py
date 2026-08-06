@@ -37,14 +37,6 @@ class EnvConfig(DefaultEnvConfig):
         #     "exposure": 40000,
         # },
     }
-    EXTRA_REALSENSE_CAMERAS = {
-        "front_camera_2": {
-            "serial_number": "318122301393",
-            "dim": (640, 480),
-            "exposure": 40000,
-            "depth": True,
-        },
-    }
     IMAGE_CROP = {
         "front_camera": lambda img: img[0:460, 60:520],
         # "front_classifier": lambda img: img[240:360, 210:330],
@@ -86,7 +78,7 @@ class TrainConfig(DefaultTrainingConfig):
     )
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     batch_size = 128
-    buffer_period = 10000
+    buffer_period = 1000
     checkpoint_period = 10000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
@@ -97,12 +89,14 @@ class TrainConfig(DefaultTrainingConfig):
         fake_env=False,
         save_video=False,
         classifier=False,
-        enable_tactile=True,
+        enable_tactile=None,
         record_data=False,
         frame_save_path=None,
     ):
         env_config = EnvConfig()
-        env_config.ENABLE_TACTILE = enable_tactile
+        if enable_tactile is not None:
+            env_config.ENABLE_TACTILE = bool(enable_tactile)
+        enable_tactile = env_config.ENABLE_TACTILE
 
         if enable_tactile:
             self.image_keys = ["front_camera", "tactile_data"]
@@ -175,7 +169,7 @@ class TrainConfig(DefaultTrainingConfig):
             
                 prob = sigmoid(classifier(obs)).item()
                 if is_pick:
-                    success = prob > 0.9
+                    success = prob > 0.95
                     reward = 1 if success else 0
                 else:
                     success = prob > 0.5

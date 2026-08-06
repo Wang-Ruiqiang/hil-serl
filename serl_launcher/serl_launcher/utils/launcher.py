@@ -24,6 +24,7 @@ def make_bc_agent(
     sample_action, 
     image_keys=("image",), 
     encoder_type="resnet-pretrained",
+    hand_action_weight=1.0,
 ):
     return BCAgent.create(
         jax.random.PRNGKey(seed),
@@ -45,6 +46,7 @@ def make_bc_agent(
         encoder_type=encoder_type,
         image_keys=image_keys,
         augmentation_function=make_batch_augmentation_func(image_keys),
+        hand_action_weight=hand_action_weight,
     )
 
 

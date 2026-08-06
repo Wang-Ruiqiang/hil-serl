@@ -134,11 +134,14 @@ def get_frame_data(
     color_image = _read_image(color_image_path)
     color_image_wrist = _read_image(color_image_path_wrist) if os.path.exists(color_image_path_wrist) else None
     if enable_tactile:
-        index_heat_map_image = _read_tactile_image(frame_path, "index")
-        thumb_heat_map_image = _read_tactile_image(frame_path, "thumb")
-        index_heat_map_image = cv2.resize(index_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-        thumb_heat_map_image = cv2.resize(thumb_heat_map_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
-        heatmap_canvas = cv2.hconcat([thumb_heat_map_image, index_heat_map_image])
+        tactile_stems = ["thumb", "index", "middle"] if exp_name == "flip_object" else ["thumb", "index"]
+        tactile_images = []
+        for stem in tactile_stems:
+            tactile_image = _read_tactile_image(frame_path, stem)
+            tactile_images.append(
+                cv2.resize(tactile_image, tactile_resize_dim, interpolation=cv2.INTER_LINEAR)
+            )
+        heatmap_canvas = cv2.hconcat(tactile_images)
 
     joint_file_path = os.path.join(frame_path, "right_arm_joint.txt")
     action_file_path = os.path.join(frame_path, "action.txt")
@@ -205,7 +208,7 @@ def get_frame_data(
     
     if image_keys is None:
         image_keys = ["front_camera"]
-        if exp_name in {"tube_insertion", "twist_bottle_cap", "lid_grip"}:
+        if exp_name in {"tube_insertion", "twist_bottle_cap", "lid_grip", "flip_object"}:
             image_keys.append("wrist_camera")
         if enable_tactile:
             image_keys.append("tactile_data")

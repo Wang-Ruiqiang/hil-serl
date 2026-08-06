@@ -25,10 +25,14 @@ sys.path.insert(0, str(ROBOT_INFRA_DIR))
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_multi_string("frame_root", None, "Recorded data root(s) with frame_xxx folders.")
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
+flags.DEFINE_multi_string(
+    "frame_root",
+    ["/home/wrq/workspaces/HK_TACEXO_WANG/bc_data/flip_object/classifier_data"],
+    "Recorded data root(s). Each root may directly contain frame_xxx folders or recorded demo subfolders.",
+)
+flags.DEFINE_string("exp_name", "flip_object", "Experiment name.")
 flags.DEFINE_string("classifier_task", "auto", "Task/stage name used for default output dirs.")
-flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data.")
+flags.DEFINE_integer("enable_tactile", 0, "Whether to include tactile_data.")
 flags.DEFINE_string("config_module", "", "Defaults to experiments.<exp_name>.config.")
 flags.DEFINE_string(
     "robot_urdf_path",
@@ -76,6 +80,20 @@ def _frame_dirs(root: Path):
         and (frame_dir / "color_image.jpg").exists()
     ]
     return sorted(frames, key=_frame_number)
+
+
+def _has_frames(root: Path) -> bool:
+    return bool(_frame_dirs(root))
+
+
+def _iter_recording_roots(root: Path):
+    if _has_frames(root):
+        return [root]
+    return [
+        child
+        for child in sorted(root.iterdir(), key=lambda p: p.name)
+        if child.is_dir() and _has_frames(child)
+    ]
 
 
 def _has_label(frame_dir: Path):
@@ -189,11 +207,20 @@ def main(_):
     print(f"[source] image_keys={image_keys}")
     print(f"[source] robot_urdf={robot_urdf_path}")
 
+    recording_roots = []
     for root_str in FLAGS.frame_root:
         root = Path(root_str).expanduser()
         if not root.exists():
             print(f"[warn] missing root: {root}")
             continue
+        roots = _iter_recording_roots(root)
+        if not roots:
+            print(f"[warn] no recorded frame folders under {root}")
+            continue
+        print(f"[source] root={root} recording_folders={len(roots)}")
+        recording_roots.extend(roots)
+
+    for root in recording_roots:
         frames = _frame_dirs(root)
         allowed = _load_allowed_frame_ids(root)
         for i in tqdm(range(max(0, len(frames) - 1)), desc=root.name):

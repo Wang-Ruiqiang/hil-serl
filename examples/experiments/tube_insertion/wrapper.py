@@ -30,13 +30,6 @@ class RAMEnv(DensoEnv):
                 )
                 self.cap[cam_name] = cap
                 
-        # for cam_name, kwargs in extra_cameras_dict.items():
-        #     cap = VideoCapture(
-        #         RSCapture(name=cam_name, **kwargs)
-        #     )
-        #     self.cap[cam_name] = cap
-                
-
     def open_hand(self, steps=20, step_time=0.05):
         self._send_leap_hand_command(self.gripper_open_joint, steps=steps, step_time=step_time)
         time.sleep(steps * step_time + 0.5)
@@ -57,7 +50,7 @@ class RAMEnv(DensoEnv):
         # z_init = np.random.uniform(0.08, 0.14)
         # init_pos = np.array([0.7, -0.1458, z_init])
         # init_pos = np.array([0.7, -0.1458, 0.0809])
-        init_pos = np.array([0.7, -0.1458, 0.1009])
+        init_pos = np.array([0.7, -0.1458, 0.1209])
         init_ori = np.array([0, 1, 0, 0])
         init_arm_action = np.concatenate([init_pos, init_ori])
         self.ros_interface.publish_arm_action(init_arm_action)

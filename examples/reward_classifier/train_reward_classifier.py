@@ -3,7 +3,15 @@
 import glob
 import os
 import pickle as pkl
+import sys
 from collections import OrderedDict
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+EXAMPLES_DIR = SCRIPT_DIR.parent
+REPO_ROOT = EXAMPLES_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(EXAMPLES_DIR))
 
 import flax.linen as nn
 import gymnasium as gym
@@ -22,10 +30,10 @@ from serl_launcher.vision.data_augmentations import batched_random_crop
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("exp_name", "tube_insertion", "Name of experiment.")
+flags.DEFINE_string("exp_name", "flip_object", "Name of experiment.")
 flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
-flags.DEFINE_enum("classifier_task", "", ["", "pick", "place", "lid_grip", "bottle_twist", "tube_pick", "tube_insertion"], "Classifier stage.")
+flags.DEFINE_enum("classifier_task", "flip_object", ["", "pick", "place", "lid_grip", "bottle_twist", "tube_pick", "tube_insertion", "flip_object"], "Classifier stage.")
 flags.DEFINE_integer("is_pick_task", 1, "Deprecated tennis-ball pick flag.")
 flags.DEFINE_integer("is_place_task", 0, "Deprecated tennis-ball place flag.")
 flags.DEFINE_integer("is_tube_pick", 0, "Deprecated tube-pick flag.")
@@ -70,23 +78,23 @@ def _checkpoint_dir_name():
     if FLAGS.exp_name == "lid_grip":
         name = "classifier_ckpt_lid_grip"
         return f"{name}{'' if tactile else '_no_tactile'}"
+    if FLAGS.exp_name == "flip_object":
+        return os.path.join("flip_object_classifier", f"classifier_ckpt_flip_object{'' if tactile else '_no_tactile'}")
     return f"classifier_ckpt_{task}{'' if tactile else '_no_tactile'}"
 
 
 def _resolve_examples_path(path, default_name):
-    examples_dir = os.path.dirname(os.path.abspath(__file__))
     if path:
         return os.path.abspath(os.path.expanduser(path))
-    return os.path.join(examples_dir, default_name)
+    return str(EXAMPLES_DIR / default_name)
 
 
 def _resolve_default_data_dir():
-    examples_dir = os.path.dirname(os.path.abspath(__file__))
     if FLAGS.data_dir:
         return os.path.abspath(os.path.expanduser(FLAGS.data_dir))
     default_name = _data_dir_name()
-    reward_classifier_dir = os.path.join(examples_dir, "reward_classifier", default_name)
-    legacy_dir = os.path.join(examples_dir, default_name)
+    reward_classifier_dir = SCRIPT_DIR / default_name
+    legacy_dir = EXAMPLES_DIR / default_name
     return reward_classifier_dir if os.path.exists(reward_classifier_dir) else legacy_dir
 
 

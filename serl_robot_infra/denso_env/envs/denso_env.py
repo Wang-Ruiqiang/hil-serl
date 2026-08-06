@@ -68,10 +68,6 @@ class DefaultEnvConfig:
         # "side_camera": "234222300515",
         "wrist_camera": "218622271185",
     }
-    # EXTRA_REALSENSE_CAMERAS: Dict = {
-    #     # "front_camera": "242422303461",
-    #     "side_camera": "234222300515",
-    # }
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((7,))
     # GRASP_POSE: np.ndarray = np.zeros((6,))
@@ -92,6 +88,7 @@ class DefaultEnvConfig:
     #     "load_inertia": [0, 0, 0, 0, 0, 0, 0, 0, 0]
     # }
     DISPLAY_IMAGE: bool = True
+    REVERSE_TACTILE_OBS_ORDER: bool = False
     # GRIPPER_SLEEP: float = 0.6
     MAX_EPISODE_LENGTH: int = 200
     # JOINT_RESET_PERIOD: int = 0
@@ -299,6 +296,7 @@ class DensoEnv(gym.Env):
             # low = np.array([-1] * 6 + [0], dtype=np.float32)
             # high = np.array([1] * 6 + [4], dtype=np.float32)
 
+            tactile_width = 128 * (3 if getattr(config, "USE_THREE_FINGER_TACTILE", False) else 2)
             self.observation_space = gym.spaces.Dict(
                 {
                     "state": gym.spaces.Dict(state_dict),
@@ -306,7 +304,7 @@ class DensoEnv(gym.Env):
                         {
                             **{key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
                                     for key in config.REALSENSE_CAMERAS},
-                            "tactile_data": gym.spaces.Box(0, 255, shape=(64, 128, 3), dtype=np.uint8),  #TODO:tennins ball pick 使用64,64的tactile图像，其他任务不是，后续需要统一
+                            "tactile_data": gym.spaces.Box(0, 255, shape=(128, tactile_width, 3), dtype=np.uint8),
                         }
                     ),
                 }
@@ -351,8 +349,7 @@ class DensoEnv(gym.Env):
             self.middle_tactile_sensor = Sensor(middle_cfg)
             # self.middle_tactile_vis  = Visualizer(self.middle_tactile_sensor.points)
 
-            #TODO:tennins ball pick 使用64,64的tactile图像，其他任务不是，后续需要统一
-            self.tactile_size = (64, 64)
+            self.tactile_size = (128, 128)
             self.thumb_raw_img = []
             self.index_raw_img = []
             self.middle_raw_img = []
@@ -382,9 +379,9 @@ class DensoEnv(gym.Env):
             self.start_tac_processing()
         
         self.cap = None
-        self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
+        self.init_cameras(self.config.REALSENSE_CAMERAS)
         if self.display_image:
-            self.img_queue = queue.Queue()
+            self.img_queue = queue.Queue(maxsize=1)
             self.displayer = ImageDisplayer(self.img_queue, self.url)
             self.displayer.start()
 
@@ -425,7 +422,13 @@ class DensoEnv(gym.Env):
             self.gripper_twist_joint = config.GRIPPER_TWIST_JOINT
             self.gripper_open_joint = config.GRIPPER_OPEN_JOINT
 
-        self.curr_leap_hand_pos = list(self.gripper_open_joint)
+        if hasattr(config, "FLIP_OBJECT_HAND_STATES"):
+            self.hand_waypoints = np.asarray(config.FLIP_OBJECT_HAND_STATES, dtype=np.float32)
+            self.gripper_open_joint = self.hand_waypoints[0].copy()
+
+        self.curr_leap_hand_pos = list(
+            getattr(config, "GRIPPER_OPEN_JOINT", np.zeros(16, dtype=np.float32))
+        )
 
         print("Initialized Denso")
 
@@ -473,6 +476,9 @@ class DensoEnv(gym.Env):
                 self.nextpos[2] = 0.05
             if self.nextpos[1] < -0.145:
                 self.nextpos[1] = -0.145
+        elif self.exp_name == "flip_object":
+            if self.nextpos[2] < 0.025:
+                self.nextpos[2] = 0.025
 
         # GET ORIENTATION FROM ACTION
         rpy_delta = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -490,10 +496,12 @@ class DensoEnv(gym.Env):
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
 
-        if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip" or self.exp_name == "tube_insertion":
+        if hasattr(self, "hand_waypoints") or self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip" or self.exp_name == "tube_insertion":
             target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
         elif self.exp_name == "tennis_ball_pick" or self.exp_name == "tennis_ball_place":
             target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
+        else:
+            target_hand_pos = current_hand_pos
 
         # print("target_hand_pos = ", target_hand_pos)
 
@@ -520,8 +528,7 @@ class DensoEnv(gym.Env):
         reward = self.compute_reward(ob)
         # self.save_training_frame()
         # print(f"reward in denso_env = {reward}")
-        # done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
-        done = reward or self.terminate
+        done = self.curr_path_length >= self.max_episode_length or reward or self.terminate
         # t_end = time.time()
         # print(f"[Step End] {t_end:.6f}, Step总耗时（含sleep）: {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
         # print("curr hand pos = ", self.curr_leap_hand_pos)
@@ -574,10 +581,13 @@ class DensoEnv(gym.Env):
     
 
     def _segmented_init(self, current_hand_pos: np.ndarray, max_steps: int=10):
-        self._waypoints = np.stack(
-            [self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint],
-            axis=0
-        ).astype(np.float32)
+        if hasattr(self, "hand_waypoints"):
+            self._waypoints = np.asarray(self.hand_waypoints, dtype=np.float32)
+        else:
+            self._waypoints = np.stack(
+                [self.gripper_open_joint, self.gripper_close_joint, self.gripper_twist_joint],
+                axis=0
+            ).astype(np.float32)
         self._num_wp = int(self._waypoints.shape[0]) 
         self._loop = bool(self.grip_loop)
         self._num_seg = self._num_wp if self._loop else (self._num_wp - 1)
@@ -622,7 +632,10 @@ class DensoEnv(gym.Env):
         # # cumulative length at each segment start, length = num_seg
         # self._cumlen = np.concatenate([[0.0], np.cumsum(self._seg_lens[:-1])]).astype(np.float32)
 
-        # self._turns = 0
+        self._turns = 0
+        if hasattr(self, "_prev_hand_progress"):
+            delattr(self, "_prev_hand_progress")
+        self._force_next_hand_progress_zero = True
         # self.gripper_phase = 0.0               # in [0,1)
         # self.gripper_unwrapped_phase = 0.0     # turns + phase (optional)
     
@@ -869,6 +882,10 @@ class DensoEnv(gym.Env):
         hand_joint_pos = np.asarray(hand_joint_pos, dtype=np.float32)
 
         # If waypoints not prepared, fallback
+        if not hasattr(self, "_waypoints") and not (
+            hasattr(self, "gripper_open_joint") and hasattr(self, "gripper_close_joint")
+        ):
+            return 0.0
         if not hasattr(self, "_waypoints"):
             open_joint = np.asarray(self.gripper_open_joint, dtype=np.float32)
             close_joint = np.asarray(self.gripper_close_joint, dtype=np.float32)
@@ -937,6 +954,11 @@ class DensoEnv(gym.Env):
         # init memory
         if not hasattr(self, "_turns"):
             self._turns = 0
+        if getattr(self, "_force_next_hand_progress_zero", False):
+            self._force_next_hand_progress_zero = False
+            self._turns = 0
+            self._prev_hand_progress = 0.0
+            return 0.0
         if not hasattr(self, "_prev_hand_progress"):
             self._prev_hand_progress = progress
 
@@ -1006,7 +1028,7 @@ class DensoEnv(gym.Env):
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
+                self.init_cameras(self.config.REALSENSE_CAMERAS)
                 return self.get_im()
         # if not self.enable_tactile:
         #     if self.display_image:
@@ -1015,16 +1037,93 @@ class DensoEnv(gym.Env):
         #             "wrist_camera": display_images["wrist_camera_full"],
         #         }
         if self.enable_tactile:
-            heat_map = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+            heat_map = self._tactile_heatmap_canvas()
             full_res_images["tactile_data"] = heat_map
             video_images["tactile_data"] = heat_map
-            with self.tac_index_lock:
-                display_images["heat_map"] = heat_map
+            display_images["heat_map"] = self._label_tactile_display_canvas(heat_map)
+            if getattr(self.config, "DISPLAY_TACTILE_RAW", False):
+                display_images["tactile_raw"] = self._label_tactile_display_canvas(
+                    self._tactile_raw_canvas()
+                )
         if self.display_image:
-            self.img_queue.put(display_images)
+            self._put_latest_display_images(display_images)
         if self.save_video:
             self.recording_frames.append(video_images)
         return images
+
+    def _put_latest_display_images(self, display_images):
+        if not hasattr(self, "img_queue"):
+            return
+        while not self.img_queue.empty():
+            try:
+                self.img_queue.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self.img_queue.put_nowait(display_images)
+        except queue.Full:
+            pass
+
+    def _tactile_heatmap_canvas(self):
+        if getattr(self.config, "USE_THREE_FINGER_TACTILE", False):
+            with self.tac_thumb_lock, self.tac_index_lock, self.tac_middle_lock:
+                tactile_images = [
+                    copy.deepcopy(self.thumb_heat_map),
+                    copy.deepcopy(self.index_heat_map),
+                    copy.deepcopy(self.middle_heat_map),
+                ]
+        else:
+            with self.tac_thumb_lock, self.tac_index_lock:
+                tactile_images = [
+                    copy.deepcopy(self.thumb_heat_map),
+                    copy.deepcopy(self.index_heat_map),
+                ]
+        if getattr(self.config, "REVERSE_TACTILE_OBS_ORDER", False):
+            tactile_images = list(reversed(tactile_images))
+        return cv2.hconcat(tactile_images)
+
+    def _tactile_raw_canvas(self):
+        def resize_raw(img):
+            return cv2.resize(img, self.tactile_size, interpolation=cv2.INTER_LINEAR)
+
+        if getattr(self.config, "USE_THREE_FINGER_TACTILE", False):
+            with self.tac_thumb_lock, self.tac_index_lock, self.tac_middle_lock:
+                tactile_images = [
+                    resize_raw(copy.deepcopy(self.thumb_raw_img)),
+                    resize_raw(copy.deepcopy(self.index_raw_img)),
+                    resize_raw(copy.deepcopy(self.middle_raw_img)),
+                ]
+        else:
+            with self.tac_thumb_lock, self.tac_index_lock:
+                tactile_images = [
+                    resize_raw(copy.deepcopy(self.thumb_raw_img)),
+                    resize_raw(copy.deepcopy(self.index_raw_img)),
+                ]
+        if getattr(self.config, "REVERSE_TACTILE_OBS_ORDER", False):
+            tactile_images = list(reversed(tactile_images))
+        return cv2.hconcat(tactile_images)
+
+    def _label_tactile_display_canvas(self, heat_map):
+        display_heat_map = copy.deepcopy(heat_map)
+        if not getattr(self.config, "USE_THREE_FINGER_TACTILE", False):
+            return display_heat_map
+
+        labels = ["thumb", "index", "middle"]
+        if getattr(self.config, "REVERSE_TACTILE_OBS_ORDER", False):
+            labels = list(reversed(labels))
+        panel_width = display_heat_map.shape[1] // len(labels)
+        for i, label in enumerate(labels):
+            cv2.putText(
+                display_heat_map,
+                label,
+                (i * panel_width + 8, 22),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+        return display_heat_map
 
 
     def get_rgb_and_dpth_im(self) -> Dict[str, np.ndarray]:
@@ -1056,7 +1155,7 @@ class DensoEnv(gym.Env):
                     f"{key} camera frozen. Check connect, then press enter to relaunch..."
                 )
                 cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS, self.config.EXTRA_REALSENSE_CAMERAS)
+                self.init_cameras(self.config.REALSENSE_CAMERAS)
                 return self.get_rgb_and_dpth_im()
             
         return images, depth_images
@@ -1175,7 +1274,7 @@ class DensoEnv(gym.Env):
         except Exception as e:
             print(f"Failed to save video: {e}")
 
-    def init_cameras(self, name_serial_dict=None, extra_cameras_dict=None):
+    def init_cameras(self, name_serial_dict=None):
         """Init both wrist cameras."""
         if self.cap is not None:  # close cameras if they are already open
             self.close_cameras()
@@ -1186,12 +1285,6 @@ class DensoEnv(gym.Env):
                 RSCapture(name=cam_name, **kwargs)
             )
             self.cap[cam_name] = cap
-
-        # for cam_name, kwargs in extra_cameras_dict.items():
-        #     cap = VideoCapture(
-        #         RSCapture(name=cam_name, **kwargs)
-        #     )
-        #     self.cap[cam_name] = cap
 
     def close_cameras(self):
         """Close both wrist cameras."""
@@ -1297,7 +1390,7 @@ class DensoEnv(gym.Env):
             obs["images"][cam_key] = img
             
         if self.enable_tactile:
-            heatmap_canvas = cv2.hconcat([self.thumb_heat_map, self.index_heat_map])
+            heatmap_canvas = self._tactile_heatmap_canvas()
             obs["images"]["tactile_data"] = heatmap_canvas
                 
         return copy.deepcopy(obs)
@@ -1306,11 +1399,18 @@ class DensoEnv(gym.Env):
     def close(self):
         if hasattr(self, 'listener'):
             self.listener.stop()
-        self.close_cameras()
-        if self.display_image:
+        if hasattr(self, "cap"):
+            self.close_cameras()
+        if self.display_image and hasattr(self, "img_queue"):
+            while not self.img_queue.empty():
+                try:
+                    self.img_queue.get_nowait()
+                except queue.Empty:
+                    break
             self.img_queue.put(None)
             cv2.destroyAllWindows()
-            self.displayer.join()
+            if hasattr(self, "displayer"):
+                self.displayer.join()
 
         # Ensure ROS executor and node are cleaned up to avoid threading errors
         if hasattr(self, "_ros_spin_stop"):

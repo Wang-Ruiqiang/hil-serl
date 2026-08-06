@@ -32,14 +32,6 @@ class EnvConfig(DefaultEnvConfig):
             "depth": True,
         },
     }
-    EXTRA_REALSENSE_CAMERAS = {
-        "front_camera_2": {
-            "serial_number": "318122301393",
-            "dim": (640, 480),
-            # "exposure": 40000,
-            "depth": True,
-        },
-    }
     IMAGE_CROP = {
         "front_camera": lambda img: img[35:375, 160:500],
         "wrist_camera": lambda img: img[0:480, 120:600],
@@ -52,7 +44,7 @@ class EnvConfig(DefaultEnvConfig):
     # ACTION_SCALE = (0.01, 0.06, 1)
     ACTION_SCALE = (0.025, 0.025, 0.025)
     DISPLAY_IMAGE = True
-    MAX_EPISODE_LENGTH = 100
+    MAX_EPISODE_LENGTH = 200
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
     
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
@@ -106,12 +98,14 @@ class TrainConfig(DefaultTrainingConfig):
         fake_env=False,
         save_video=False,
         classifier=False,
-        enable_tactile=False,
+        enable_tactile=None,
         record_data=False,
         frame_save_path=None,
     ):
         env_config = EnvConfig()
-        env_config.ENABLE_TACTILE = enable_tactile
+        if enable_tactile is not None:
+            env_config.ENABLE_TACTILE = bool(enable_tactile)
+        enable_tactile = env_config.ENABLE_TACTILE
         if enable_tactile:
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.classifier_keys= ["front_camera", "wrist_camera", "tactile_data"]
@@ -141,14 +135,14 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_lid_grip"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/twist_bottle_cap_classifier/classifier_ckpt_lid_grip"),
                 )
             else:
                 classifier_lid_grip = load_classifier_func(
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/classifier_ckpt_lid_grip_no_tactile"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/twist_bottle_cap_classifier/classifier_ckpt_lid_grip_no_tactile"),
                 )
             def reward_func(obs, is_pick=True):
                 print("classifier = classifier_pick")

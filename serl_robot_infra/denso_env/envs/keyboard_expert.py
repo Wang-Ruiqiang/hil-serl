@@ -24,7 +24,7 @@ class KeyboardExpert:
         elif exp_name == "twist_bottle_cap" or exp_name == "lid_grip":
             self.LARGE_STEP = 1
             self.SMALL_STEP = 0.4
-        elif exp_name == "tube_insertion":
+        elif exp_name == "tube_insertion" or exp_name == "flip_object":
             self.LARGE_STEP = 1
             self.SMALL_STEP = 0.5
 
@@ -138,5 +138,4 @@ class KeyboardExpert:
             self.process.terminate()
             self.process.join()
         self.manager.shutdown()
-
 

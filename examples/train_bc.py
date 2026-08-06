@@ -39,22 +39,37 @@ from examples.utils.runtime import (
 
 FLAGS = flags.FLAGS
 
+DEFAULT_DEMO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "bc_data"))
+
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_string("bc_checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("bc_checkpoint_path_pick", None, "Path to the stage-1 pick checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 0, "Number of trajectories to evaluate.")
-flags.DEFINE_integer("eval_checkpoint_step", 60000, "Step to evaluate the checkpoint.")
-flags.DEFINE_integer("train_steps", 2000000, "Number of pretraining steps.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer(
+    "eval_checkpoint_period",
+    0,
+    "If > 0, advance eval checkpoint step by this period after each trajectory. Defaults to 0 to reuse the same checkpoint.",
+)
+flags.DEFINE_integer("train_steps", 5000000, "Number of pretraining steps.")
+flags.DEFINE_integer(
+    "checkpoint_period",
+    -1,
+    "BC checkpoint save period. Uses the task config value when set to -1; disables periodic saving when set to 0.",
+)
 flags.DEFINE_bool("save_video", False, "Save video of the evaluation.")
-flags.DEFINE_multi_string("demo_path", None, "Path to demo pkl file(s) or directories.")
+flags.DEFINE_multi_string(
+    "demo_path",
+    [DEFAULT_DEMO_PATH],
+    "Path to demo pkl file(s) or directories.",
+)
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
-flags.DEFINE_string("wandb_project", "bc_hil_rl_comparison", "WandB project name.")
 flags.DEFINE_string(
     "wandb_description",
     None,
-    "WandB run descriptor. Defaults to <date>_<exp_name>_bc_demo_buffer.",
+    "WandB run name. Defaults to bc-<exp_name>-<month>-<day>.",
 )
 
 flags.DEFINE_boolean(
@@ -147,7 +162,20 @@ def _count_demo_episodes(transitions):
 
 
 def _dated_run_name():
-    return f"{time.strftime('%Y-%m-%d')}_{FLAGS.exp_name}_bc_demo_buffer"
+    return f"bc-{FLAGS.exp_name}-{int(time.strftime('%m'))}-{int(time.strftime('%d'))}"
+
+
+def _checkpoint_period(config):
+    return config.checkpoint_period if FLAGS.checkpoint_period < 0 else FLAGS.checkpoint_period
+
+
+def _save_bc_checkpoint(bc_agent, step):
+    checkpoints.save_checkpoint(
+        os.path.abspath(FLAGS.bc_checkpoint_path),
+        bc_agent.state,
+        step=step,
+        keep=100,
+    )
 
 
 def _is_multi_stage_task():
@@ -290,7 +318,8 @@ def eval(env, bc_agent: BCAgent, sampling_rng):
                         success_counter += 1
                     print(f"{success_counter}/{episode + 1}")
                     intervention_label = 0
-                    ckpt_step += 20000
+                    if FLAGS.eval_checkpoint_period > 0:
+                        ckpt_step += FLAGS.eval_checkpoint_period
                     done_by_manual = False
 
                     mode = "S1_INFERENCE"
@@ -316,6 +345,7 @@ def train(
     start_step=0,
     wandb_logger=None,
 ):
+    checkpoint_period = _checkpoint_period(config)
 
     bc_replay_iterator = bc_replay_buffer.get_iterator(
         sample_args={
@@ -344,12 +374,12 @@ def train(
 
         if (
             step > 0
-            and config.checkpoint_period
-            and step % config.checkpoint_period == 0
+            and checkpoint_period
+            and step % checkpoint_period == 0
         ):
-            checkpoints.save_checkpoint(
-                os.path.abspath(FLAGS.bc_checkpoint_path), bc_agent.state, step=step, keep=100
-            )
+            _save_bc_checkpoint(bc_agent, step)
+    _save_bc_checkpoint(bc_agent, FLAGS.train_steps)
+    print_green(f"saved final BC checkpoint at step {FLAGS.train_steps}")
     print_green("bc pretraining done")
 
 
@@ -363,6 +393,7 @@ def main(_):
     assert config.batch_size % num_devices == 0
     eval_mode = FLAGS.eval_n_trajs > 0
     run_name = FLAGS.wandb_description or _dated_run_name()
+    wandb_project = _dated_run_name()
     bc_checkpoint_path = FLAGS.bc_checkpoint_path or run_name
  
     env = config.get_environment(
@@ -386,12 +417,13 @@ def main(_):
 
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project=FLAGS.wandb_project,
+            project=wandb_project,
             description=run_name,
             debug=FLAGS.debug,
         )
         FLAGS.bc_checkpoint_path = bc_checkpoint_path
         print_green(f"BC checkpoint path: {FLAGS.bc_checkpoint_path}")
+        print_green(f"WandB project: {wandb_project}")
         print_green(f"WandB run name: {run_name}")
 
 

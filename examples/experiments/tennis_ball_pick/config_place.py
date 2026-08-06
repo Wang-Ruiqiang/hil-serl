@@ -37,14 +37,6 @@ class EnvConfig(DefaultEnvConfig):
         #     "exposure": 40000,
         # },
     }
-    EXTRA_REALSENSE_CAMERAS = {
-        "front_camera_2": {
-            "serial_number": "318122301393",
-            "dim": (640, 480),
-            "exposure": 40000,
-            "depth": True,
-        },
-    }
     IMAGE_CROP = {
         "front_camera": lambda img: img[0:460, 60:520],
         # "front_classifier": lambda img: img[240:360, 210:330],
@@ -56,13 +48,15 @@ class EnvConfig(DefaultEnvConfig):
     # ACTION_SCALE = (0.01, 0.06, 1)
     ACTION_SCALE = (0.03, 0.03, 0.03)
     DISPLAY_IMAGE = True
-    MAX_EPISODE_LENGTH = 100
+    MAX_EPISODE_LENGTH = 150
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
+
+     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
     GRIPPER_CLOSE_JOINT = np.array([
-        3.1584663, 4.4301367, 3.3057287, 3.3241363,
+        3.1584663, 4.4301367, 3.2057287, 3.8241363,
         3.406330614089965820, 3.202951908111572266, 3.466796636581420898, 3.969689750671386719,
         3.218291759490966797, 3.238233327865600586, 2.867010116577148438, 3.325670242309570312,
-        4.6126804, 3.118583, 3.028078, 3.4085052,
+        4.6126804, 3.118583, 2.928078, 3.8085052,
     ], dtype=np.float32)
     GRIPPER_OPEN_JOINT = np.array([
         3.209087848663330078, 4.022466754913330078, 3.210621833801269531, 3.652039194107055664,
@@ -87,7 +81,7 @@ class TrainConfig(DefaultTrainingConfig):
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     batch_size = 128
     buffer_period = 1000
-    checkpoint_period = 1000
+    checkpoint_period = 10000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
@@ -97,12 +91,14 @@ class TrainConfig(DefaultTrainingConfig):
         fake_env=False,
         save_video=False,
         classifier=False,
-        enable_tactile=True,
+        enable_tactile=None,
         record_data=False,
         frame_save_path=None,
     ):
         env_config = EnvConfig()
-        env_config.ENABLE_TACTILE = enable_tactile
+        if enable_tactile is not None:
+            env_config.ENABLE_TACTILE = bool(enable_tactile)
+        enable_tactile = env_config.ENABLE_TACTILE
 
         if enable_tactile:
             self.image_keys = ["front_camera", "tactile_data"]
@@ -142,7 +138,7 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("../../tennis_ball_pick_classifier/classifier_ckpt_ball_place/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/tennis_ball_pick_classifier/classifier_ckpt_ball_place/"),
                 )
             else:
                 classifier_pick = load_classifier_func(
@@ -155,7 +151,7 @@ class TrainConfig(DefaultTrainingConfig):
                     key=jax.random.PRNGKey(0),
                     sample=env.observation_space.sample(),
                     image_keys=self.classifier_keys,
-                    checkpoint_path=os.path.abspath("../../tennis_ball_pick_classifier/classifier_ckpt_ball_place_no_tactile/"),
+                    checkpoint_path=os.path.abspath("/home/wrq/workspaces/HK_TACEXO_WANG/hil-serl/examples/tennis_ball_pick_classifier/classifier_ckpt_ball_place_no_tactile/"),
                 )
             
             # input("debug")

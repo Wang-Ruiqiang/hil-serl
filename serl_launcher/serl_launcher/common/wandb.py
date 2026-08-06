@@ -71,6 +71,7 @@ class WandBLogger(object):
             config=self._variant,
             project=self.config.project,
             entity=self.config.entity,
+            name=self.config.exp_descriptor,
             group=self.config.group,
             tags=self.config.tag,
             dir=wandb_output_dir,

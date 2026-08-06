@@ -38,14 +38,6 @@ class EnvConfig(DefaultEnvConfig):
         # },
         
     }
-    # EXTRA_REALSENSE_CAMERAS = {
-    #     "front_camera_2": {
-    #         "serial_number": "242422303461",
-    #         "dim": (640, 480),
-    #         "exposure": 40000,
-    #         "depth": True,
-    #     },
-    # }
     # IMAGE_CROP = {
     #     "front_camera": lambda img: img[242:370, 232:360],
     #     "wrist_camera": lambda img: img[0:480, 120:600],
@@ -72,9 +64,9 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RZ_RANGE = 0.05
     # ACTION_SCALE = (0.01, 0.06, 1)
     # ACTION_SCALE = (0.01, 0.01, 0.05)
-    ACTION_SCALE = (0.005, 0.005, 0.05)
+    ACTION_SCALE = (0.007, 0.007, 0.007)
     DISPLAY_IMAGE = True
-    MAX_EPISODE_LENGTH = 100
+    MAX_EPISODE_LENGTH = 250
     REWARD_THRESHOLD = np.array([0.01, 0.005, 0.01, 1, 1, 1])  # [x, y, z, roll, pitch, yaw]
     
     # 1-4 index, 5-8 middle, 9-12 ring, 13-16 thumb
@@ -101,6 +93,7 @@ class EnvConfig(DefaultEnvConfig):
     ], dtype=np.float32)
     
     ENABLE_TACTILE = True
+    REVERSE_TACTILE_OBS_ORDER = True
     TACT_BASE_PATH = '/home/wrq/workspaces/HK_TACEXO_WANG/9DTact/shape_reconstruction/'
     EXP_NAME = "tube_insertion"
 
@@ -115,7 +108,7 @@ class TrainConfig(DefaultTrainingConfig):
     proprio_keys = ["tcp_pos", "tcp_ori", "gripper_pose"]
     buffer_period = 1000
     batch_size = 128
-    checkpoint_period = 1000
+    checkpoint_period = 10000
     steps_per_update = 100
     encoder_type = "resnet-pretrained"
     setup_mode = "single-arm-fixed-gripper"
@@ -125,12 +118,14 @@ class TrainConfig(DefaultTrainingConfig):
         fake_env=False,
         save_video=False,
         classifier=False,
-        enable_tactile=True,
+        enable_tactile=None,
         record_data=False,
         frame_save_path=None,
     ):
         env_config = EnvConfig()
-        env_config.ENABLE_TACTILE = enable_tactile
+        if enable_tactile is not None:
+            env_config.ENABLE_TACTILE = bool(enable_tactile)
+        enable_tactile = env_config.ENABLE_TACTILE
         if enable_tactile:
             self.image_keys = ["front_camera", "wrist_camera", "tactile_data"]
             self.classifier_keys = ["front_camera", "wrist_camera", "tactile_data"]
@@ -213,7 +208,7 @@ class TrainConfig(DefaultTrainingConfig):
                 # else:
                 #     success = prob > 0.8
                 #     reward = 1 if success else 0
-                success = prob > 0.5
+                success = prob > 0.1
                 reward = 1 if success else 0
                 return reward
 

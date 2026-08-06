@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import glob
+import json
 import os
+import re
 import time
 
 import jax
@@ -35,6 +37,7 @@ from examples.utils.runtime import (
     MULTI_STAGE_EXP_NAMES,
     STOP_COMMAND_EXP_NAMES,
     print_green,
+    print_yellow,
 )
 
 FLAGS = flags.FLAGS
@@ -47,11 +50,21 @@ flags.DEFINE_string("ip", "localhost", "IP address of the learner.")
 flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_string("checkpoint_path_pick", None, "Path to save pick checkpoints.")
-flags.DEFINE_integer("eval_checkpoint_step", 21000, "Step to evaluate the checkpoint.")
+flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("stage1_checkpoint_step", 32000, "Checkpoint step for the first-stage pick policy.")
 flags.DEFINE_integer("eval_n_trajs", 20, "Number of trajectories to evaluate.")
-flags.DEFINE_boolean("save_video", False, "Save video.")
+flags.DEFINE_integer(
+    "eval_checkpoint_step_interval",
+    0,
+    "If > 0, load the next checkpoint after each eval episode by increasing eval_checkpoint_step by this interval.",
+)
+flags.DEFINE_boolean("save_video", True, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer(
+    "eval_max_episode_steps",
+    0,
+    "Maximum eval steps per episode. 0 relies on the task env MAX_EPISODE_LENGTH.",
+)
 
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
@@ -68,6 +81,38 @@ is_end = False
 
 def is_multi_stage_task():
     return FLAGS.exp_name in MULTI_STAGE_EXP_NAMES
+
+
+def _latest_checkpoint_step(path):
+    if path is None or not os.path.exists(path):
+        return 0
+    latest = checkpoints.latest_checkpoint(os.path.abspath(path))
+    if latest is None:
+        return 0
+    basename = os.path.basename(latest)
+    if not basename.startswith("checkpoint_"):
+        return 0
+    return int(basename.replace("checkpoint_", ""))
+
+
+def _date_from_checkpoint_path(path):
+    if path is None:
+        return None
+    basename = os.path.basename(os.path.normpath(path))
+    match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", basename)
+    if match is None:
+        return None
+    month = int(match.group(2))
+    day = int(match.group(3))
+    return f"{month}-{day}"
+
+
+def _wandb_project_date():
+    if _latest_checkpoint_step(FLAGS.checkpoint_path) > 0:
+        checkpoint_date = _date_from_checkpoint_path(FLAGS.checkpoint_path)
+        if checkpoint_date is not None:
+            return checkpoint_date
+    return time.strftime("%m-%d").lstrip("0").replace("-0", "-")
 
 
 def restore_agent_checkpoint(agent, path, *, step=None, label="checkpoint"):
@@ -105,7 +150,7 @@ def run_stage1_until_complete(agent_pick, env, obs, key):
 def reset_after_episode(env, episode=None):
     if FLAGS.exp_name in STOP_COMMAND_EXP_NAMES:
         env.unwrapped.stop_cur_command()
-    if FLAGS.save_video and episode is not None:
+    if _is_eval_mode() and FLAGS.save_video and episode is not None:
         env.unwrapped.save_video_recording(episode)
     if FLAGS.exp_name == "tube_insertion":
         env.open_hand(steps=20, step_time=0.05)
@@ -114,6 +159,131 @@ def reset_after_episode(env, episode=None):
         env.move_up()
     input("reset env")
     return env.reset()[0]
+
+
+def _reached_eval_max_episode_steps(eval_episode_steps):
+    return (
+        FLAGS.eval_max_episode_steps > 0
+        and eval_episode_steps >= FLAGS.eval_max_episode_steps
+    )
+
+
+def _save_eval_video(env, ckpt_step, episode):
+    if not (_is_eval_mode() and FLAGS.save_video):
+        return None
+    video_id = f"ckpt_{ckpt_step}_episode_{episode}"
+    env.unwrapped.save_video_recording(video_id)
+    return os.path.abspath(os.path.join("videos", video_id))
+
+
+def _is_eval_mode():
+    return bool(FLAGS.actor and FLAGS.eval_checkpoint_step)
+
+
+def _record_eval_result(
+    records,
+    *,
+    ckpt_step,
+    episode,
+    reward,
+    duration,
+    episode_steps,
+    video_dir,
+    termination_reason,
+):
+    reward_value = float(np.asarray(reward).item())
+    records.append(
+        {
+            "checkpoint_step": int(ckpt_step),
+            "episode": int(episode),
+            "success": bool(reward_value),
+            "reward": reward_value,
+            "duration_sec": float(duration),
+            "episode_steps": int(episode_steps),
+            "termination_reason": termination_reason,
+            "video_dir": video_dir,
+        }
+    )
+
+
+def _write_eval_summary(records, *, interrupted):
+    if not FLAGS.save_video:
+        return None
+
+    summary_dir = os.path.abspath("videos")
+    os.makedirs(summary_dir, exist_ok=True)
+    timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    md_path = os.path.join(summary_dir, f"eval_summary_{timestamp}.md")
+    json_path = os.path.join(summary_dir, f"eval_summary_{timestamp}.json")
+
+    success_records = [record for record in records if record["success"]]
+    success_rate = len(success_records) / len(records) if records else 0.0
+    success_durations = [record["duration_sec"] for record in success_records]
+    avg_success_time = float(np.mean(success_durations)) if success_durations else None
+
+    summary = {
+        "exp_name": FLAGS.exp_name,
+        "checkpoint_path": FLAGS.checkpoint_path,
+        "checkpoint_path_pick": FLAGS.checkpoint_path_pick,
+        "stage1_checkpoint_step": FLAGS.stage1_checkpoint_step,
+        "eval_checkpoint_step": FLAGS.eval_checkpoint_step,
+        "eval_checkpoint_step_interval": FLAGS.eval_checkpoint_step_interval,
+        "eval_max_episode_steps": FLAGS.eval_max_episode_steps,
+        "interrupted": interrupted,
+        "total_episodes": len(records),
+        "success_count": len(success_records),
+        "success_rate": success_rate,
+        "average_success_duration_sec": avg_success_time,
+        "records": records,
+    }
+
+    with open(json_path, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    lines = [
+        "# Eval Summary\n\n",
+        f"- exp_name: `{FLAGS.exp_name}`\n",
+        f"- checkpoint_path: `{FLAGS.checkpoint_path}`\n",
+        f"- eval_checkpoint_step: `{FLAGS.eval_checkpoint_step}`\n",
+        f"- eval_checkpoint_step_interval: `{FLAGS.eval_checkpoint_step_interval}`\n",
+        f"- eval_max_episode_steps: `{FLAGS.eval_max_episode_steps}`\n",
+        f"- interrupted: `{interrupted}`\n",
+        f"- success: `{len(success_records)}/{len(records)}`\n",
+        f"- success_rate: `{success_rate:.2%}`\n",
+        "- average_success_duration_sec: "
+        f"`{avg_success_time:.2f}`\n" if avg_success_time is not None else "- average_success_duration_sec: `nan`\n",
+        "\n## Successful Episodes\n\n",
+        "| checkpoint | episode | duration_sec | steps | video_dir |\n",
+        "|---:|---:|---:|---:|---|\n",
+    ]
+    for record in success_records:
+        lines.append(
+            f"| {record['checkpoint_step']} | {record['episode']} | "
+            f"{record['duration_sec']:.2f} | {record['episode_steps']} | "
+            f"`{record['video_dir']}` |\n"
+        )
+
+    lines.extend(
+        [
+            "\n## All Episodes\n\n",
+            "| checkpoint | episode | success | reward | duration_sec | steps | termination | video_dir |\n",
+            "|---:|---:|:---:|---:|---:|---:|---|---|\n",
+        ]
+    )
+    for record in records:
+        lines.append(
+            f"| {record['checkpoint_step']} | {record['episode']} | "
+            f"{str(record['success']).lower()} | {record['reward']:.1f} | "
+            f"{record['duration_sec']:.2f} | {record['episode_steps']} | "
+            f"{record['termination_reason']} | `{record['video_dir']}` |\n"
+        )
+
+    with open(md_path, "w") as f:
+        f.writelines(lines)
+
+    print_green(f"Saved eval summary: {md_path}")
+    print_green(f"Saved eval summary json: {json_path}")
+    return md_path
 
 
 def iter_transition_files(paths):
@@ -139,6 +309,13 @@ def load_transition_stream(path):
     return transitions
 
 
+def ensure_penalty_keys(transition):
+    transition = transition.copy()
+    transition.setdefault("grasp_penalty", np.float32(0.0))
+    transition.setdefault("robot_arm_penalty", np.float32(0.0))
+    return transition
+
+
 def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=None):
     """
     This is the actor loop, which runs when "--actor" is set to True.
@@ -146,18 +323,30 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     
     if FLAGS.eval_checkpoint_step:
         key_reader = None
+        eval_records = []
+        interrupted = False
         try:
             print("in eval mode")
-            mode = "S1_INFERENCE"
-            success_counter = 0
-            intervention_label = 0
-            time_list = []
-            agent = restore_agent_checkpoint(
-                agent,
-                FLAGS.checkpoint_path,
-                step=FLAGS.eval_checkpoint_step,
-                label="eval checkpoint",
-            )
+            eval_steps = [FLAGS.eval_checkpoint_step]
+            if FLAGS.eval_checkpoint_step_interval > 0:
+                latest_step = _latest_checkpoint_step(FLAGS.checkpoint_path)
+                if latest_step < FLAGS.eval_checkpoint_step:
+                    print_yellow(
+                        f"Latest checkpoint step {latest_step} is smaller than "
+                        f"eval_checkpoint_step {FLAGS.eval_checkpoint_step}."
+                    )
+                else:
+                    eval_steps = list(
+                        range(
+                            FLAGS.eval_checkpoint_step,
+                            latest_step + 1,
+                            FLAGS.eval_checkpoint_step_interval,
+                        )
+                    )
+                    print_green(
+                        f"Evaluating checkpoints from {FLAGS.eval_checkpoint_step} "
+                        f"to {latest_step} every {FLAGS.eval_checkpoint_step_interval} steps."
+                    )
 
             if is_multi_stage_task():
                 stage1_template = agent_pick if agent_pick is not None else agent
@@ -168,74 +357,161 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
                     label="stage-1 checkpoint",
                 )
             
-            obs, _ = env.reset()
             key_reader = KeyReader()
             key_reader.start()
-            ckpt_step = FLAGS.eval_checkpoint_step
             done_by_manual = False
-            for episode in range(FLAGS.eval_n_trajs):
-                done = False
-                start_time = time.time()
-                
-                # print_green(f"Loaded previous checkpoint at step {ckpt_step}.")
-                # ckpt = checkpoints.restore_checkpoint(
-                #     os.path.abspath(FLAGS.checkpoint_path),
-                #     agent.state,
-                #     step=ckpt_step,
-                # )
-                # agent = agent.replace(state=ckpt)
-                
-                while not done:
+            total_success_counter = 0
+            total_episode_counter = 0
+            total_time_list = []
+            for ckpt_index, ckpt_step in enumerate(eval_steps):
+                try:
+                    agent = restore_agent_checkpoint(
+                        agent,
+                        FLAGS.checkpoint_path,
+                        step=ckpt_step,
+                        label="eval checkpoint",
+                    )
+                except ValueError as exc:
+                    print_yellow(f"Skipping checkpoint_{ckpt_step}: {exc}")
+                    break
+                print_green(f"Evaluating checkpoint step {ckpt_step}")
+                success_counter = 0
+                ckpt_episode_counter = 0
+                time_list = []
+                n_episodes = 1 if FLAGS.eval_checkpoint_step_interval > 0 else FLAGS.eval_n_trajs
+                for episode in range(n_episodes):
+                    obs = reset_after_episode(env) if episode > 0 or ckpt_index > 0 else env.reset()[0]
+                    done = False
+                    mode = "S1_INFERENCE" if is_multi_stage_task() else "S2_TRAIN"
+                    intervention_label = 0
+                    episode_steps = 0
+                    start_time = time.time()
 
-                    sampling_rng, key = jax.random.split(sampling_rng)
-                    if is_multi_stage_task() and mode == "S1_INFERENCE":
-                        obs, stage1_done = run_stage1_until_complete(agent_pick, env, obs, key)
-                        if stage1_done:
-                            mode = "S2_TRAIN"
-                        continue
+                    while not done:
 
-                    print_green(f"obs[state] =  {obs['state']}")
-                    actions = sample_policy_action(agent, obs, key, argmax=False)
+                        sampling_rng, key = jax.random.split(sampling_rng)
+                        if is_multi_stage_task() and mode == "S1_INFERENCE":
+                            obs, stage1_done = run_stage1_until_complete(agent_pick, env, obs, key)
+                            episode_steps += 1
+                            if _reached_eval_max_episode_steps(episode_steps):
+                                reward = 0
+                                print_yellow(
+                                    f"Reached eval max episode length {FLAGS.eval_max_episode_steps}."
+                                )
+                                video_dir = _save_eval_video(env, ckpt_step, episode)
+                                _record_eval_result(
+                                    eval_records,
+                                    ckpt_step=ckpt_step,
+                                    episode=episode,
+                                    reward=reward,
+                                    duration=time.time() - start_time,
+                                    episode_steps=episode_steps,
+                                    video_dir=video_dir,
+                                    termination_reason="max_length",
+                                )
+                                ckpt_episode_counter += 1
+                                total_episode_counter += 1
+                                print(f"checkpoint_{ckpt_step}: {success_counter}/{episode + 1}")
+                                done_by_manual = False
+                                break
+                            if stage1_done:
+                                mode = "S2_TRAIN"
+                            continue
 
-                    print("actions = ", actions)
+                        print_green(f"obs[state] =  {obs['state']}")
+                        actions = sample_policy_action(agent, obs, key, argmax=False)
 
-                    next_obs, reward, done, truncated, info = env.step(actions)
-                    obs = next_obs
-                    key = key_reader.get_key_nowait()
-                    while key is not None:
-                        if key == '1':
-                            done = True
-                            info = dict(info)
-                            done_by_manual = True
-                            info['succeed'] = True
+                        print("actions = ", actions)
+
+                        next_obs, reward, done, truncated, info = env.step(actions)
+                        episode_steps += 1
+                        obs = next_obs
                         key = key_reader.get_key_nowait()
-                        
-                    if "intervene_action" in info:
-                        intervention_label = 1
-                    if done:
-                        if reward:
+                        while key is not None:
+                            if key == '1':
+                                done = True
+                                reward = 1
+                                info = dict(info)
+                                done_by_manual = True
+                                info['succeed'] = True
+                            elif key == '2':
+                                done = True
+                                reward = 0
+                                info = dict(info)
+                                done_by_manual = True
+                                info['succeed'] = False
+                            key = key_reader.get_key_nowait()
+
+                        max_length_done = _reached_eval_max_episode_steps(episode_steps)
+                        if max_length_done and not done:
+                            done = True
+                            reward = 0
+                            print_yellow(
+                                f"Reached eval max episode length {FLAGS.eval_max_episode_steps}."
+                            )
+                            
+                        if "intervene_action" in info:
+                            intervention_label = 1
+                        if done:
+                            reward_value = float(np.asarray(reward).item())
                             dt = time.time() - start_time
-                            time_list.append(dt)
-                            print(dt)
-                        if not intervention_label or not done_by_manual:
-                            success_counter += 1
-                        print(f"{success_counter}/{episode + 1}")
-                        intervention_label = 0
-                        ckpt_step += 2000
-                        done_by_manual = False
+                            if reward_value:
+                                time_list.append(dt)
+                                total_time_list.append(dt)
+                                print(dt)
+                            success_counter += int(bool(reward_value))
+                            total_success_counter += int(bool(reward_value))
+                            ckpt_episode_counter += 1
+                            total_episode_counter += 1
+                            print(f"checkpoint_{ckpt_step}: {success_counter}/{episode + 1}")
+                            intervention_label = 0
+                            termination_reason = "success" if reward_value else "env_done"
+                            if truncated:
+                                termination_reason = "truncated"
+                            if max_length_done:
+                                termination_reason = "max_length"
+                            if done_by_manual and reward_value:
+                                termination_reason = "manual_success"
+                            elif done_by_manual:
+                                termination_reason = "manual_failure"
+                            video_dir = _save_eval_video(env, ckpt_step, episode)
+                            _record_eval_result(
+                                eval_records,
+                                ckpt_step=ckpt_step,
+                                episode=episode,
+                                reward=reward_value,
+                                duration=dt,
+                                episode_steps=episode_steps,
+                                video_dir=video_dir,
+                                termination_reason=termination_reason,
+                            )
+                            done_by_manual = False
 
-                        mode = "S1_INFERENCE"
-                        obs = reset_after_episode(env, episode)
+                if ckpt_episode_counter:
+                    print(f"checkpoint_{ckpt_step} success rate: {success_counter / ckpt_episode_counter}")
+                else:
+                    print(f"checkpoint_{ckpt_step} success rate: no completed eval episodes")
+                print(f"checkpoint_{ckpt_step} average time: {np.mean(time_list) if time_list else float('nan')}")
 
-            print(f"success rate: {success_counter / FLAGS.eval_n_trajs}")
-            print(f"average time: {np.mean(time_list)}")
+            if total_episode_counter:
+                print(f"success rate: {total_success_counter / total_episode_counter}")
+            else:
+                print("success rate: no completed eval episodes")
+            print(f"average time: {np.mean(total_time_list) if total_time_list else float('nan')}")
             return  # after done eval, return and exit
         
         except KeyboardInterrupt:
-            pass
+            interrupted = True
+            print_yellow("Eval interrupted by Ctrl+C.")
         finally:
+            _write_eval_summary(eval_records, interrupted=interrupted)
             if key_reader is not None:
                 key_reader.stop()
+            print_green("Resetting env before eval exit.")
+            try:
+                env.reset()
+            except Exception as exc:
+                print_yellow(f"Failed to reset env before eval exit: {exc}")
         return
         
         
@@ -292,133 +568,157 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng, agent_pick=Non
     pick_steps = 0
     demo_count = 216
 
+    key_reader = KeyReader()
+    key_reader.start()
     pbar = tqdm.tqdm(range(start_step, config.max_steps), dynamic_ncols=True)
-    for step in pbar:
-        if is_multi_stage_task():
-            step = step - pick_steps
-        if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
-            # dump to pickle file
-            buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
-            demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
-            if not os.path.exists(buffer_path):
-                os.makedirs(buffer_path)
-            if not os.path.exists(demo_buffer_path):
-                os.makedirs(demo_buffer_path)
-            with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
-                pkl.dump(transitions, f)
-                transitions = []
-            with open(
-                os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
-            ) as f:
-                pkl.dump(demo_transitions, f)
-                demo_transitions = []
-        
-        sampling_rng, key = jax.random.split(sampling_rng)
-        if is_multi_stage_task() and mode == "S1_INFERENCE":
-            pick_steps += 1
-            obs, stage1_done = run_stage1_until_complete(agent_pick, env, obs, key)
-            if stage1_done:
-                mode = "S2_TRAIN"
-                intervention_count = 0
-                intervention_steps = 0
-                already_intervened = False
-            continue
-
-        
-        timer.tick("total")
-        with timer.context("sample_actions"):
-            print_green(f"obs[state] =  {obs['state']}")
-            # if step < config.random_steps:
-            #     print("random actions")
-            #     actions = env.action_space.sample()
-            # else:
+    try:
+        for step in pbar:
+            if is_multi_stage_task():
+                step = step - pick_steps
+            if step > 0 and config.buffer_period > 0 and step % config.buffer_period == 0:
+                # dump to pickle file
+                buffer_path = os.path.join(FLAGS.checkpoint_path, "buffer")
+                demo_buffer_path = os.path.join(FLAGS.checkpoint_path, "demo_buffer")
+                if not os.path.exists(buffer_path):
+                    os.makedirs(buffer_path)
+                if not os.path.exists(demo_buffer_path):
+                    os.makedirs(demo_buffer_path)
+                with open(os.path.join(buffer_path, f"transitions_{step}.pkl"), "wb") as f:
+                    pkl.dump(transitions, f)
+                    transitions = []
+                with open(
+                    os.path.join(demo_buffer_path, f"transitions_{step}.pkl"), "wb"
+                ) as f:
+                    pkl.dump(demo_transitions, f)
+                    demo_transitions = []
+            
             sampling_rng, key = jax.random.split(sampling_rng)
-            # print("obs shape = ", obs["state"].shape)
-            actions = sample_policy_action(agent, obs, key, argmax=True)
-            print("actions sampled= ", actions)
-            # if actions[..., 6] < 0.0:
-            #     random_action = np.random.uniform(0.0, 0.30)
-            #     actions[..., 6] = random_action
-            
-        # Step environment
-        with timer.context("step_env"):
-            next_obs, reward, done, truncated, info = env.step(actions)
-            # print("reward = ", reward)
+            if is_multi_stage_task() and mode == "S1_INFERENCE":
+                pick_steps += 1
+                obs, stage1_done = run_stage1_until_complete(agent_pick, env, obs, key)
+                if stage1_done:
+                    mode = "S2_TRAIN"
+                    intervention_count = 0
+                    intervention_steps = 0
+                    already_intervened = False
+                continue
 
-            # print_red(f"next_obs[state] =  {next_obs['state']}")
-
-            # override the action with the intervention action
-            if "intervene_action" in info:
-                actions = info.pop("intervene_action")
-                # print("intervene_action = ", actions)
-                intervention_steps += 1
-                if not already_intervened:
-                    intervention_count += 1
-                already_intervened = True
-            else:
-                already_intervened = False
             
-            # if "is_pick" in info:
-            #     is_pick = info["is_pick"]
-            # else:
-            #     is_pick = True
-            state = obs["state"][0]
-            if FLAGS.exp_name in {"twist_bottle_cap", "lid_grip"}:
-                # if state[2] < 0.22 and (0.6 < state[0] < 0.8) and (-0.13 < state[1] < -0.05):
-                #     actions[:3] = np.clip(actions[:3], -0.4, 0.4)
-                if state[2] < 0.24 and (0.6 < state[0] < 0.8) and (-0.2 < state[1] < -0.1):
-                    actions[:3] = np.clip(actions[:3], -0.4, 0.4)
-            print("actions = ", actions)
-            # print("reward = ", reward)
-            # print("done = ", done)
-            # input("step done, press to continue")
-            running_return += reward
-            transition = dict(
-                observations=obs,
-                next_observations=next_obs,
-                actions=actions,
-                rewards=reward,
-                masks=1.0 - done,
-                dones=done,
-            )
-            if 'grasp_penalty' in info:
-                transition['grasp_penalty']= info['grasp_penalty']
-            if 'robot_arm_penalty' in info:
-                transition['robot_arm_penalty']= info['robot_arm_penalty']
-            
-            print("info['robot_arm_penalty'] = ", info.get('robot_arm_penalty', 0))
-            print("info['grasp_penalty'] = ", info.get('grasp_penalty', 0))
-            data_store.insert(transition)
-            transitions.append(copy.deepcopy(transition))
-            if already_intervened:
-                intvn_data_store.insert(transition)
-                demo_transitions.append(copy.deepcopy(transition))
-
-            obs = next_obs
-            # if done and is_pick:
-            #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-            if done:
-                print_green(f" task done = {done}")
-                info["episode"]["intervention_count"] = intervention_count
-                info["episode"]["intervention_steps"] = intervention_steps
-                stats = {"environment": info}  # send stats to the learner to log
-                client.request("send-stats", stats)
-                pbar.set_description(f"last return: {running_return}")
-                running_return = 0.0
-                intervention_count = 0
-                intervention_steps = 0
-                already_intervened = False
-                client.update()
-                mode = "S1_INFERENCE"
-                if FLAGS.save_video:
-                    env.unwrapped.save_video_recording(demo_count)
-                demo_count += 1
-                obs = reset_after_episode(env)
+            timer.tick("total")
+            with timer.context("sample_actions"):
+                print_green(f"obs[state] =  {obs['state']}")
+                # if step < config.random_steps:
+                #     print("random actions")
+                #     actions = env.action_space.sample()
+                # else:
+                sampling_rng, key = jax.random.split(sampling_rng)
+                # print("obs shape = ", obs["state"].shape)
+                actions = sample_policy_action(agent, obs, key, argmax=True)
+                print("actions sampled= ", actions)
+                # if actions[..., 6] < 0.0:
+                #     random_action = np.random.uniform(0.0, 0.30)
+                #     actions[..., 6] = random_action
                 
-        timer.tock("total")
-        if step % config.log_period == 0:
-            stats = {"timer": timer.get_average_times()}
-            client.request("send-stats", stats)
+            # Step environment
+            with timer.context("step_env"):
+                next_obs, reward, done, truncated, info = env.step(actions)
+                # print("reward = ", reward)
+
+                # print_red(f"next_obs[state] =  {next_obs['state']}")
+
+                # override the action with the intervention action
+                if "intervene_action" in info:
+                    actions = info.pop("intervene_action")
+                    # print("intervene_action = ", actions)
+                    intervention_steps += 1
+                    if not already_intervened:
+                        intervention_count += 1
+                    already_intervened = True
+                else:
+                    already_intervened = False
+
+                manual_success_done = False
+                manual_failure_done = False
+                key_input = key_reader.get_key_nowait()
+                while key_input is not None:
+                    if key_input == "1":
+                        done = True
+                        reward = 1
+                        manual_success_done = True
+                        info = dict(info)
+                        info["succeed"] = True
+                        print_yellow("Manual episode success requested by 1.")
+                    elif key_input == "2":
+                        done = True
+                        reward = 0
+                        manual_failure_done = True
+                        info = dict(info)
+                        info["succeed"] = False
+                        print_yellow("Manual episode failure requested by 2.")
+                    key_input = key_reader.get_key_nowait()
+                
+                # if "is_pick" in info:
+                #     is_pick = info["is_pick"]
+                # else:
+                #     is_pick = True
+                state = obs["state"][0]
+                if FLAGS.exp_name in {"twist_bottle_cap", "lid_grip"}:
+                    # if state[2] < 0.22 and (0.6 < state[0] < 0.8) and (-0.13 < state[1] < -0.05):
+                    #     actions[:3] = np.clip(actions[:3], -0.4, 0.4)
+                    if state[2] < 0.24 and (0.6 < state[0] < 0.8) and (-0.2 < state[1] < -0.1):
+                        actions[:3] = np.clip(actions[:3], -0.4, 0.4)
+                print("actions = ", actions)
+                # print("reward = ", reward)
+                # print("done = ", done)
+                # input("step done, press to continue")
+                running_return += reward
+                transition = dict(
+                    observations=obs,
+                    next_observations=next_obs,
+                    actions=actions,
+                    rewards=reward,
+                    masks=1.0 - done,
+                    dones=done,
+                )
+                transition["grasp_penalty"] = info.get("grasp_penalty", np.float32(0.0))
+                transition["robot_arm_penalty"] = info.get("robot_arm_penalty", np.float32(0.0))
+                
+                print("info['robot_arm_penalty'] = ", info.get('robot_arm_penalty', 0))
+                print("info['grasp_penalty'] = ", info.get('grasp_penalty', 0))
+                data_store.insert(transition)
+                transitions.append(copy.deepcopy(transition))
+                if already_intervened:
+                    intvn_data_store.insert(transition)
+                    demo_transitions.append(copy.deepcopy(transition))
+
+                obs = next_obs
+                # if done and is_pick:
+                #     print_green("pick task done--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+                if done:
+                    print_green(f" task done = {done}")
+                    info.setdefault("episode", {})
+                    info["episode"]["intervention_count"] = intervention_count
+                    info["episode"]["intervention_steps"] = intervention_steps
+                    info["episode"]["manual_success"] = manual_success_done
+                    info["episode"]["manual_failure"] = manual_failure_done
+                    stats = {"environment": info}  # send stats to the learner to log
+                    client.request("send-stats", stats)
+                    pbar.set_description(f"last return: {running_return}")
+                    running_return = 0.0
+                    intervention_count = 0
+                    intervention_steps = 0
+                    already_intervened = False
+                    client.update()
+                    mode = "S1_INFERENCE"
+                    demo_count += 1
+                    obs = reset_after_episode(env)
+                    
+            timer.tock("total")
+            if step % config.log_period == 0:
+                stats = {"timer": timer.get_average_times()}
+                client.request("send-stats", stats)
+    finally:
+        key_reader.stop()
 
 
 ##############################################################################
@@ -427,12 +727,8 @@ def learner(rng, agent, replay_buffer, demo_buffer, wandb_logger=None):
     """
     The learner loop, which runs when "--learner" is set to True.
     """
-    start_step = (
-        int(os.path.basename(checkpoints.latest_checkpoint(os.path.abspath(FLAGS.checkpoint_path)))[11:])
-        + 1
-        if FLAGS.checkpoint_path and os.path.exists(FLAGS.checkpoint_path)
-        else 0
-    )
+    latest_step = _latest_checkpoint_step(FLAGS.checkpoint_path)
+    start_step = latest_step + 1 if latest_step > 0 else 0
 
     # start_step = 0
     step = start_step
@@ -553,7 +849,7 @@ def main(_):
 
     env = config.get_environment(
         fake_env=FLAGS.learner,
-        save_video=FLAGS.save_video,
+        save_video=_is_eval_mode() and FLAGS.save_video,
         classifier=True,
         enable_tactile=FLAGS.enable_tactile
     )
@@ -654,11 +950,13 @@ def main(_):
             include_robot_arm_penalty=include_robot_arm_penalty,
         )
         # set up wandb and logging
+        wandb_project = f"hil-ablation-{FLAGS.exp_name}-{_wandb_project_date()}-0"
         wandb_logger = make_wandb_logger(
-            project="hil_rl_denso",
+            project=wandb_project,
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
         )
+        print_green(f"WandB project: {wandb_project}")
         return replay_buffer, wandb_logger
 
     if FLAGS.learner:
@@ -680,7 +978,7 @@ def main(_):
             transitions = load_transition_stream(path)
             print_green(f"Loaded {len(transitions)} demo transitions from {path}")
             for transition in transitions:
-                demo_buffer.insert(transition)
+                demo_buffer.insert(ensure_penalty_keys(transition))
         print_green(f"demo buffer size: {len(demo_buffer)}")
         print_green(f"online buffer size: {len(replay_buffer)}")
 
@@ -690,7 +988,7 @@ def main(_):
             for file in iter_transition_files([os.path.join(FLAGS.checkpoint_path, "buffer")]):
                 transitions = load_transition_stream(file)
                 for transition in transitions:
-                    replay_buffer.insert(transition)
+                    replay_buffer.insert(ensure_penalty_keys(transition))
             print_green(
                 f"Loaded previous buffer data. Replay buffer size: {len(replay_buffer)}"
             )
@@ -701,7 +999,7 @@ def main(_):
             for file in iter_transition_files([os.path.join(FLAGS.checkpoint_path, "demo_buffer")]):
                 transitions = load_transition_stream(file)
                 for transition in transitions:
-                    demo_buffer.insert(transition)
+                    demo_buffer.insert(ensure_penalty_keys(transition))
             print_green(
                 f"Loaded previous demo buffer data. Demo buffer size: {len(demo_buffer)}"
             )

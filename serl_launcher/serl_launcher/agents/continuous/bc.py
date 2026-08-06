@@ -9,7 +9,6 @@ import numpy as np
 import optax
 from flax.core import FrozenDict
 import distrax 
-from jax import debug
 
 from serl_launcher.common.common import JaxRLTrainState, ModuleDict, nonpytree_field
 from serl_launcher.common.encoding import EncodingWrapper
@@ -66,36 +65,27 @@ class BCAgent(flax.struct.PyTreeNode):
             else:
                 batch_actions = batch["actions"]
 
-            # pi_arm, pi_hand = pi_actions[:, :7], pi_actions[:, 7:]
+            action_weights = jnp.ones((pi_actions.shape[-1],), dtype=pi_actions.dtype)
+            action_weights = action_weights.at[-1].set(self.config["hand_action_weight"])
+            weight_scale = jnp.mean(action_weights)
 
-            # arm_std = dist.scale_diag[:, :7]
-            # hand_std = dist.scale_diag[:, 7:]
-
-            # arm_dist = distrax.MultivariateNormalDiag(pi_arm, arm_std)
-            # hand_dist = distrax.MultivariateNormalDiag(pi_hand, hand_std)
-
-            # arm_log_prob = arm_dist.log_prob(batch_actions[:, :7])
-            # hand_log_prob = hand_dist.log_prob(batch_actions[:, 7:])
-
-            # arm_weight = 0.7
-            # hand_weight = 0.3
-            # weighted_log_prob = arm_weight * arm_log_prob + hand_weight * hand_log_prob
-            # # weighted_log_prob = arm_weight * arm_log_prob
-            # actor_loss = -(weighted_log_prob).mean()
-            # mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-
-            # return actor_loss, {
-            #     "actor_loss": actor_loss,
-            #     "mse": mse.mean(),
-            # }
-
+            per_dim_dist = distrax.Normal(pi_actions, dist.scale_diag)
+            per_dim_log_probs = per_dim_dist.log_prob(batch_actions)
+            weighted_log_probs = jnp.sum(per_dim_log_probs * action_weights, axis=-1) / weight_scale
             log_probs = dist.log_prob(batch_actions)
-            mse = ((pi_actions - batch_actions) ** 2).sum(-1)
-            actor_loss = -(log_probs).mean()
+            per_dim_mse = (pi_actions - batch_actions) ** 2
+            mse = per_dim_mse.sum(-1)
+            weighted_mse = jnp.sum(per_dim_mse * action_weights, axis=-1) / weight_scale
+            actor_loss = -(weighted_log_probs).mean()
 
             return actor_loss, {
                 "actor_loss": actor_loss,
                 "mse": mse.mean(),
+                "weighted_mse": weighted_mse.mean(),
+                "arm_mse": per_dim_mse[..., :-1].sum(-1).mean(),
+                "hand_mse": per_dim_mse[..., -1].mean(),
+                "log_probs": log_probs.mean(),
+                "weighted_log_probs": weighted_log_probs.mean(),
             }
 
         # compute gradients and update params
@@ -132,7 +122,6 @@ class BCAgent(flax.struct.PyTreeNode):
             name="actor",
         )
 
-        debug.print("argmax: {}", argmax)
         if argmax:
             actions = dist.mode()
         else:
@@ -182,6 +171,7 @@ class BCAgent(flax.struct.PyTreeNode):
         # Optimizer
         learning_rate: float = 3e-4,
         augmentation_function: Optional[callable] = None,
+        hand_action_weight: float = 1.0,
     ):
         if encoder_type == "resnet":
             from serl_launcher.vision.resnet_v1 import resnetv1_configs
@@ -254,6 +244,7 @@ class BCAgent(flax.struct.PyTreeNode):
             image_keys=image_keys,
             augmentation_function=augmentation_function,
             tanh_squash_distribution=policy_kwargs["tanh_squash_distribution"],
+            hand_action_weight=hand_action_weight,
         )
 
         agent = cls(state, config)

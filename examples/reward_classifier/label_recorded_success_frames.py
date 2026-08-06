@@ -10,14 +10,20 @@ from absl import app, flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_multi_string("frame_root", None, "Recorded data root(s) with frame_xxx folders.")
-flags.DEFINE_string("classifier_task", "default", "Label task name, used only for metadata.")
+flags.DEFINE_multi_string(
+    "frame_root",
+    ["/home/wrq/workspaces/HK_TACEXO_WANG/bc_data/flip_object/flip_object_teleop_2026_08_01_08"],
+    "Recorded data root(s). Each root may directly contain frame_xxx folders or recorded demo subfolders.",
+)
+flags.DEFINE_string("classifier_task", "flip_object", "Label task name, used only for metadata.")
 flags.DEFINE_string("image_name", "color_image.jpg", "Image filename in each frame folder.")
+flags.DEFINE_string("wrist_image_name", "color_image2.jpg", "Wrist camera image filename in each frame folder.")
 flags.DEFINE_string("label_name", "is_record_success.txt", "Label filename to write.")
 flags.DEFINE_bool("reset_existing_labels", True, "Overwrite missing/existing labels with 0 first.")
-flags.DEFINE_integer("display_width", 960, "Display image width.")
+flags.DEFINE_integer("display_width", 560, "Display front camera image width.")
+flags.DEFINE_bool("show_wrist", True, "Show wrist camera image when available.")
 flags.DEFINE_bool("show_tactile", True, "Show thumb/index tactile panels when available.")
-flags.DEFINE_integer("tactile_width", 480, "Tactile panel width.")
+flags.DEFINE_integer("tactile_width", 360, "Tactile panel width.")
 flags.DEFINE_string("range_name", "classifier_ranges.json", "Range json filename. Use none to disable.")
 flags.DEFINE_bool("export_only_manual_ranges", False, "Only write manually selected ranges.")
 
@@ -41,6 +47,21 @@ def _find_frames(root: Path):
         and (frame_dir / FLAGS.image_name).exists()
     ]
     return sorted(frames, key=_frame_number)
+
+
+def _has_frames(root: Path) -> bool:
+    return bool(_find_frames(root))
+
+
+def _iter_recording_roots(root: Path):
+    if _has_frames(root):
+        return [root]
+
+    recording_roots = []
+    for child in sorted(root.iterdir(), key=lambda p: p.name):
+        if child.is_dir() and _has_frames(child):
+            recording_roots.append(child)
+    return recording_roots
 
 
 def _load_episode_ranges(root: Path, frames):
@@ -168,16 +189,45 @@ def _read_tactile_image(path: Path):
 def _make_tactile_panel(frame_dir: Path, height: int):
     if not FLAGS.show_tactile:
         return None
-    thumb = _read_tactile_image(frame_dir / "thumb_heat_map.jpg")
-    index = _read_tactile_image(frame_dir / "index_heat_map.jpg")
-    if thumb is None or index is None:
+    tactile_items = [
+        ("thumb", _read_tactile_image(frame_dir / "thumb_heat_map.jpg")),
+        ("index", _read_tactile_image(frame_dir / "index_heat_map.jpg")),
+        ("middle", _read_tactile_image(frame_dir / "middle_heat_map.jpg")),
+    ]
+    tactile_items = [(name, image) for name, image in tactile_items if image is not None]
+    if not tactile_items:
         return None
-    thumb = cv2.resize(thumb, (height, height), interpolation=cv2.INTER_NEAREST)
-    index = cv2.resize(index, (height, height), interpolation=cv2.INTER_NEAREST)
-    panel = cv2.resize(cv2.hconcat([thumb, index]), (FLAGS.tactile_width, height))
+    tactile_images = [
+        cv2.resize(image, (height, height), interpolation=cv2.INTER_NEAREST)
+        for _, image in tactile_items
+    ]
+    panel = cv2.resize(cv2.hconcat(tactile_images), (FLAGS.tactile_width, height))
     cv2.rectangle(panel, (0, 0), (panel.shape[1], 35), (0, 0, 0), -1)
-    cv2.putText(panel, "tactile: thumb | index", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
+    cv2.putText(panel, f"tactile: {' | '.join(name for name, _ in tactile_items)}", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
     return panel
+
+
+def _make_wrist_panel(frame_dir: Path, height: int):
+    if not FLAGS.show_wrist:
+        return None
+    wrist_path = frame_dir / FLAGS.wrist_image_name
+    wrist_image = cv2.imread(str(wrist_path))
+    if wrist_image is None:
+        return None
+    h, w = wrist_image.shape[:2]
+    target_width = max(1, int(w * (height / float(h))))
+    wrist_image = cv2.resize(wrist_image, (target_width, height))
+    cv2.rectangle(wrist_image, (0, 0), (wrist_image.shape[1], 35), (0, 0, 0), -1)
+    cv2.putText(
+        wrist_image,
+        "wrist camera",
+        (10, 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        1,
+    )
+    return wrist_image
 
 
 def _make_display_image(frame_dir: Path, root: Path, idx: int, total: int, episode_index, manual_range):
@@ -196,13 +246,18 @@ def _make_display_image(frame_dir: Path, root: Path, idx: int, total: int, episo
         if manual_range is not None
         else f"episode={episode_index} range=full episode"
     )
-    cv2.rectangle(image, (0, 0), (image.shape[1], 112), (0, 0, 0), -1)
-    cv2.putText(image, f"{root.name} | {frame_dir.name} | {idx + 1}/{total} | {status}", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
-    cv2.putText(image, f"label file: {FLAGS.label_name}", (12, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-    cv2.putText(image, range_text, (12, 83), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
-    cv2.putText(image, "1/s=success | 0/f=fail | n/space=next | p=prev | [ ]=range | q=quit", (12, 106), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1)
+    cv2.rectangle(image, (0, 0), (image.shape[1], 76), (0, 0, 0), -1)
+    cv2.putText(image, f"{root.name} | {frame_dir.name} | {idx + 1}/{total} | {status}", (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 1)
+    cv2.putText(image, range_text, (8, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
+    cv2.putText(image, "1/s success | 0/f fail | n next | p prev | [ ] range | q quit", (8, 66), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1)
+    panels = [image]
+    wrist_panel = _make_wrist_panel(frame_dir, image.shape[0])
+    if wrist_panel is not None:
+        panels.append(wrist_panel)
     tactile_panel = _make_tactile_panel(frame_dir, image.shape[0])
-    return cv2.hconcat([image, tactile_panel]) if tactile_panel is not None else image
+    if tactile_panel is not None:
+        panels.append(tactile_panel)
+    return cv2.hconcat(panels)
 
 
 def _label_root(root: Path):
@@ -264,10 +319,18 @@ def main(_):
         raise ValueError("--frame_root is required")
     for root_str in FLAGS.frame_root:
         root = Path(root_str).expanduser()
-        if root.exists():
-            _label_root(root)
-        else:
+        if not root.exists():
             print(f"[warn] missing root: {root}")
+            continue
+
+        recording_roots = _iter_recording_roots(root)
+        if not recording_roots:
+            print(f"[warn] no recorded frame folders under {root}")
+            continue
+
+        print(f"[label] root={root} recording_folders={len(recording_roots)}")
+        for recording_root in recording_roots:
+            _label_root(recording_root)
     cv2.destroyAllWindows()
 
 

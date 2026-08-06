@@ -22,22 +22,39 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ROBOT_INFRA_DIR))
 
+from experiments.mappings import NEW_MAPPING
+
 FLAGS = flags.FLAGS
 
-flags.DEFINE_multi_string("frame_root", None, "Recorded data root(s) with frame_xxx folders.")
-flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
-flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data.")
+DEFAULT_FRAME_ROOT = Path("/home/wrq/workspaces/HK_TACEXO_WANG/bc_data")
+
+flags.DEFINE_multi_string(
+    "frame_root",
+    None,
+    f"Recorded data root(s) with frame_xxx folders. Defaults to all recordings under {DEFAULT_FRAME_ROOT}.",
+)
+flags.DEFINE_string("exp_name", "flip_object", "Experiment name.")
+flags.DEFINE_integer("enable_tactile", 0, "Whether to include tactile_data.")
 flags.DEFINE_string("config_module", "", "Defaults to experiments.<exp_name>.config.")
 flags.DEFINE_string(
     "robot_urdf_path",
     "",
     "Robot URDF path. Defaults to examples/urdf/denso_robot_with_ati_4.urdf.",
 )
-flags.DEFINE_string("output_dir", "demo_data", "Output directory for demo pickle.")
+flags.DEFINE_string(
+    "output_dir",
+    "bc_data",
+    "Output directory for demo pickle. Default writes to examples/bc_data/<exp_name>.",
+)
 flags.DEFINE_string("output_name", "", "Output filename.")
 flags.DEFINE_boolean("success_only", True, "Only export successful episodes from metadata.")
 flags.DEFINE_boolean("disable_image_crop", False, "Use full frame images instead of task crop.")
 flags.DEFINE_string("label_name", "is_record_success.txt", "Per-frame success label filename.")
+flags.DEFINE_boolean(
+    "stop_at_first_success_label",
+    True,
+    "End each exported episode at the first frame whose success label is 1.",
+)
 flags.DEFINE_integer("max_transitions", 0, "Debug limit. 0 means no limit.")
 
 
@@ -48,6 +65,14 @@ def _frame_number(path: Path) -> int:
 
 def _frame_dir(root: Path, frame_id: int) -> Path:
     return root / f"frame_{int(frame_id)}"
+
+
+def _existing_frame_ids(root: Path, start: int, end: int):
+    frame_ids = []
+    for frame_id in range(start, end + 1):
+        if _frame_dir(root, frame_id).exists():
+            frame_ids.append(frame_id)
+    return frame_ids
 
 
 def _stack_obs_horizon_one(obs):
@@ -87,22 +112,75 @@ def _episodes(root: Path):
     if metadata is None:
         print(f"[warn] {root} has no recording_metadata.json; using all contiguous frames.")
         return _all_frame_ranges(root)
-    return metadata.get("episode_ranges", [])
+    episodes = metadata.get("episode_ranges", [])
+    stage_export_ranges = {
+        "tennis_ball_place": ("place_range", "place"),
+        "twist_bottle_cap": ("twist_range", "twist"),
+    }
+    if FLAGS.exp_name in stage_export_ranges:
+        range_key, export_stage = stage_export_ranges[FLAGS.exp_name]
+        stage_episodes = []
+        for episode in episodes:
+            stage_range = episode.get(range_key)
+            if stage_range is None:
+                stage_episodes.append(episode)
+                continue
+            stage_episode = dict(episode)
+            stage_episode["full_start_frame"] = episode.get("start_frame")
+            stage_episode["full_end_frame"] = episode.get("end_frame")
+            stage_episode["start_frame"] = stage_range["start_frame"]
+            stage_episode["end_frame"] = stage_range["end_frame"]
+            stage_episode["export_stage"] = export_stage
+            stage_episodes.append(stage_episode)
+        return stage_episodes
+    return episodes
+
+
+def _default_frame_roots():
+    if not DEFAULT_FRAME_ROOT.exists():
+        return []
+    prefixes = {
+        "tennis_ball_pick": ("ball_pick_", "tennis_ball_pick_"),
+        "tennis_ball_place": ("ball_place_", "tennis_ball_place_"),
+        "lid_grip": ("lid_grip_",),
+        "twist_bottle_cap": ("twist_bottle_cap_",),
+        "tube_insertion": ("tube_insertion_",),
+        "flip_object": ("flip_object_",),
+    }.get(FLAGS.exp_name, (f"{FLAGS.exp_name}_",))
+    search_roots = [DEFAULT_FRAME_ROOT]
+    task_root = DEFAULT_FRAME_ROOT / FLAGS.exp_name
+    if task_root.exists():
+        search_roots.insert(0, task_root)
+
+    frame_roots = []
+    for search_root in search_roots:
+        frame_roots.extend(
+            [
+                child
+                for child in search_root.iterdir()
+                if child.is_dir()
+                and child.name.startswith(prefixes)
+                and (child / "recording_metadata.json").exists()
+            ]
+        )
+    return sorted(
+        set(frame_roots)
+    )
 
 
 def _image_keys_from_config():
-    module_name = FLAGS.config_module or f"experiments.{FLAGS.exp_name}.config"
-    config_module = importlib.import_module(module_name)
-    config = config_module.TrainConfig()
+    if FLAGS.config_module:
+        config_module = importlib.import_module(FLAGS.config_module)
+        config = config_module.TrainConfig()
+    else:
+        assert FLAGS.exp_name in NEW_MAPPING, f"Experiment {FLAGS.exp_name} not found."
+        config = NEW_MAPPING[FLAGS.exp_name]()
     env = config.get_environment(
         fake_env=True,
         save_video=False,
         classifier=False,
         enable_tactile=bool(FLAGS.enable_tactile),
     )
-    close_fn = getattr(env, "close", None)
-    if callable(close_fn):
-        close_fn()
     return list(config.image_keys)
 
 
@@ -161,35 +239,45 @@ def _iter_episode_pairs(root: Path, episode):
     end = int(episode["end_frame"])
     if end <= start:
         return
+    frame_ids = _existing_frame_ids(root, start, end)
+    if len(frame_ids) < 2:
+        return
     episode_index = int(episode.get("episode_index", 0))
-    for frame_id in range(start, end):
+    terminal_frame = frame_ids[-1]
+    if FLAGS.stop_at_first_success_label:
+        for frame_id in frame_ids:
+            if _read_success(_frame_dir(root, frame_id)):
+                terminal_frame = frame_id
+                break
+        frame_ids = [frame_id for frame_id in frame_ids if frame_id <= terminal_frame]
+        if len(frame_ids) < 2:
+            return
+    for frame_id, next_frame_id in zip(frame_ids, frame_ids[1:]):
         current_frame = _frame_dir(root, frame_id)
-        next_frame = _frame_dir(root, frame_id + 1)
-        if not current_frame.exists() or not next_frame.exists():
-            continue
-        done = bool(episode.get("success", False)) and (
-            _read_success(current_frame) or _read_success(next_frame) or frame_id + 1 == end
-        )
+        next_frame = _frame_dir(root, next_frame_id)
+        done = bool(episode.get("success", False)) and next_frame_id == terminal_frame
         yield current_frame, next_frame, episode_index, done
         if done:
             return
 
 
 def main(_):
-    if not FLAGS.frame_root:
-        raise ValueError("--frame_root is required")
+    frame_roots = [Path(root).expanduser() for root in FLAGS.frame_root] if FLAGS.frame_root else _default_frame_roots()
+    if not frame_roots:
+        raise ValueError(f"No frame roots found. Pass --frame_root or add recordings under {DEFAULT_FRAME_ROOT}.")
     robot_urdf_path = FLAGS.robot_urdf_path or str(
         REPO_ROOT / "examples" / "urdf" / "denso_robot_with_ati_4.urdf"
     )
     image_keys = _image_keys_from_config()
     output_dir = (SCRIPT_DIR / FLAGS.output_dir).resolve()
+    if FLAGS.output_dir == "bc_data":
+        output_dir = output_dir / FLAGS.exp_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     transitions = []
     episode_count = 0
     skipped = 0
-    for root_str in FLAGS.frame_root:
-        root = Path(root_str).expanduser()
+    for root in frame_roots:
         if not root.exists():
             print(f"[warn] missing root: {root}")
             continue

@@ -8,13 +8,14 @@ from jax import numpy as jnp
 import gymnasium as gym
 
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_launcher'))
-sys.path.insert(0, project_root)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+EXAMPLES_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+REPO_ROOT = os.path.abspath(os.path.join(EXAMPLES_DIR, ".."))
+sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, EXAMPLES_DIR)
+
 from serl_launcher.networks.reward_classifier import load_classifier_func
 from examples.utils import read_utils
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../serl_robot_infra'))
-sys.path.insert(0, project_root)
 
 from experiments.mappings import NEW_MAPPING
 
