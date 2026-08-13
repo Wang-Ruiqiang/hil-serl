@@ -24,6 +24,11 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "flip_object", "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
+flags.DEFINE_integer(
+    "max_episode_steps",
+    0,
+    "Maximum episode length while recording. Use 0 to disable the limit.",
+)
 flags.DEFINE_boolean("record_data", True, "Save raw frame data for later demo/classifier export.")
 flags.DEFINE_boolean("classifier", True, "Load reward classifier while recording demos.")
 flags.DEFINE_string(
@@ -367,6 +372,18 @@ def main(_):
         enable_tactile=FLAGS.enable_tactile,
         record_data=FLAGS.record_data,
         frame_save_path=frame_save_path,
+    )
+    base_env = _get_unwrapped_env(env)
+    if not hasattr(base_env, "max_episode_length"):
+        raise AttributeError(
+            "Recording environment does not expose max_episode_length."
+        )
+    base_env.max_episode_length = (
+        float("inf") if FLAGS.max_episode_steps <= 0 else FLAGS.max_episode_steps
+    )
+    print(
+        "[record_demos] max episode length: "
+        f"{'disabled' if FLAGS.max_episode_steps <= 0 else FLAGS.max_episode_steps}"
     )
 
     obs, info = env.reset()

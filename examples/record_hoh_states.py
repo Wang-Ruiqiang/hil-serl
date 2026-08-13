@@ -7,6 +7,7 @@ import re
 import sys
 import time
 
+import cv2
 import numpy as np
 from absl import app, flags
 from tqdm import tqdm
@@ -22,7 +23,7 @@ flags.DEFINE_string("exp_name", "flip_object", "Experiment name.")
 flags.DEFINE_float("hz", 10.0, "Recording frequency in Hz.")
 flags.DEFINE_integer(
     "enable_tactile",
-    -1,
+    0,
     "Whether to enable tactile sensors. Use -1 to follow the task config default.",
 )
 flags.DEFINE_string(
@@ -42,8 +43,20 @@ flags.DEFINE_string(
     "Directory for raw frame_xxx data. If empty, auto-create one under --record_root.",
 )
 flags.DEFINE_bool("display_image", True, "Display camera/tactile images while recording.")
+flags.DEFINE_bool(
+    "enable_wrist_camera",
+    True,
+    "Initialize and record the wrist RealSense camera.",
+)
 flags.DEFINE_integer("max_frames", 0, "Stop after this many frames. 0 means record until Ctrl+C.")
 flags.DEFINE_bool("save_on_interrupt", True, "Save buffered frames after Ctrl+C.")
+flags.DEFINE_bool("save_video", True, "Save one MP4 per available camera when recording exits.")
+flags.DEFINE_string("video_name", "hoh_recording.mp4", "Output video filename.")
+flags.DEFINE_float(
+    "video_fps",
+    0.0,
+    "Output video FPS. Use 0 to follow --hz.",
+)
 flags.DEFINE_float(
     "startup_timeout",
     15.0,
@@ -102,7 +115,20 @@ def _make_env(config_module, frame_save_path):
     env_config = config_module.EnvConfig()
     if FLAGS.enable_tactile >= 0:
         env_config.ENABLE_TACTILE = bool(FLAGS.enable_tactile)
+    if not FLAGS.enable_wrist_camera:
+        env_config.REALSENSE_CAMERAS = {
+            name: camera_config
+            for name, camera_config in env_config.REALSENSE_CAMERAS.items()
+            if name != "wrist_camera"
+        }
+    if not env_config.REALSENSE_CAMERAS:
+        raise ValueError("No RealSense cameras are enabled for HOH recording.")
     env_config.DISPLAY_IMAGE = bool(FLAGS.display_image)
+
+    print(
+        "[record_hoh_states] cameras="
+        f"{list(env_config.REALSENSE_CAMERAS)} tactile={env_config.ENABLE_TACTILE}"
+    )
 
     return config_module.RAMEnv(
         fake_env=False,
@@ -172,7 +198,9 @@ def _state_record(frame_id, timestamp, state, prev_state):
     }
 
 
-def _write_hoh_metadata(frame_save_path, exp_name, hz, records, interrupted):
+def _write_hoh_metadata(
+    frame_save_path, exp_name, hz, records, interrupted, video_paths=None
+):
     metadata = {
         "exp_name": exp_name,
         "record_type": "hoh_state_recording",
@@ -180,6 +208,7 @@ def _write_hoh_metadata(frame_save_path, exp_name, hz, records, interrupted):
         "hz": float(hz),
         "total_frames": len(records),
         "interrupted": bool(interrupted),
+        "video_paths": video_paths or [],
         "created_at": datetime.datetime.now().isoformat(),
     }
     metadata_path = os.path.join(frame_save_path, "hoh_metadata.json")
@@ -200,6 +229,74 @@ def _write_hoh_metadata(frame_save_path, exp_name, hz, records, interrupted):
 
     print(f"[record_hoh_states][metadata] saved {metadata_path}")
     print(f"[record_hoh_states][states] saved {states_path}")
+
+
+def _save_camera_video(frame_save_path, records, camera_name, image_name, video_name):
+    video_path = os.path.abspath(os.path.join(frame_save_path, video_name))
+    fps = FLAGS.video_fps if FLAGS.video_fps > 0 else FLAGS.hz
+    image_paths = []
+    for record in records:
+        image_path = os.path.join(
+            frame_save_path, f"frame_{record['frame_id']}", image_name
+        )
+        if os.path.isfile(image_path):
+            image_paths.append(image_path)
+    if not image_paths:
+        print(f"[record_hoh_states][video] {camera_name} camera not recorded; skipped")
+        return None
+
+    first_frame = cv2.imread(image_paths[0], cv2.IMREAD_COLOR)
+    if first_frame is None:
+        raise RuntimeError(f"Failed to read camera frame: {image_paths[0]}")
+    height, width = first_frame.shape[:2]
+    writer = cv2.VideoWriter(
+        video_path,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height),
+    )
+    if not writer.isOpened():
+        raise RuntimeError(f"Failed to open video writer: {video_path}")
+    try:
+        written_frames = 0
+        for image_path in image_paths:
+            frame = cv2.imread(image_path, cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+            if frame.shape[:2] != (height, width):
+                frame = cv2.resize(frame, (width, height))
+            writer.write(frame)
+            written_frames += 1
+    finally:
+        writer.release()
+    print(
+        f"[record_hoh_states][video] saved {camera_name}: {video_path} "
+        f"frames={written_frames} fps={fps:g}"
+    )
+    return video_path
+
+
+def _save_recording_videos(frame_save_path, records):
+    video_name = FLAGS.video_name.strip()
+    if not video_name:
+        raise ValueError("--video_name must not be empty")
+    if not video_name.lower().endswith(".mp4"):
+        video_name += ".mp4"
+    stem = os.path.splitext(video_name)[0]
+    camera_outputs = (
+        ("front", "color_image.jpg", f"front_{stem}.mp4"),
+        ("wrist", "color_image2.jpg", f"wrist_{stem}.mp4"),
+    )
+    video_paths = []
+    for camera_name, image_name, output_name in camera_outputs:
+        path = _save_camera_video(
+            frame_save_path, records, camera_name, image_name, output_name
+        )
+        if path is not None:
+            video_paths.append(path)
+    if not video_paths:
+        raise RuntimeError("No camera frames were available for video export.")
+    return video_paths
 
 
 def main(_):
@@ -252,12 +349,19 @@ def main(_):
             if records and (not interrupted or FLAGS.save_on_interrupt):
                 print("[record_hoh_states][save] writing images, tactile data, and states...")
                 env.save_all_data_on_exit()
+                video_paths = []
+                if FLAGS.save_video:
+                    try:
+                        video_paths = _save_recording_videos(frame_save_path, records)
+                    except Exception as exc:
+                        print(f"[record_hoh_states][video][error] {exc}")
                 _write_hoh_metadata(
                     frame_save_path,
                     FLAGS.exp_name,
                     FLAGS.hz,
                     records,
                     interrupted=interrupted,
+                    video_paths=video_paths,
                 )
             elif interrupted and not FLAGS.save_on_interrupt:
                 print("[record_hoh_states][interrupt] skipped save because --nosave_on_interrupt was set")
