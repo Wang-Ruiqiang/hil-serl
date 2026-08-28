@@ -13,17 +13,16 @@ from absl import app, flags
 
 FLAGS = flags.FLAGS
 
-DEFAULT_METADATA = (
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/"
-    "tennis_ball_pick-6-11-0/recording_metadata.json"
-)
-DEFAULT_OUT_DIR = str(Path(__file__).resolve().parent / "gaze_cls_data")
+# ============================== 编辑这里 ==============================
+_RECORDED = "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place"
 DEFAULT_TRAIN_ROOTS = [
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-0",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-1",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-2",
+    f"{_RECORDED}/tennis_ball_pick_and_place-2026-08-14_12-18-59",
+    f"{_RECORDED}/tennis_ball_pick_and_place-2026-08-14_12-49-48",
 ]
+# =====================================================================
+
+DEFAULT_METADATA = f"{DEFAULT_TRAIN_ROOTS[0]}/recording_metadata.json"
+DEFAULT_OUT_DIR = str(Path(__file__).resolve().parent / "gaze_cls_data")
 
 flags.DEFINE_string("metadata", DEFAULT_METADATA, "Path to recording_metadata.json.")
 flags.DEFINE_multi_string(
@@ -48,6 +47,15 @@ flags.DEFINE_integer("resize_w", 128, "Output image width.")
 flags.DEFINE_integer("resize_h", 128, "Output image height.")
 flags.DEFINE_float("val_ratio", 0.2, "Validation split ratio.")
 flags.DEFINE_integer("seed", 42, "Train/val split seed.")
+flags.DEFINE_enum(
+    "split_by",
+    "episode",
+    ["episode", "frame"],
+    "How to divide train and val. 'episode' holds whole episodes out; 'frame' "
+    "shuffles individual frames, which leaks: consecutive frames are ~0.1 s "
+    "apart and nearly identical, so a frame-level split puts near-duplicates "
+    "on both sides and the validation error stops measuring generalisation.",
+)
 flags.DEFINE_boolean("success_only", True, "Export only successful episodes.")
 flags.DEFINE_boolean(
     "use_metadata_fallback",
@@ -125,12 +133,29 @@ def _rescale_gaze_to_image(xy_pix, gaze_size, dst_w, dst_h):
     return xy_pix
 
 
-def _split_train_val(samples, val_ratio, seed):
+def _split_train_val(samples, val_ratio, seed, split_by="episode"):
+    """Hold out whole episodes by default; see the --split_by flag for why."""
+    if split_by == "frame":
+        rng = random.Random(seed)
+        idxs = list(range(len(samples)))
+        rng.shuffle(idxs)
+        split = int(len(samples) * (1.0 - val_ratio))
+        return [samples[i] for i in idxs[:split]], [samples[i] for i in idxs[split:]]
+
+    # An episode is only unique together with the recording it came from.
+    keys = sorted({(s["recording_root"], int(s["episode_index"])) for s in samples})
     rng = random.Random(seed)
-    idxs = list(range(len(samples)))
-    rng.shuffle(idxs)
-    split = int(len(samples) * (1.0 - val_ratio))
-    return [samples[i] for i in idxs[:split]], [samples[i] for i in idxs[split:]]
+    rng.shuffle(keys)
+    n_val = max(1, int(round(len(keys) * val_ratio)))
+    val_keys = set(keys[:n_val])
+    train, val = [], []
+    for sample in samples:
+        key = (sample["recording_root"], int(sample["episode_index"]))
+        (val if key in val_keys else train).append(sample)
+    print(f"[split] episodes total={len(keys)} val={len(val_keys)} train={len(keys)-len(val_keys)}")
+    print(f"[split] held-out episodes: "
+          f"{sorted((Path(r).name[-8:], e) for r, e in val_keys)}")
+    return train, val
 
 
 def _save_shards(samples, out_dir: Path, shard_size: int, prefix: str):
@@ -208,7 +233,8 @@ def main(_):
 
     if FLAGS.use_metadata_fallback:
         samples = _load_samples_from_metadata(Path(FLAGS.metadata).expanduser().resolve(), "metadata")
-        train_samples, val_samples = _split_train_val(samples, val_ratio=FLAGS.val_ratio, seed=FLAGS.seed)
+        train_samples, val_samples = _split_train_val(
+            samples, FLAGS.val_ratio, FLAGS.seed, FLAGS.split_by)
         test_samples = []
     else:
         train_source_samples = _load_samples_from_roots(FLAGS.train_root, "train")
@@ -218,10 +244,7 @@ def main(_):
             val_samples = _load_samples_from_roots(FLAGS.val_root, "val")
         else:
             train_samples, val_samples = _split_train_val(
-                train_source_samples,
-                val_ratio=FLAGS.val_ratio,
-                seed=FLAGS.seed,
-            )
+                train_source_samples, FLAGS.val_ratio, FLAGS.seed, FLAGS.split_by)
         test_samples = _load_samples_from_roots(FLAGS.test_root, "test")
 
     if not train_samples and not val_samples and not test_samples:

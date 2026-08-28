@@ -22,9 +22,12 @@ from serl_launcher.networks.gaze_point_predictor import load_gaze_point_predicto
 
 FLAGS = flags.FLAGS
 
+# Empty by default: the val shards are the held-out episodes, which is what
+# the predictions should be judged on. Point --frame_root at a recording only
+# to sweep raw frames that were never exported.
 flags.DEFINE_string(
     "frame_root",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-25-2",
+    "",
     "Recording root with frame_*/color_image.jpg. If empty, samples are loaded from --data_dir.",
 )
 flags.DEFINE_string(

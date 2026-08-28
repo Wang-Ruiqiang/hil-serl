@@ -64,7 +64,8 @@ class RAMEnv(FrankaEnv):
         time.sleep(1)
         self.curr_leap_hand_pos = np.array(self.gripper_open_joint, dtype=np.float32)
 
-        # Reset and RL actions both use the Cartesian /target_pose path.
+        # Temporary target-pose-only control: reset and RL actions both use
+        # the Cartesian /target_pose path.
         cur_position, cur_orientation = self.ros_interface.get_current_robot_ee()
         self.curpos = np.concatenate((cur_position, cur_orientation), axis=0)
         init_pos = np.array(
@@ -80,10 +81,10 @@ class RAMEnv(FrankaEnv):
             steps=200,
         )
         self._close_open_pose_init(self.curr_leap_hand_pos)
-        time.sleep(5)
 
         self.cmd_pose = init_arm_action.copy()
         self.nextpos = self.cmd_pose.copy()
+
         self.curr_path_length = 0
         self._update_cur_position(init_arm_action, wait_threshold=0.05)
         obs = self._get_obs()

@@ -1,9 +1,9 @@
-"""Train a lightweight RGB mask predictor for mask1/mask2.
+"""Train a lightweight RGB mask predictor for ball and basket masks.
 
 Input frame format:
   <data_root>/frame_XXXX/color_image.jpg
-  <data_root>/frame_XXXX/mask1.png      # tennis ball mask, optional/zero if hidden
-  <data_root>/frame_XXXX/mask2.png      # basket mask, optional/zero if hidden
+  <data_root>/frame_XXXX/ball_mask.png  # tennis ball mask, optional/zero if hidden
+  <data_root>/frame_XXXX/basket_mask.png  # basket mask, optional/zero if hidden
 
 The model learns:
   RGB image -> two binary masks: [mask1, mask2]
@@ -36,6 +36,10 @@ DEFAULT_DATA_ROOTS = [
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
 ]
 MASK_SLOTS = ("mask1", "mask2")
+MASK_FILE_CANDIDATES = {
+    "mask1": ("ball_mask.png", "mask1.png"),
+    "mask2": ("basket_mask.png", "mask2.png"),
+}
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = str(SCRIPT_DIR / "mask_predictor_ckpt")
 
@@ -62,7 +66,7 @@ class TrainConfig:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train RGB image -> mask1/mask2 predictor."
+        description="Train RGB image -> ball/basket mask predictor."
     )
     parser.add_argument(
         "--data_root",
@@ -135,7 +139,10 @@ def read_mask_original(
     slot: str,
     image_shape: tuple[int, int],
 ) -> np.ndarray:
-    path = frame_dir / f"{slot}.png"
+    path = next(
+        (frame_dir / name for name in MASK_FILE_CANDIDATES[slot] if (frame_dir / name).exists()),
+        frame_dir / MASK_FILE_CANDIDATES[slot][0],
+    )
     height, width = image_shape
     if not path.exists():
         return np.zeros((height, width), dtype=np.uint8)
@@ -156,7 +163,10 @@ def resize_mask(mask: np.ndarray, image_size: int, min_mask_pixels: int) -> np.n
 
 
 def has_supervision(frame_dir: Path) -> bool:
-    return any((frame_dir / f"{slot}.png").exists() for slot in MASK_SLOTS)
+    return any(
+        any((frame_dir / name).exists() for name in MASK_FILE_CANDIDATES[slot])
+        for slot in MASK_SLOTS
+    )
 
 
 def split_frame_dirs(
@@ -467,7 +477,7 @@ def main() -> None:
     )
     if not train_dirs:
         raise RuntimeError(
-            "No supervised frames found. Make sure frame_* folders contain mask1.png or mask2.png."
+            "No supervised frames found. Make sure frame_* folders contain ball_mask.png or basket_mask.png."
         )
 
     output_dir = Path(config.output_dir).expanduser()

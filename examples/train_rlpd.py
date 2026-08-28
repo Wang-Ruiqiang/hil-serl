@@ -31,6 +31,7 @@ from serl_launcher.utils.launcher import (
     make_wandb_logger,
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
+from serl_launcher.utils.gaze_mask_utils import PHASE_ONEHOT_DIM
 from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
@@ -47,6 +48,27 @@ flags.DEFINE_multi_string("demo_path", None, "Path to the demo data.")
 flags.DEFINE_string("checkpoint_path", None, "Path to save checkpoints.")
 flags.DEFINE_integer("eval_checkpoint_step", 0, "Step to evaluate the checkpoint.")
 flags.DEFINE_integer("eval_n_trajs", 21, "Number of trajectories to evaluate.")
+flags.DEFINE_string(
+    "eval_encoder_type",
+    "",
+    "Encoder type used to construct an eval-only checkpoint. Empty uses the task config.",
+)
+flags.DEFINE_string(
+    "eval_encoder_checkpoint_path",
+    "",
+    "Pretrained encoder checkpoint used to construct a vit-grounded eval agent.",
+)
+flags.DEFINE_string(
+    "encoder_type",
+    "",
+    "Override config.encoder_type (e.g. vit-grounded). Empty keeps the config "
+    "value, so the resnet-pretrained baseline scripts are unaffected.",
+)
+flags.DEFINE_string(
+    "encoder_checkpoint_path",
+    "",
+    "Pretrained encoder checkpoint for vit-grounded. Empty trains from scratch.",
+)
 flags.DEFINE_boolean("save_video", False, "Save video.")
 flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
 flags.DEFINE_string(
@@ -105,6 +127,29 @@ flags.DEFINE_float(
     0.45,
     "Heatmap opacity for actor feature overlay.",
 )
+flags.DEFINE_boolean(
+    "eval_record",
+    True,
+    "In eval mode, write per-episode raw/attention video plus an .npz of the "
+    "per-step diagnostics. Costs two extra network forwards per control step "
+    "(critic and grasp critic) to log Q values.",
+)
+flags.DEFINE_string(
+    "eval_record_dir",
+    None,
+    "Where eval recordings go. Defaults to <checkpoint_path>/eval_recordings.",
+)
+flags.DEFINE_float(
+    "actor_feature_overlay_gamma",
+    0.35,
+    "Display-only dynamic-range compression for the softmax overlay "
+    "(vit-grounded). 1.0 renders per-cell probability faithfully, which hides "
+    "any secondary object: the ball covers ~4 tokens and the basket ~40, so "
+    "during pick the peak sits ~7x higher and the hand -- holding 23% of the "
+    "attention mass -- renders at 5% of it, i.e. solid blue. Values below 1 "
+    "lift the low end so the whole support is visible. Ignored in energy mode "
+    "so the resnet-pretrained baseline renders exactly as before.",
+)
 
 
 devices = jax.local_devices()
@@ -150,8 +195,15 @@ class KeyReader(threading.Thread):
 
 
 def zero_action_rpy(action):
+    """Pin the rotation slots of a 7-dim action to zero.
+
+    A no-op once ArmActionSubspaceWrapper has narrowed the action space, where
+    index 3 is the gripper rather than a rotation -- zeroing it there would
+    silently destroy every grasp command.
+    """
     action = np.asarray(action).copy()
-    action[..., 3:6] = 0.0
+    if action.shape[-1] >= 7:
+        action[..., 3:6] = 0.0
     return action
 
 
@@ -164,14 +216,121 @@ def _last_rgb_frame(image):
     return image[..., :3].astype(np.uint8)
 
 
-def _attention_heatmap_overlay(rgb_image, attention_map, alpha):
+def _latest_unstacked_observation(observation, observation_space):
+    """Extract one raw observation from either raw or horizon-stacked data."""
+    latest = {}
+    for key, value in observation.items():
+        array = np.asarray(value)
+        if key not in observation_space.spaces:
+            latest[key] = array[-1] if array.ndim > 0 and array.shape[0] == 1 else array
+            continue
+        stacked_shape = observation_space.spaces[key].shape
+        raw_shape = stacked_shape[1:]
+        if array.shape == raw_shape:
+            latest[key] = array
+        elif array.ndim == len(stacked_shape) and array.shape[1:] == raw_shape:
+            latest[key] = array[-1]
+        else:
+            raise ValueError(
+                f"Cannot adapt demo observation {key!r} with shape {array.shape} "
+                f"to replay shape {stacked_shape}."
+            )
+    return latest
+
+
+def _stack_demo_transition_history(transitions, observation_space, horizon):
+    """Yield temporal observation windows without rewriting demo pickle files."""
+    if horizon <= 1:
+        yield from transitions
+        return
+
+    history = None
+    previous_done = True
+    previous_episode = None
+    for transition in transitions:
+        transition = dict(transition)
+        info = transition.get("infos", {})
+        episode = (info.get("source_root"), info.get("episode_id"))
+        current = _latest_unstacked_observation(
+            transition["observations"], observation_space
+        )
+        next_observation = _latest_unstacked_observation(
+            transition["next_observations"], observation_space
+        )
+        starts_episode = (
+            history is None
+            or previous_done
+            or (
+                previous_episode != (None, None)
+                and episode != (None, None)
+                and episode != previous_episode
+            )
+        )
+        if starts_episode:
+            history = [current for _ in range(horizon)]
+        else:
+            history = history[1:] + [current]
+
+        next_history = history[1:] + [next_observation]
+        transition["observations"] = {
+            key: np.stack([item[key] for item in history], axis=0)
+            for key in current
+        }
+        transition["next_observations"] = {
+            key: np.stack([item[key] for item in next_history], axis=0)
+            for key in next_observation
+        }
+        previous_done = bool(transition.get("dones", False))
+        previous_episode = episode
+        yield transition
+
+
+def _attention_heatmap_overlay(rgb_image, attention_map, alpha, mode="energy", gamma=1.0):
+    """Overlay an encoder attention map on the RGB frame.
+
+    ``mode`` must match what the encoder actually returns:
+
+    "softmax"
+        The map is raw attention *logits* (vit-grounded's grounding query).
+        These have to go through the same softmax the CGL loss uses before
+        they mean anything. Rescaling the logits linearly instead -- which is
+        what this function used to do for every encoder -- exaggerates
+        secondary regions badly: a cell one nat below the peak holds ~37% of
+        the peak's probability but renders at ~90% of its brightness once the
+        map is divided by its own max.
+
+    "energy"
+        The map is a non-negative feature-energy map (resnet-pretrained's
+        ``mean(square(features))``). Softmax is meaningless on an unbounded
+        magnitude, so keep the original robust-max rescaling.
+
+    Either way the result is normalized to its own peak, so brightness is
+    always *relative to the strongest cell in this frame*, never absolute.
+    That relative scale is what makes a widely-spread secondary object
+    disappear next to a tightly-peaked primary one, so ``gamma`` < 1 may be
+    applied afterwards (softmax mode only) to compress the dynamic range for
+    display. It changes nothing the policy sees.
+    """
     attention = np.asarray(attention_map, dtype=np.float32)
     if attention.ndim > 2:
         attention = attention.reshape((-1, *attention.shape[-2:]))[0]
-    attention = attention - np.nanmin(attention)
-    denom = float(np.nanmax(attention))
-    if denom > 1e-8:
-        attention = attention / denom
+    attention = np.nan_to_num(attention, nan=0.0, posinf=0.0, neginf=0.0)
+
+    peak_probability = None
+    if mode == "softmax":
+        flat = attention.reshape(-1)
+        probabilities = np.exp(flat - flat.max())
+        probabilities /= max(probabilities.sum(), 1e-8)
+        attention = probabilities.reshape(attention.shape)
+        peak_probability = float(attention.max())
+        attention = attention / (peak_probability + 1e-12)
+    else:
+        attention = np.maximum(attention, 0.0)
+        robust_max = float(np.percentile(attention, 99.0))
+        attention = attention / (robust_max + 1e-6)
+    attention = np.clip(attention, 0.0, 1.0)
+    if mode == "softmax" and gamma != 1.0:
+        attention = attention ** float(gamma)
     attention_uint8 = np.clip(attention * 255.0, 0, 255).astype(np.uint8)
     heatmap = cv2.applyColorMap(
         cv2.resize(
@@ -182,44 +341,161 @@ def _attention_heatmap_overlay(rgb_image, attention_map, alpha):
         cv2.COLORMAP_JET,
     )
     base_bgr = rgb_image[..., ::-1]
-    return cv2.addWeighted(base_bgr, 1.0 - alpha, heatmap, alpha, 0)
+    blended = cv2.addWeighted(base_bgr, 1.0 - alpha, heatmap, alpha, 0)
+    if peak_probability is not None:
+        # Brightness is relative, so print the peak's absolute probability:
+        # a tidy-looking blob at peak=0.02 is a near-uniform map.
+        cv2.putText(
+            blended,
+            f"peak p={peak_probability:.3f}"
+            + ("" if gamma == 1.0 else f"  g={gamma:g}"),
+            (4, 14),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.4,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+    return blended
 
 
-def maybe_display_actor_feature_overlay(agent, env, obs, action, step):
+class ActorFeatureOverlayWorker(threading.Thread):
+    """Render actor attention without blocking the robot control loop."""
+
+    def __init__(self, display_queue, alpha, mode="energy", gamma=1.0):
+        super().__init__(daemon=True)
+        self.display_queue = display_queue
+        self.alpha = alpha
+        self.mode = mode
+        self.gamma = gamma
+        self.pending = queue.Queue(maxsize=1)
+
+    def submit(self, rgb_image, attention_map):
+        item = (np.asarray(rgb_image), np.asarray(attention_map, dtype=np.float32))
+        try:
+            self.pending.put_nowait(item)
+            return
+        except queue.Full:
+            pass
+        try:
+            self.pending.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            self.pending.put_nowait(item)
+        except queue.Full:
+            pass
+
+    def run(self):
+        while True:
+            item = self.pending.get()
+            if item is None:
+                return
+            rgb_image, attention_map = item
+            overlay = _attention_heatmap_overlay(
+                rgb_image,
+                attention_map,
+                self.alpha,
+                mode=self.mode,
+                gamma=self.gamma,
+            )
+            self.display_queue.put({"front_camera_attention_weights": overlay})
+
+
+def policy_distribution_stats(distribution):
+    """Pre-tanh loc/scale, the only thing that separates saturated from confident.
+
+    Q values are deliberately NOT computed here. Each critic forward is an
+    unjitted pass through the encoder (measured: ~120 ms), and three of them
+    per control step overruns a 10 Hz budget by 3.6x -- which would change the
+    very behaviour the eval is meant to measure. Everything the critics need is
+    in the recorded observations, so analyze_eval.py computes them afterwards
+    in batch instead.
+    """
+    base = getattr(distribution, "distribution", None)
+    if base is None:
+        return {}
+    return {
+        "pretanh_mean": np.asarray(jax.device_get(base.loc), np.float32).reshape(-1),
+        "pretanh_std": np.asarray(jax.device_get(base.scale_diag), np.float32).reshape(-1),
+    }
+
+
+def make_actor_feature_overlay_worker(env):
+    if not FLAGS.actor_feature_overlay or FLAGS.actor_feature_overlay_period <= 0:
+        return None
+    unwrapped = env.unwrapped
+    # The learner builds its env with fake_env=True (train_rlpd passes
+    # fake_env=FLAGS.learner). FrankaEnv.__init__ sets display_image from the
+    # config *before* the `if fake_env: return`, but only creates img_queue
+    # afterwards -- so a fake env advertises display_image=True while having no
+    # queue. That is expected on the learner and is not worth warning about.
+    if getattr(unwrapped, "fake_env", False):
+        return None
+    missing = []
+    if not getattr(unwrapped, "display_image", False):
+        missing.append("config.DISPLAY_IMAGE is False")
+    if not hasattr(unwrapped, "img_queue"):
+        missing.append("env has no img_queue (camera display never started)")
+    if missing:
+        print_red(
+            "[warn] actor attention overlay disabled: " + "; ".join(missing)
+        )
+        return None
+    # vit-grounded surfaces the grounding query's logits; resnet-pretrained
+    # surfaces a feature-energy map. They need different display transforms.
+    encoder_type = FLAGS.encoder_type or config.encoder_type
+    # Both ViT pipelines surface grounding-query logits, which are a
+    # distribution over tokens; the resnet path surfaces feature energy.
+    mode = "softmax" if encoder_type in ("vit-grounded", "vit-gaze") else "energy"
+    gamma = FLAGS.actor_feature_overlay_gamma if mode == "softmax" else 1.0
+    print_green(
+        f"[actor overlay] encoder_type={encoder_type} display={mode} gamma={gamma:g}"
+    )
+    worker = ActorFeatureOverlayWorker(
+        unwrapped.img_queue,
+        FLAGS.actor_feature_overlay_alpha,
+        mode=mode,
+        gamma=gamma,
+    )
+    worker.start()
+    return worker
+
+
+def maybe_display_actor_feature_overlay(worker, obs, attention_map, step):
     if (
-        not FLAGS.actor_feature_overlay
+        worker is None
         or FLAGS.actor_feature_overlay_period <= 0
         or step % FLAGS.actor_feature_overlay_period != 0
-        or not hasattr(agent, "forward_gaze_attention")
     ):
-        return
-    unwrapped = env.unwrapped
-    if not getattr(unwrapped, "display_image", False) or not hasattr(unwrapped, "img_queue"):
         return
     if "front_camera" not in obs:
         return
     try:
-        critic_action = np.asarray(action, dtype=np.float32)
-        if critic_action.shape[-1] > 6:
-            critic_action = critic_action[..., :-1]
-        attention_map = agent.forward_gaze_attention(
-            jax.device_put(obs),
-            jax.device_put(critic_action),
-            rng=None,
-            train=False,
-        )
-        overlay = _attention_heatmap_overlay(
+        worker.submit(
             _last_rgb_frame(obs["front_camera"]),
             jax.device_get(attention_map),
-            FLAGS.actor_feature_overlay_alpha,
         )
-        unwrapped.img_queue.put({"front_camera_feature_overlay": overlay})
     except Exception as exc:
         print_red(f"[warn] failed to display actor feature overlay: {exc}")
 
 
-def actor(agent, data_store, intvn_data_store, env, sampling_rng):
+def actor(
+    agent,
+    data_store,
+    intvn_data_store,
+    env,
+    sampling_rng,
+    manual_failure_penalty=0.0,
+):
     """Run a single-agent actor for tennis_ball_pick / tennis_ball_pick_and_place."""
+    manual_failure_penalty = float(manual_failure_penalty)
+    if manual_failure_penalty > 0.0:
+        raise ValueError(
+            "manual_failure_penalty must be non-positive, got "
+            f"{manual_failure_penalty}."
+        )
+    overlay_worker = make_actor_feature_overlay_worker(env)
 
     if FLAGS.eval_checkpoint_step:
         try:
@@ -247,6 +523,16 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             )
             agent = agent.replace(state=ckpt)
 
+            recorder = None
+            if FLAGS.eval_record:
+                from eval_recorder import EvalEpisodeRecorder
+
+                recorder = EvalEpisodeRecorder(
+                    FLAGS.eval_record_dir
+                    or os.path.join(checkpoint_dir, "eval_recordings"),
+                    gamma=FLAGS.actor_feature_overlay_gamma,
+                )
+
             obs, _ = env.reset()
             print_green("Eval policy execution enabled.")
             key_reader = KeyReader()
@@ -262,24 +548,55 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                 start_time = time.time()
                 while not done:
                     sampling_rng, key = jax.random.split(sampling_rng)
-                    actions = agent.sample_actions(
-                        observations=jax.device_put(obs),
-                        argmax=True,
-                        seed=key,
-                    )
-                    actions = zero_action_rpy(jax.device_get(actions))
+                    # Recording needs the attention too, so it must not depend
+                    # on --actor_feature_overlay being on.
+                    if overlay_worker is not None or recorder is not None:
+                        actions, attention_map, distribution = (
+                            agent.sample_actions_with_attention(
+                                observations=jax.device_put(obs),
+                                argmax=True,
+                                seed=key,
+                                return_distribution=True,
+                            )
+                        )
+                        actions, attention_map = jax.device_get(
+                            (actions, attention_map)
+                        )
+                        step_stats = (
+                            policy_distribution_stats(distribution)
+                            if recorder is not None
+                            else {}
+                        )
+                    else:
+                        actions = agent.sample_actions(
+                            observations=jax.device_put(obs),
+                            argmax=True,
+                            seed=key,
+                        )
+                        actions = jax.device_get(actions)
+                        attention_map = None
+                        step_stats = {}
+                    actions = zero_action_rpy(actions)
                     maybe_display_actor_feature_overlay(
-                        agent,
-                        env,
+                        overlay_worker,
                         obs,
-                        actions,
+                        attention_map,
                         eval_step,
                     )
                     eval_step += 1
                     print("actions = ", actions)
 
+                    step_obs = obs
                     next_obs, reward, done, truncated, info = env.step(actions)
                     obs = next_obs
+
+                    if recorder is not None:
+                        extras = dict(step_stats)
+                        extras["attention"] = attention_map
+                        recorder.step(
+                            step_obs, actions, extras,
+                            reward=reward, done=done, info=info,
+                        )
 
                     key = key_reader.get_key_nowait()
                     while key is not None:
@@ -294,6 +611,16 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                         intervention_label = 1
 
                     if done:
+                        # Snapshot the episode's flags before the loop clears
+                        # them, so the recording reports this episode's outcome
+                        # rather than the reset defaults.
+                        episode_flags = {
+                            "checkpoint_step": int(FLAGS.eval_checkpoint_step),
+                            "succeeded": bool(reward),
+                            "done_by_manual": bool(done_by_manual),
+                            "intervened": bool(intervention_label),
+                            "wall_seconds": round(time.time() - start_time, 2),
+                        }
                         if reward:
                             dt = time.time() - start_time
                             time_list.append(dt)
@@ -308,6 +635,8 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                             env.unwrapped.move_up()
                         if FLAGS.save_video:
                             env.unwrapped.save_video_recording(episode)
+                        if recorder is not None:
+                            recorder.save(episode, extra=episode_flags)
                         key_reader.drain()
                         input("reset env")
                         key_reader.drain()
@@ -385,13 +714,30 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
             with timer.context("sample_actions"):
                 print_green(f"obs[state] =  {obs['state']}")
                 sampling_rng, key = jax.random.split(sampling_rng)
-                actions = agent.sample_actions(
-                    observations=jax.device_put(obs),
-                    argmax=True,
-                    seed=key,
+                if overlay_worker is not None:
+                    actions, attention_map = agent.sample_actions_with_attention(
+                        observations=jax.device_put(obs),
+                        argmax=True,
+                        seed=key,
+                    )
+                    actions, attention_map = jax.device_get(
+                        (actions, attention_map)
+                    )
+                else:
+                    actions = agent.sample_actions(
+                        observations=jax.device_put(obs),
+                        argmax=True,
+                        seed=key,
+                    )
+                    actions = jax.device_get(actions)
+                    attention_map = None
+                actions = zero_action_rpy(actions)
+                maybe_display_actor_feature_overlay(
+                    overlay_worker,
+                    obs,
+                    attention_map,
+                    step,
                 )
-                actions = zero_action_rpy(jax.device_get(actions))
-                maybe_display_actor_feature_overlay(agent, env, obs, actions, step)
 
             with timer.context("step_env"):
                 next_obs, reward, done, truncated, info = env.step(actions)
@@ -406,10 +752,15 @@ def actor(agent, data_store, intvn_data_store, env, sampling_rng):
                         info["manual_success"] = True
                     elif key == "2":
                         done = True
-                        reward = 0.0
+                        reward = manual_failure_penalty
                         info = dict(info)
                         info["succeed"] = False
                         info["manual_failure"] = True
+                        info["manual_failure_penalty"] = manual_failure_penalty
+                        print_red(
+                            "manual failure: terminating episode with "
+                            f"reward={manual_failure_penalty:.3f}"
+                        )
                     key = key_reader.get_key_nowait()
 
                 if "intervene_action" in info:
@@ -650,6 +1001,11 @@ def main(_):
         env_kwargs["mask_predictor_checkpoint_path"] = FLAGS.mask_predictor_checkpoint_path
     if "mask_selection_mode" in env_signature:
         env_kwargs["mask_selection_mode"] = FLAGS.mask_selection_mode
+    if "encoder_type" in env_signature:
+        # The environment has to know: vit-gaze takes no mask observations and
+        # no phase one-hot, so the config must not build them or load the
+        # predictors that produce them.
+        env_kwargs["encoder_type"] = FLAGS.encoder_type or config.encoder_type
     if "pick_classifier_checkpoint_path" in env_signature:
         env_kwargs["pick_classifier_checkpoint_path"] = FLAGS.pick_classifier_checkpoint_path
     if "pick_classifier_threshold" in env_signature:
@@ -660,16 +1016,35 @@ def main(_):
     env = RecordEpisodeStatistics(env)
     sample_obs = env.observation_space.sample()
     state_dim = sample_obs["state"].shape[-1]
+    action_dim = int(np.prod(env.action_space.shape))
+    print_green(f"[action space] dim={action_dim} "
+                f"(7 means rpy slots are still present; 4 means xyz + grip)")
     agent_factory = make_gaze_sac_pixel_agent_hybrid_single_arm
+
+    encoder_type = FLAGS.encoder_type or config.encoder_type
+    freeze_encoder = bool(getattr(config, "freeze_encoder", False))
+    encoder_checkpoint_path = FLAGS.encoder_checkpoint_path or getattr(
+        config, "encoder_checkpoint_path", None
+    )
+    if FLAGS.eval_checkpoint_step:
+        if FLAGS.eval_encoder_type:
+            encoder_type = FLAGS.eval_encoder_type
+        if FLAGS.eval_encoder_checkpoint_path:
+            encoder_checkpoint_path = FLAGS.eval_encoder_checkpoint_path
 
     agent_kwargs = dict(
         seed=FLAGS.seed,
         sample_obs=sample_obs,
         sample_action=env.action_space.sample(),
         image_keys=config.image_keys,
-        encoder_type=config.encoder_type,
+        encoder_type=encoder_type,
         discount=config.discount,
     )
+    if encoder_checkpoint_path:
+        agent_kwargs["encoder_checkpoint_path"] = encoder_checkpoint_path
+    agent_kwargs["freeze_encoder"] = freeze_encoder
+    if hasattr(config, "tactile_encoder_type"):
+        agent_kwargs["tactile_encoder_type"] = config.tactile_encoder_type
     if hasattr(config, "mask_pick_place_phase_control"):
         agent_kwargs["mask_pick_place_phase_control"] = (
             config.mask_pick_place_phase_control
@@ -679,7 +1054,11 @@ def main(_):
     if hasattr(config, "mask_feature_min_gate"):
         agent_kwargs["mask_feature_min_gate"] = config.mask_feature_min_gate
     agent: SACAgent = agent_factory(**agent_kwargs)
-    print(f"[vision_config] encoder_type={config.encoder_type} mask_observation=True")
+    print(
+        f"[vision_config] encoder_type={encoder_type} "
+        f"tactile_encoder={getattr(config, 'tactile_encoder_type', 'cnn')} "
+        f"mask_observation=True"
+    )
     include_robot_arm_penalty = True
     include_grasp_penalty = True
 
@@ -694,7 +1073,7 @@ def main(_):
         # input("Checkpoint path already exists. Press Enter to resume training.")
         latest_ckpt = checkpoints.latest_checkpoint(FLAGS.checkpoint_path)
     
-    if latest_ckpt is not None:
+    if latest_ckpt is not None and not FLAGS.eval_checkpoint_step:
         ckpt = checkpoints.restore_checkpoint(
             os.path.abspath(FLAGS.checkpoint_path),
             agent.state,
@@ -717,7 +1096,11 @@ def main(_):
         )
         # set up wandb and logging
         wandb_logger = make_wandb_logger(
-            project="tennis_ball_pick-and-place-vit-8-5",
+            project=getattr(
+                config,
+                "wandb_project",
+                "tennis_ball_pick-and-place-cnn-8-17",
+            ),
             # project="tube-insertion-ablation-12-27",
             description=FLAGS.exp_name,
             debug=FLAGS.debug,
@@ -740,6 +1123,12 @@ def main(_):
         def prepare_replay_transition(transition):
             nonlocal logged_demo_front_camera_mask
             transition = dict(transition)
+            # Demos and buffers recorded before the action space was narrowed
+            # still carry 7-dim actions; keep (x, y, z, grip) so they line up
+            # with what the policy emits now.
+            actions = np.asarray(transition["actions"], dtype=np.float32)
+            if actions.shape[-1] > action_dim and actions.shape[-1] == 7:
+                transition["actions"] = actions[..., [0, 1, 2, 6]]
             for obs_key in ("observations", "next_observations"):
                 obs_dict = dict(transition[obs_key])
                 state = np.asarray(obs_dict["state"], dtype=np.float32)
@@ -765,7 +1154,7 @@ def main(_):
                         "[demo front_camera_mask1 obs] "
                         f"shape={front_camera_mask.shape} "
                         f"active_pixels={int(np.count_nonzero(front_camera_mask))} "
-                        f"phase={state[..., -3:]}"
+                        f"phase={state[..., -PHASE_ONEHOT_DIM:]}"
                     )
                     logged_demo_front_camera_mask = True
                 transition[obs_key] = obs_dict
@@ -781,12 +1170,18 @@ def main(_):
                     except EOFError:
                         break  # 读取结束
                 print("len trans = ", len(transitions))
-                for transition in transitions:
+                stacked_transitions = _stack_demo_transition_history(
+                    transitions,
+                    env.observation_space,
+                    getattr(config, "observation_horizon", 1),
+                )
+                for transition_index, transition in enumerate(stacked_transitions):
                     # if 'infos' in transition and 'grasp_penalty' in transition:
                     #     transition['grasp_penalty'] = transition['infos']['grasp_penalty']
                     # if 'infos' in transition and 'robot_arm_penalty' in transition['infos']:
                     #     transition['robot_arm_penalty'] = transition['infos']['robot_arm_penalty']
                     demo_buffer.insert(prepare_replay_transition(transition))
+                    transitions[transition_index] = None
         print_green(f"demo buffer size: {len(demo_buffer)}")
         print_green(f"online buffer size: {len(replay_buffer)}")
 
@@ -796,8 +1191,14 @@ def main(_):
             for file in glob.glob(os.path.join(FLAGS.checkpoint_path, "buffer/*.pkl")):
                 with open(file, "rb") as f:
                     transitions = pkl.load(f)
-                    for transition in transitions:
+                    stacked_transitions = _stack_demo_transition_history(
+                        transitions,
+                        env.observation_space,
+                        getattr(config, "observation_horizon", 1),
+                    )
+                    for transition_index, transition in enumerate(stacked_transitions):
                         replay_buffer.insert(prepare_replay_transition(transition))
+                        transitions[transition_index] = None
             print_green(
                 f"Loaded previous buffer data. Replay buffer size: {len(replay_buffer)}"
             )
@@ -839,6 +1240,7 @@ def main(_):
             intvn_data_store,
             env,
             sampling_rng,
+            manual_failure_penalty=config.manual_failure_penalty,
         )
 
     else:

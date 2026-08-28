@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import ast
+from collections.abc import Mapping
 from pathlib import Path
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -31,7 +32,8 @@ DEFAULT_CHECKPOINT_PATH = str(
     / "examples"
     / "experiments"
     / "tennis_ball_pick_and_place"
-    / "2026-8-3_0_ball_pick_and_place_vit_rl_run"
+    # / "2026-7-21_0_ball_pick_and_place_rl_run"
+    / "2026-8-13_0_ball_pick_and_place_vit_rl_run"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
@@ -49,6 +51,7 @@ from serl_launcher.utils.gaze_mask_utils import (
     add_gaze_mask_image_to_obs,
     compute_all_index_target_mask_fields,
     compute_index_target_mask_fields,
+    gaze_phase_onehot,
     load_mask_predictor,
 )
 from serl_launcher.utils.launcher import make_gaze_sac_pixel_agent_hybrid_single_arm
@@ -57,6 +60,12 @@ from serl_launcher.utils.launcher import make_gaze_sac_pixel_agent_hybrid_single
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("exp_name", "tennis_ball_pick_and_place", "Experiment name.")
+flags.DEFINE_enum(
+    "encoder_type",
+    "vit",
+    ["vit", "pretrained_resnet"],
+    "Encoder used by the checkpoint: vit or pretrained_resnet.",
+)
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_string("frame_root", DEFAULT_FRAME_ROOT, "Recorded frame root.")
 flags.DEFINE_string("checkpoint_path", DEFAULT_CHECKPOINT_PATH, "Checkpoint directory.")
@@ -103,31 +112,11 @@ flags.DEFINE_string(
     str(REPO_ROOT / "examples" / "gaze_data_process" / "SAM_process" / "mask_predictor_ckpt" / "best.pt"),
     "Mask predictor checkpoint used by pick_only/place_only modes.",
 )
-flags.DEFINE_float(
-    "mask_feature_gate_alpha",
-    0.25,
-    "Signed feature gating strength from the trainable mask feature head.",
-)
-flags.DEFINE_float(
-    "mask_feature_min_gate",
-    0.1,
-    "Minimum multiplicative gate for non-selected RGB features.",
-)
-flags.DEFINE_boolean(
-    "show_mask_encoder_feature",
-    True,
-    "Render the small CNN mask encoder's last convolutional feature energy.",
-)
 flags.DEFINE_string("gaze_json_name", "gaze_contact.json", "Recorded gaze json name.")
 flags.DEFINE_string(
     "attention_keys",
     "front_camera,tactile_data",
     "Comma-separated image keys whose critic attention should be rendered.",
-)
-flags.DEFINE_boolean(
-    "compare_raw_mask_feature",
-    True,
-    "Render both raw spatial feature energy and trainable mask feature head.",
 )
 flags.DEFINE_float(
     "viewer_mask_grounding_threshold",
@@ -266,22 +255,24 @@ def read_mask(mask_path: Path, target_shape):
 def mask_paths(frame_dir: Path):
     fid = frame_id(frame_dir)
     central_names = {
-        "mask1": f"frame_{fid:06d}_mask1.png",
-        "mask2": f"frame_{fid:06d}_mask2.png",
+        "mask1": (f"frame_{fid:06d}_ball_mask.png", f"frame_{fid:06d}_mask1.png"),
+        "mask2": (f"frame_{fid:06d}_basket_mask.png", f"frame_{fid:06d}_mask2.png"),
     }
     root = frame_dir.parent
     return {
         "mask1": [
+            frame_dir / "ball_mask.png",
             frame_dir / "mask1.png",
             frame_dir / "rs_mask_obj0.png",
-            root / "sam_masks" / central_names["mask1"],
-            root / "sam_masks" / "propagated" / central_names["mask1"],
+            *(root / "sam_masks" / name for name in central_names["mask1"]),
+            *(root / "sam_masks" / "propagated" / name for name in central_names["mask1"]),
         ],
         "mask2": [
+            frame_dir / "basket_mask.png",
             frame_dir / "mask2.png",
             frame_dir / "rs_mask_obj1.png",
-            root / "sam_masks" / central_names["mask2"],
-            root / "sam_masks" / "propagated" / central_names["mask2"],
+            *(root / "sam_masks" / name for name in central_names["mask2"]),
+            *(root / "sam_masks" / "propagated" / name for name in central_names["mask2"]),
         ],
     }
 
@@ -355,14 +346,10 @@ def read_recorded_gaze_xy(frame_dir: Path):
 
 
 def phase_onehot(selected_index):
-    phase = np.zeros((3,), dtype=np.float32)
-    if selected_index == 0:
-        phase[0] = 1.0
-    elif selected_index == 1:
-        phase[1] = 1.0
-    else:
-        phase[2] = 1.0
-    return phase
+    # Delegate to the shared implementation so this cannot drift from the
+    # width the env wrappers append -- a local copy is how demos would end up
+    # one column wider than the observation space they are replayed into.
+    return gaze_phase_onehot(selected_index)
 
 
 def zero_action_rpy(action):
@@ -847,6 +834,47 @@ def render_attention_probability_panel(image_rgb, attention_map, title, extra_li
     return overlay
 
 
+def render_feature_vector_panel(feature_vector, title, extra_lines):
+    """Render the actual vector sent from one image branch before the MLP.
+
+    After spatial pooling and Dense fusion there is no one-to-one pixel
+    correspondence anymore, so this is intentionally shown as a vector strip
+    instead of an RGB overlay.
+    """
+    vector = np.asarray(feature_vector, dtype=np.float32).reshape(-1)
+    width, height = 512, 180
+    panel = np.full((height, width, 3), 245, dtype=np.uint8)
+    margin_x, margin_y = 18, 18
+    usable_w = width - 2 * margin_x
+    usable_h = height - 2 * margin_y
+    scale = max(float(np.max(np.abs(vector))), 1e-8)
+    points = []
+    for index, value in enumerate(vector):
+        x = margin_x + int(index * (usable_w - 1) / max(vector.size - 1, 1))
+        y = margin_y + int((0.5 - 0.45 * float(value) / scale) * usable_h)
+        points.append((x, int(np.clip(y, margin_y, height - margin_y))))
+    if points:
+        cv2.polylines(
+            panel,
+            [np.asarray(points, dtype=np.int32)],
+            isClosed=False,
+            color=(40, 40, 40),
+            thickness=1,
+            lineType=cv2.LINE_AA,
+        )
+    zero_y = margin_y + usable_h // 2
+    cv2.line(panel, (margin_x, zero_y), (width - margin_x, zero_y), (180, 180, 180), 1)
+    cv2.line(panel, (margin_x, margin_y), (margin_x, height - margin_y), (180, 180, 180), 1)
+    if FLAGS.output_scale > 1:
+        panel = cv2.resize(
+            panel,
+            (panel.shape[1] * FLAGS.output_scale, panel.shape[0] * FLAGS.output_scale),
+            interpolation=cv2.INTER_NEAREST,
+        )
+    draw_text_panel(panel, [title, *extra_lines])
+    return panel
+
+
 def panel_base_image(obs, attention_key, attention_kind):
     if attention_kind == "mask_encoder_feature":
         if "front_camera_mask" in obs:
@@ -883,6 +911,7 @@ def create_attention_agent(
     *,
     return_raw_attention,
     return_mask_encoder_attention=False,
+    return_feature_debug=False,
 ):
     return make_gaze_sac_pixel_agent_hybrid_single_arm(
         seed=FLAGS.seed,
@@ -895,8 +924,8 @@ def create_attention_agent(
         gaze_heatmap_size=(FLAGS.image_size, FLAGS.image_size),
         gaze_region_radius=0,
         gaze_attention_image_key=attention_key,
-        mask_feature_gate_alpha=FLAGS.mask_feature_gate_alpha,
-        mask_feature_min_gate=FLAGS.mask_feature_min_gate,
+        mask_feature_gate_alpha=getattr(config, "mask_feature_gate_alpha", 0.9),
+        mask_feature_min_gate=getattr(config, "mask_feature_min_gate", 0.4),
         mask_pick_place_phase_control=getattr(
             config,
             "mask_pick_place_phase_control",
@@ -904,6 +933,7 @@ def create_attention_agent(
         ),
         return_raw_attention=return_raw_attention,
         return_mask_encoder_attention=return_mask_encoder_attention,
+        return_feature_debug=return_feature_debug,
     )
 
 
@@ -1051,6 +1081,72 @@ def critic_attention_for_frame(agent, obs, action):
     return attention_map
 
 
+def critic_feature_debug_for_frame(agent, obs, action):
+    critic_action = np.asarray(action, dtype=np.float32)[..., :-1]
+    feature_debug = agent.forward_feature_debug(
+        jax.device_put(obs),
+        jax.device_put(critic_action),
+    )
+    return jax.device_get(feature_debug)
+
+
+def critic_fused_attribution_for_frame(agent, obs, action, image_key):
+    critic_action = np.asarray(action, dtype=np.float32)[..., :-1]
+    attribution = agent.forward_fused_attribution(
+        jax.device_put(obs),
+        jax.device_put(critic_action),
+        image_key=image_key,
+    )
+    return np.asarray(jax.device_get(attribution))
+
+
+def find_param_by_suffix(tree, suffix):
+    """Find a checkpoint parameter without depending on Flax module prefixes."""
+    def visit(node, path=()):
+        if isinstance(node, Mapping):
+            for key, value in node.items():
+                result = visit(value, path + (str(key),))
+                if result is not None:
+                    return result
+        elif hasattr(node, "shape") and "/".join(path).endswith(suffix):
+            return np.asarray(node)
+        return None
+
+    return visit(tree)
+
+
+def fused_feature_proxy(feature_debug, agent, image_key):
+    """Approximate the fused vector's spatial contribution using ckpt weights."""
+    debug = feature_debug["features"][image_key]
+    raw_map = np.asarray(debug["raw_spatial"], dtype=np.float32)
+    head_map = debug.get("head_spatial")
+    raw_vector = debug.get("raw_vector")
+    head_vector = debug.get("head_vector")
+    if head_map is None or raw_vector is None or head_vector is None:
+        return raw_map
+
+    raw_vector = np.asarray(raw_vector, dtype=np.float32).reshape(-1)
+    head_vector = np.asarray(head_vector, dtype=np.float32).reshape(-1)
+    kernel = find_param_by_suffix(
+        agent.state.params,
+        "mask_visual_fusion_front_camera_proj/kernel",
+    )
+    if kernel is not None and kernel.ndim == 2 and kernel.shape[0] >= 2 * raw_vector.size:
+        raw_contribution = raw_vector @ kernel[: raw_vector.size]
+        head_contribution = head_vector @ kernel[raw_vector.size : 2 * raw_vector.size]
+        raw_weight = float(np.mean(np.abs(raw_contribution)))
+        head_weight = float(np.mean(np.abs(head_contribution)))
+    else:
+        raw_weight = float(np.linalg.norm(raw_vector))
+        head_weight = float(np.linalg.norm(head_vector))
+
+    def normalize_map(value):
+        value = np.maximum(np.asarray(value, dtype=np.float32), 0.0)
+        return value / max(float(np.mean(value)), 1e-8)
+
+    return raw_weight * normalize_map(raw_map) + head_weight * normalize_map(head_map)
+
+
 def pad_to_same_height(panels):
     max_height = max(panel.shape[0] for panel in panels)
     padded = []
@@ -1091,6 +1187,13 @@ def main(_):
     if FLAGS.exp_name not in NEW_MAPPING:
         raise ValueError(f"Unknown exp_name={FLAGS.exp_name}")
     config = NEW_MAPPING[FLAGS.exp_name]()
+    # The checkpoint architecture is selected explicitly at runtime. The task
+    # config still supplies observation and phase/mask behavior.
+    config.encoder_type = (
+        "resnet-pretrained"
+        if FLAGS.encoder_type == "pretrained_resnet"
+        else "vit"
+    )
     mask_selection_mode = resolve_mask_selection_mode(FLAGS.exp_name)
     config.image_keys = list(
         config.get_image_keys(
@@ -1127,10 +1230,6 @@ def main(_):
     if not FLAGS.skip_restore:
         _checkpoint_root, resolved_checkpoint, _checkpoint_step = resolve_checkpoint_path()
     has_recorded_mask1 = has_any_recorded_mask(frame_dirs, "mask1")
-    show_mask_encoder_feature = bool(
-        FLAGS.show_mask_encoder_feature
-        and has_recorded_mask1
-    )
 
     print_green(f"frame_root={frame_root}")
     print_green(f"checkpoint_path={Path(FLAGS.checkpoint_path).expanduser().resolve()}")
@@ -1141,7 +1240,7 @@ def main(_):
     print_green(f"mask_selection_mode={mask_selection_mode}")
     if mask_selection_mode == "phase_ranges":
         print_green(f"phase_ranges_path={FLAGS.phase_ranges_path}")
-    print_green(f"encoder_type={config.encoder_type}")
+    print_green(f"encoder_type={FLAGS.encoder_type} ({config.encoder_type})")
     print_green(f"mask_suppress_beta={effective_mask_suppress_beta(config)}")
     print_green(
         "mask_pick_place_phase_control="
@@ -1150,14 +1249,14 @@ def main(_):
     print_green(f"use_mask_feature_head={effective_use_mask_feature_head(config)}")
     print_green("use_mask_encoder=True")
     print_green(f"has_recorded_mask1={has_recorded_mask1}")
-    print_green(f"show_mask_encoder_feature={show_mask_encoder_feature}")
-    if FLAGS.show_mask_encoder_feature and not has_recorded_mask1:
-        print_green("No recorded mask1 files found; skipping mask_encoder_feature panels.")
-    print_green(f"compare_raw_mask_feature={FLAGS.compare_raw_mask_feature}")
-    print_green(f"mask_feature_gate_alpha={FLAGS.mask_feature_gate_alpha}")
-    print_green(f"mask_feature_min_gate={FLAGS.mask_feature_min_gate}")
-    print_green("mask_feature_hidden_dim=128")
-    print_green("mask_encoder_latent_dim=64")
+    print_green(
+        "mask_feature_gate_alpha="
+        f"{getattr(config, 'mask_feature_gate_alpha', 0.9)}"
+    )
+    print_green(
+        "mask_feature_min_gate="
+        f"{getattr(config, 'mask_feature_min_gate', 0.4)}"
+    )
     print_green("mask_grounding_key=auto(front_camera_mask1 else front_camera_mask)")
     print_green(f"viewer_mask_grounding_threshold={FLAGS.viewer_mask_grounding_threshold}")
     print_green(
@@ -1193,66 +1292,55 @@ def main(_):
             (FLAGS.image_size, FLAGS.image_size),
         )
     attention_specs = []
-    use_mask_feature_head = effective_use_mask_feature_head(config)
-    for attention_key in attention_keys:
-        if FLAGS.compare_raw_mask_feature:
-            return_raw_attention = True
+    if is_vit_encoder(config):
+        for attention_key in attention_keys:
             attention_specs.append(
                 {
                     "key": attention_key,
-                    "kind": attention_kind_name(
-                        config,
-                        attention_key,
-                        return_raw_attention=return_raw_attention,
-                    ),
-                    "return_raw_attention": return_raw_attention,
-                    "return_mask_encoder_attention": False,
-                    "allow_restore_fallback": False,
-                }
-            )
-        if attention_key == "front_camera" and use_mask_feature_head:
-            return_raw_attention = False
-            attention_specs.append(
-                {
-                    "key": attention_key,
-                    "kind": attention_kind_name(
-                        config,
-                        attention_key,
-                        return_raw_attention=return_raw_attention,
-                    ),
-                    "return_raw_attention": return_raw_attention,
-                    "return_mask_encoder_attention": False,
-                    "allow_restore_fallback": False,
-                }
-            )
-        if (
-            attention_key == "front_camera"
-            and show_mask_encoder_feature
-        ):
-            attention_specs.append(
-                {
-                    "key": attention_key,
-                    "kind": "mask_encoder_feature",
+                    "kind": "vit_feature",
                     "return_raw_attention": False,
-                    "return_mask_encoder_attention": True,
+                    "return_mask_encoder_attention": False,
+                    "return_feature_debug": True,
+                    "agent_kind": "feature_debug",
                     "allow_restore_fallback": False,
                 }
             )
-        elif not FLAGS.compare_raw_mask_feature:
-            return_raw_attention = True
+    else:
+        for attention_key in attention_keys:
             attention_specs.append(
                 {
                     "key": attention_key,
-                    "kind": attention_kind_name(
-                        config,
-                        attention_key,
-                        return_raw_attention=return_raw_attention,
-                    ),
-                    "return_raw_attention": return_raw_attention,
+                    "kind": "raw_feature",
+                    "return_raw_attention": False,
                     "return_mask_encoder_attention": False,
+                    "return_feature_debug": True,
+                    "agent_kind": "feature_debug",
                     "allow_restore_fallback": False,
                 }
             )
+            if attention_key == "front_camera":
+                attention_specs.extend(
+                    [
+                        {
+                            "key": attention_key,
+                            "kind": "mask_head_feature",
+                            "return_raw_attention": False,
+                            "return_mask_encoder_attention": False,
+                            "return_feature_debug": True,
+                            "agent_kind": "feature_debug",
+                            "allow_restore_fallback": False,
+                        },
+                        {
+                            "key": attention_key,
+                            "kind": "fused_attribution",
+                            "return_raw_attention": False,
+                            "return_mask_encoder_attention": False,
+                            "return_feature_debug": True,
+                            "agent_kind": "feature_debug",
+                            "allow_restore_fallback": False,
+                        },
+                    ]
+                )
     if not attention_specs:
         raise ValueError("No attention specs were created.")
 
@@ -1261,26 +1349,33 @@ def main(_):
     for spec in attention_specs:
         attention_key = spec["key"]
         attention_kind = spec["kind"]
+        agent_kind = spec.get("agent_kind", attention_kind)
+        agent_id = (attention_key, agent_kind)
         start = time.time()
-        agent = create_attention_agent(
-            config,
-            sample_obs,
-            attention_key,
-            return_raw_attention=spec["return_raw_attention"],
-            return_mask_encoder_attention=spec["return_mask_encoder_attention"],
-        )
+        if agent_id in agents:
+            agent = agents[agent_id]
+        else:
+            agent = create_attention_agent(
+                config,
+                sample_obs,
+                attention_key,
+                return_raw_attention=spec["return_raw_attention"],
+                return_mask_encoder_attention=spec["return_mask_encoder_attention"],
+                return_feature_debug=spec.get("return_feature_debug", False),
+            )
         label = f"{attention_key}/{attention_kind}"
-        agent = restore_agent(
-            agent,
-            label=label,
-            allow_fallback=spec["allow_restore_fallback"],
-        )
-        expected_state_dims[(attention_key, attention_kind)] = infer_actor_state_dim(agent)
-        agent = jax.device_put(jax.tree_util.tree_map(jnp.array, agent))
-        agents[(attention_key, attention_kind)] = agent
+        if agent_id not in agents:
+            agent = restore_agent(
+                agent,
+                label=label,
+                allow_fallback=spec["allow_restore_fallback"],
+            )
+            agent = jax.device_put(jax.tree_util.tree_map(jnp.array, agent))
+            agents[agent_id] = agent
+        expected_state_dims[agent_id] = infer_actor_state_dim(agent)
         print_green(
             f"loaded attention agent key={label} "
-            f"state_dim={expected_state_dims[(attention_key, attention_kind)]} "
+            f"state_dim={expected_state_dims[agent_id]} "
             f"time={time.time() - start:.2f}s"
         )
 
@@ -1331,29 +1426,71 @@ def main(_):
                 for spec in attention_specs:
                     attention_key = spec["key"]
                     attention_kind = spec["kind"]
+                    agent_id = (attention_key, spec.get("agent_kind", attention_kind))
                     frame_obs = align_obs_state_dim(
                         obs,
-                        expected_state_dims.get((attention_key, attention_kind)),
+                        expected_state_dims.get(agent_id),
                         selected_slot,
                     )
-                    attention_map = critic_attention_for_frame(
-                        agents[(attention_key, attention_kind)],
-                        frame_obs,
-                        action,
-                    )
-                    attention_prob = attention_to_prob(attention_map)
-                    peak_y, peak_x = np.unravel_index(
-                        int(np.argmax(attention_prob)),
-                        attention_prob.shape,
-                    )
-                    peak_prob = float(attention_prob[peak_y, peak_x])
+                    feature_vector = None
+                    full_pre_mlp_vector = None
+                    if spec.get("return_feature_debug", False):
+                        if attention_kind == "fused_attribution":
+                            feature_debug = critic_feature_debug_for_frame(
+                                agents[agent_id],
+                                frame_obs,
+                                action,
+                            )
+                            attention_map = fused_feature_proxy(
+                                feature_debug,
+                                agents[agent_id],
+                                attention_key,
+                            )
+                        else:
+                            feature_debug = critic_feature_debug_for_frame(
+                                agents[agent_id],
+                                frame_obs,
+                                action,
+                            )
+                            image_debug = feature_debug["features"][attention_key]
+                            map_name = {
+                                "raw_feature": "raw_spatial",
+                                "mask_head_feature": "head_spatial",
+                                "vit_feature": "raw_spatial",
+                            }[attention_kind]
+                            attention_map = np.asarray(image_debug[map_name])
+                    else:
+                        attention_map = critic_attention_for_frame(
+                            agents[agent_id],
+                            frame_obs,
+                            action,
+                        )
+                    if attention_map is not None and attention_map.ndim > 2:
+                        attention_map = attention_map.reshape(
+                            (-1, *attention_map.shape[-2:])
+                        )[0]
+                    if attention_map is not None:
+                        attention_prob = attention_to_prob(attention_map)
+                        peak_y, peak_x = np.unravel_index(
+                            int(np.argmax(attention_prob)),
+                            attention_prob.shape,
+                        )
+                        peak_prob = float(attention_prob[peak_y, peak_x])
+                    else:
+                        attention_prob = None
+                        peak_y = peak_x = -1
+                        peak_prob = np.nan
                     metrics = {
                         "mask_mass": np.nan,
                         "mask_grounding_loss": np.nan,
                         "mask_cell_fraction": np.nan,
                     }
                     metric_lines = []
-                    if attention_key == "front_camera" and "front_camera_mask1" in obs:
+                    if (
+                        attention_map is not None
+                        and attention_key == "front_camera"
+                        and "front_camera_mask1" in obs
+                    ):
                         metrics = attention_mask_metrics(
                             attention_map,
                             obs["front_camera_mask1"],
@@ -1381,7 +1518,7 @@ def main(_):
                             selected_slot,
                             attention_key,
                             attention_kind,
-                            tuple(attention_map.shape),
+                            "none" if attention_map is None else tuple(attention_map.shape),
                             int(peak_x),
                             int(peak_y),
                             f"{peak_prob:.8f}",
@@ -1395,13 +1532,12 @@ def main(_):
                         ]
                     )
                     panel_lines = [
-                        f"attn_shape={tuple(attention_map.shape)}",
-                        f"peak=({int(peak_x)},{int(peak_y)}) p={peak_prob:.3f}",
                         f"selected_mask={selected_slot}",
                         *metric_lines,
                     ]
                     base_image = panel_base_image(obs, attention_key, attention_kind)
-                    if FLAGS.attention_display_mode in ("heatmap", "both"):
+                    panel_lines = []
+                    if attention_map is not None and FLAGS.attention_display_mode in ("heatmap", "both"):
                         panel = render_attention_panel(
                             base_image,
                             attention_map,
@@ -1409,7 +1545,7 @@ def main(_):
                             panel_lines,
                         )
                         panels.append(panel)
-                    if FLAGS.attention_display_mode in ("prob", "both"):
+                    if attention_map is not None and FLAGS.attention_display_mode in ("prob", "both"):
                         panel = render_attention_probability_panel(
                             base_image,
                             attention_map,

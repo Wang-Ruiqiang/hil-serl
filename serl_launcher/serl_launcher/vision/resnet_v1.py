@@ -323,7 +323,6 @@ class ResNetEncoder(nn.Module):
         spatial_features = x
         if self.pre_pooling:
             return jax.lax.stop_gradient(x)
-            # return x
 
         if self.pooling_method == "spatial_learned_embeddings":
             height, width, channel = x.shape[-3:]

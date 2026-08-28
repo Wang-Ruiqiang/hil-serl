@@ -666,6 +666,7 @@ class FrankaEnv(gym.Env):
             "duration=", f"{float(duration):.2f}s",
             flush=True,
         )
+        publish_started_at = time.monotonic()
         self.ros_interface.publish_joint_target(
             start_joint,
             target_joint,
@@ -681,6 +682,15 @@ class FrankaEnv(gym.Env):
             wait=True,
         )
 
+        # The measured joints can briefly enter the tolerance band before the
+        # controller finishes the time-parameterized trajectory. Do not expose
+        # a partially-reset pose to the first Cartesian action.
+        remaining = float(duration) - (time.monotonic() - publish_started_at)
+        if remaining > 0.0:
+            time.sleep(remaining)
+        time.sleep(0.1)
+        self._update_cur_position(wait=False)
+
     def step(self, action: np.ndarray) -> tuple:
         """standard gym step function."""
         start_time = time.time()
@@ -691,11 +701,13 @@ class FrankaEnv(gym.Env):
         self.curpos = np.concatenate((self.cur_position, self.cur_orientation), axis=0)
         # self.nextpos = self.curpos.copy()
 
+        cmd_pose_before_step = self.cmd_pose.copy()
         self.nextpos = self.cmd_pose.copy()
         # print("self.nextpos before step = ", self.nextpos)
         # input("debug for step, press Enter to continue...")
         
         xyz_delta = action[:3]
+        scaled_xyz_delta = np.asarray(xyz_delta * self.action_scale[0], dtype=np.float32)
 
         # print("action scaled = ", xyz_delta * self.action_scale[0])
 
@@ -703,7 +715,7 @@ class FrankaEnv(gym.Env):
         #     if self.nextpos[2] < 0.24 and (0.6 < self.nextpos[0] < 0.8) and (-0.2 < self.nextpos[1] < -0.1):
         #         action[:3] = np.clip(xyz_delta, -0.4, 0.4)
                 
-        self.nextpos[:3] = self.nextpos[:3] + xyz_delta * self.action_scale[0]
+        self.nextpos[:3] = self.nextpos[:3] + scaled_xyz_delta
 
         if self.exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
             if self.nextpos[2] < 0.19:
@@ -730,13 +742,6 @@ class FrankaEnv(gym.Env):
         current_hand_pos = np.asarray(self.curr_leap_hand_pos, dtype=np.float32)
         grip_action = float(np.clip(action[6], -1.0, 1.0))
 
-        if self.exp_name == "twist_bottle_cap" or self.exp_name == "lid_grip" or self.exp_name == "tube_insertion":
-            target_hand_pos = self.calculate_hand_pos_segmented(grip_action, current_hand_pos)
-        elif self.exp_name in ("tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"):
-            target_hand_pos = self._cal_hand_close_open(grip_action, current_hand_pos)
-
-        # print("target_hand_pos = ", target_hand_pos)
-
         # RL actions use Cartesian pose Servo. Joint-position control is
         # reserved for task-specific reset methods.
         self.ros_interface.arm_interpolate_and_publish(
@@ -747,8 +752,32 @@ class FrankaEnv(gym.Env):
         )
         self.cmd_pose = self.nextpos.copy()
 
+        # The hand target is computed ONLY when it is actually going to be
+        # sent. Both helpers advance an internal `_cmd_pos` integrator as a
+        # side effect, so computing them on steps below the deadband used to
+        # accumulate motion that never reached the hand -- and then release it
+        # all at once the first time a command exceeded the threshold.
+        #
+        # Measured over five eval episodes: 33.5% of the policy's gripper
+        # commands land in the dropped 0.1-0.3 band, and every episode showed
+        # the same signature -- 34 to 60 consecutive dropped steps with the
+        # gripper frozen near 0.035, then a 0.19-0.61 jump within two control
+        # steps once one command crossed 0.3.
         if -0.3 > grip_action or grip_action > 0.3:
-            self._send_leap_hand_command(target_hand_pos.copy())
+            if self.exp_name in ("twist_bottle_cap", "lid_grip", "tube_insertion"):
+                target_hand_pos = self.calculate_hand_pos_segmented(
+                    grip_action, current_hand_pos
+                )
+            elif self.exp_name in (
+                "tennis_ball_pick", "tennis_ball_place", "tennis_ball_pick_and_place"
+            ):
+                target_hand_pos = self._cal_hand_close_open(
+                    grip_action, current_hand_pos
+                )
+            else:
+                target_hand_pos = None
+            if target_hand_pos is not None:
+                self._send_leap_hand_command(target_hand_pos.copy())
 
         
         # print(f"[publish End] {t_end:.6f}, Step总耗时(含sleep): {t_end - start_time:.4f}s, 实际频率: {1.0/(t_end - start_time):.2f}Hz")
@@ -757,11 +786,24 @@ class FrankaEnv(gym.Env):
         t = time.time()
         self._update_cur_position(self.nextpos, wait=False)
         _timing_log("step.update_cur_position", t)
-        tracking_error = float(np.linalg.norm(self.cmd_pose[:3] - self.cur_position))
+        tracking_error_vec = np.asarray(self.cmd_pose[:3] - self.cur_position, dtype=np.float32)
+        tracking_error = float(np.linalg.norm(tracking_error_vec))
         if tracking_error > self.cmd_pose_resync_threshold:
             print(
                 "[WARN] cmd_pose tracking error too large; "
-                f"resync cmd_pose position to robot topic. error={tracking_error:.4f}m"
+                f"resync cmd_pose position to robot topic. error={tracking_error:.4f}m\n"
+                f"       action_xyz={np.array2string(np.asarray(action[:3]), precision=5)} "
+                f"scale_xyz={np.array2string(np.asarray(self.action_scale[0]), precision=5)}\n"
+                f"       cmd_pose_before_step="
+                f"{np.array2string(np.asarray(cmd_pose_before_step[:3]), precision=5)}\n"
+                f"       scaled_delta_xyz="
+                f"{np.array2string(scaled_xyz_delta, precision=7)}\n"
+                f"       computed_nextpos="
+                f"{np.array2string(np.asarray(self.nextpos[:3]), precision=5)}\n"
+                f"       target_cmd_pose={np.array2string(np.asarray(self.cmd_pose[:3]), precision=5)}\n"
+                f"       measured_current_pose={np.array2string(np.asarray(self.cur_position), precision=5)}\n"
+                f"       error_vec={np.array2string(tracking_error_vec, precision=5)}",
+                flush=True,
             )
             self.cmd_pose[:3] = np.asarray(self.cur_position, dtype=np.float32).copy()
         # t_end = time.time()
@@ -1542,6 +1584,31 @@ class FrankaEnv(gym.Env):
             duration=self.reset_joint_duration,
         )
         self._update_cur_position(wait=False)
+
+        # Verify the joint-reset -> Cartesian-control handoff using both
+        # measured joint and EE feedback before initializing cmd_pose.
+        measured_joint = np.asarray(
+            self.ros_interface.get_current_joint(),
+            dtype=np.float32,
+        ).reshape(-1)
+        measured_ee_position = np.asarray(self.cur_position, dtype=np.float32).copy()
+        measured_ee_orientation = np.asarray(
+            self.cur_orientation,
+            dtype=np.float32,
+        ).copy()
+        joint_error = measured_joint - self.reset_joint
+        print(
+            "[reset_joint][verify] "
+            f"target_joint={np.array2string(self.reset_joint, precision=5)}\n"
+            f"    measured_joint={np.array2string(measured_joint, precision=5)}\n"
+            f"    joint_error={np.array2string(joint_error, precision=5)} "
+            f"max_abs={float(np.max(np.abs(joint_error))):.5f} rad\n"
+            f"    measured_ee_position="
+            f"{np.array2string(measured_ee_position, precision=5)}\n"
+            f"    measured_ee_orientation="
+            f"{np.array2string(measured_ee_orientation, precision=5)}",
+            flush=True,
+        )
         self.cmd_pose = np.concatenate(
             [
                 np.asarray(self.cur_position, dtype=np.float32),
@@ -1550,6 +1617,11 @@ class FrankaEnv(gym.Env):
             axis=0,
         )
         self.nextpos = self.cmd_pose.copy()
+        print(
+            "[reset_joint][verify] initialized cmd_pose="
+            f"{np.array2string(self.cmd_pose, precision=5)}",
+            flush=True,
+        )
 
     def reset(self, joint_reset=False, **kwargs):
         print("franka_env reset")
@@ -1568,6 +1640,18 @@ class FrankaEnv(gym.Env):
         self.curr_path_length = 0
 
         self._update_cur_position()
+        # Re-seed the hand command integrator from the freshly measured pose.
+        # `_close_open_pose_init` sets `is_close_open_pose_init` and nothing
+        # ever cleared it, so `_cmd_pos` was initialised from the hand exactly
+        # once per process and then ran open-loop for the whole session --
+        # which is why the joint angles reported after a reset did not match
+        # the pose the hand was physically in. Clearing the flag here makes the
+        # next `_cal_hand_close_open` re-read the hand.
+        #
+        # `is_segmented_init` (the twist/lid/tube path) is deliberately left
+        # alone: it carries per-waypoint state that has not been tested under
+        # re-initialisation, and those tasks are not in play here.
+        self.is_close_open_pose_init = False
         obs = self._get_obs()
         self.terminate = False
         return obs, {"succeed": False}
@@ -1880,6 +1964,16 @@ class FrankaEnv(gym.Env):
         frame_id = self.data_recorder.save_frame(images=images, depth_images=depth_images)
         self.global_frame_id = self.data_recorder.global_frame_id
         return frame_id
+
+
+    def set_recorded_success(self, frame_id, pick_success=False, place_success=False):
+        if self.data_recorder is None:
+            return
+        self.data_recorder.set_recorded_success(
+            frame_id,
+            pick_success=pick_success,
+            place_success=place_success,
+        )
 
 
     def save_all_data_on_exit(self):

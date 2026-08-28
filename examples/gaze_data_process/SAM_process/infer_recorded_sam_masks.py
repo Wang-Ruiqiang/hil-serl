@@ -1,11 +1,11 @@
-"""Automatically infer mask1/mask2 for recorded demos with SAM3.
+"""Automatically infer ball/basket masks for recorded demos with SAM3.
 
 This script is for generating masks on a new recorded dataset without manually
 labeling every frame and without training/using a mask predictor network.
 
 It runs SAM3 text-prompt segmentation on each frame:
-  - mask1: default prompt "tennis ball"
-  - mask2: default prompt "basket"
+  - ball_mask: default prompt "tennis ball"
+  - basket_mask: default prompt "basket"
 
 When a gaze point is available in ``gaze_contact.json``, SAM3 instances are
 selected by preferring masks that contain or are closest to that gaze point.
@@ -14,8 +14,8 @@ Default target:
   /media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1
 
 Output:
-  <frame_dir>/mask1.png
-  <frame_dir>/mask2.png
+  <frame_dir>/ball_mask.png
+  <frame_dir>/basket_mask.png
   <frame_dir>/sam3_mask_inference.json
 
 The script processes one recorded episode at a time according to
@@ -54,6 +54,7 @@ from label_recorded_sam_masks import (  # noqa: E402
 DEFAULT_FRAME_ROOT = (
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1"
 )
+MASK_FILE_STEMS = {"mask1": "ball_mask", "mask2": "basket_mask"}
 
 
 @dataclass
@@ -66,7 +67,7 @@ class EpisodeSegment:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Infer recorded frame mask1/mask2 directly with SAM3."
+        description="Infer recorded ball/basket masks directly with SAM3."
     )
     parser.add_argument("--frame_root", default=DEFAULT_FRAME_ROOT)
     parser.add_argument("--image_name", default="color_image.jpg")
@@ -136,13 +137,13 @@ def parse_args() -> argparse.Namespace:
         "--save_in_frame_dir",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Write mask1.png/mask2.png into each frame_* folder.",
+        help="Write ball_mask.png/basket_mask.png into each frame_* folder.",
     )
     parser.add_argument(
         "--save_central_masks",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Also save frame_XXXXXX_mask*.png copies into --output_dir.",
+        help="Also save frame_XXXXXX_ball_mask/basket_mask copies into --output_dir.",
     )
     parser.add_argument(
         "--write_legacy_rs_names",
@@ -153,12 +154,12 @@ def parse_args() -> argparse.Namespace:
         "--overwrite",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Overwrite existing mask1.png/mask2.png outputs.",
+        help="Overwrite existing ball_mask.png/basket_mask.png outputs.",
     )
     parser.add_argument(
         "--skip_existing",
         action="store_true",
-        help="Skip frames where both mask1.png and mask2.png already exist.",
+        help="Skip frames where both ball_mask.png and basket_mask.png already exist.",
     )
     parser.add_argument(
         "--save_overlay",
@@ -308,7 +309,7 @@ def save_masks(
 ) -> None:
     if args.save_in_frame_dir:
         for slot, mask in masks.items():
-            path = frame_dir / f"{slot}.png"
+            path = frame_dir / f"{MASK_FILE_STEMS[slot]}.png"
             if args.overwrite or not path.exists():
                 cv2.imwrite(str(path), mask)
         if args.write_legacy_rs_names:
@@ -323,7 +324,7 @@ def save_masks(
     if args.save_central_masks:
         output_dir.mkdir(parents=True, exist_ok=True)
         for slot, mask in masks.items():
-            path = output_dir / f"frame_{frame_id:06d}_{slot}.png"
+            path = output_dir / f"frame_{frame_id:06d}_{MASK_FILE_STEMS[slot]}.png"
             if args.overwrite or not path.exists():
                 cv2.imwrite(str(path), mask)
 
@@ -389,7 +390,10 @@ def save_overlay(
 
 
 def frame_has_existing_masks(frame_dir: Path) -> bool:
-    return (frame_dir / "mask1.png").exists() and (frame_dir / "mask2.png").exists()
+    return all(
+        any((frame_dir / name).exists() for name in (f"{MASK_FILE_STEMS[slot]}.png", f"{slot}.png"))
+        for slot in MASK_SLOTS
+    )
 
 
 def release_memory() -> None:

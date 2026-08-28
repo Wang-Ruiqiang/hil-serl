@@ -23,11 +23,34 @@ from experiments.mappings import NEW_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", "tennis_ball_pick_and_place", "Name of experiment corresponding to folder.")
-flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
-flags.DEFINE_integer("enable_tactile", 1, "evaluate pick or place task.")
-flags.DEFINE_boolean("record_data", False, "Save robot/camera/tactile frame data while recording demos.")
-flags.DEFINE_boolean("record_gaze", False, "Collect Pupil gaze/world frames while recording demos.")
-flags.DEFINE_boolean("classifier", True, "Load JAX reward classifier during demo recording.")
+flags.DEFINE_integer("successes_needed", 30, "Number of successful demos to collect.")
+flags.DEFINE_integer(
+    "enable_tactile",
+    1,
+    "Include tactile_data in observations and classifier input.",
+)
+flags.DEFINE_boolean("record_data", True, "Save robot/camera/tactile frame data while recording demos.")
+flags.DEFINE_boolean(
+    "record_gaze",
+    False,
+    "Collect Pupil gaze/world frames while recording demos.",
+)
+flags.DEFINE_boolean(
+    "classifier",
+    False,
+    "Load JAX reward classifier during demo recording (legacy option).",
+)
+flags.DEFINE_boolean(
+    "load_classifier",
+    False,
+    "Load pick/place classifiers and save per-frame success labels.",
+)
+flags.DEFINE_enum(
+    "mask_selection_mode",
+    "auto",
+    ["auto", "gaze", "pick_classifier", "pick_only", "place_only"],
+    "Mask selection mode. auto avoids the tactile classifier when tactile is disabled.",
+)
 flags.DEFINE_boolean(
     "ignore_max_episode_length",
     True,
@@ -35,8 +58,9 @@ flags.DEFINE_boolean(
 )
 flags.DEFINE_string(
     "frame_save_path",
-    "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-2",
-    "Directory used by the environment when --record_data or --record_gaze is enabled.",
+    "",
+    "Directory used by the environment when --record_data or --record_gaze is enabled. "
+    "Empty means create a timestamped directory automatically.",
 )
 
 
@@ -174,9 +198,25 @@ def _recording_mode(exp_name):
     return "default"
 
 
+def _default_frame_save_path(exp_name):
+    """Return a new directory for each zero-argument recording run."""
+    repo_parent = Path(__file__).resolve().parents[2]
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return str(repo_parent / "data" / "recorded_data" / exp_name / f"{exp_name}-{timestamp}")
+
+
 def main(_):
     assert FLAGS.exp_name in NEW_MAPPING, 'Experiment folder not found.'
     collect_gaze = bool(FLAGS.record_gaze)
+    classifier_enabled = bool(FLAGS.classifier or FLAGS.load_classifier)
+    if classifier_enabled:
+        print(
+            "[record_demos] classifier enabled; per-frame labels will be saved "
+            "as is_recorded_pick_success.txt and is_recorded_success.txt."
+        )
+    frame_save_path = FLAGS.frame_save_path or _default_frame_save_path(FLAGS.exp_name)
+    if collect_gaze:
+        print(f"[record_demos] gaze collection enabled; frame_save_path={frame_save_path}")
     recording_mode = _recording_mode(FLAGS.exp_name)
     if recording_mode == "pick_only":
         print("[record_demos] mode=pick_only: stop and save when pick succeeds.")
@@ -198,13 +238,24 @@ def main(_):
     env_kwargs = dict(
         fake_env=False,
         save_video=False,
-        classifier=FLAGS.classifier,
+        classifier=classifier_enabled,
         enable_tactile=FLAGS.enable_tactile,
         record_data=FLAGS.record_data or collect_gaze,
         record_gaze=collect_gaze,
     )
+    if FLAGS.mask_selection_mode != "auto":
+        env_kwargs["mask_selection_mode"] = FLAGS.mask_selection_mode
+    elif not FLAGS.enable_tactile:
+        # The available pick classifier was trained with RGB+tactile input.
+        # Use the frozen gaze path for RGB-only hardware tests instead of
+        # constructing a classifier with an incompatible input dimension.
+        env_kwargs["mask_selection_mode"] = "gaze"
+        print(
+            "[record_demos] tactile disabled; mask_selection_mode=auto "
+            "resolved to gaze to avoid the RGB+tactile classifier."
+        )
     if "frame_save_path" in inspect.signature(config.get_environment).parameters:
-        env_kwargs["frame_save_path"] = FLAGS.frame_save_path
+        env_kwargs["frame_save_path"] = frame_save_path
     env = config.get_environment(**env_kwargs)
     
     fd = sys.stdin.fileno()
@@ -230,6 +281,15 @@ def main(_):
             # actions[1] = -0.1
             next_obs, rew, done, truncated, info = env.step(actions)
             info = dict(info)
+            if classifier_enabled:
+                frame_idx = info.get("frame_idx")
+                root_env = _get_unwrapped_env(env)
+                if frame_idx is not None and hasattr(root_env, "set_recorded_success"):
+                    root_env.set_recorded_success(
+                        frame_idx,
+                        pick_success=bool(info.get("pick_success", False)),
+                        place_success=bool(info.get("place_success", False)),
+                    )
             if recording_mode == "pick_only" and rew:
                 done = True
                 info["succeed"] = True

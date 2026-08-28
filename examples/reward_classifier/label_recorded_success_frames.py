@@ -13,7 +13,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-2",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-18-59",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-49-48",
     ],
     "Recorded data root(s) containing frame_xxx folders.",
 )

@@ -22,6 +22,7 @@ class GazeAttentionCritic(nn.Module):
         train: bool = False,
         return_attention: bool = False,
         return_cgl_attention: bool = False,
+        return_feature_debug: bool = False,
     ):
         if jnp.ndim(actions) == 3:
             if return_attention or return_cgl_attention:
@@ -37,13 +38,20 @@ class GazeAttentionCritic(nn.Module):
         if self.encoder is None:
             obs_enc = observations
             attention_map = None
-        elif return_attention or return_cgl_attention:
-            obs_enc, attention_map = self.encoder(
-                observations,
-                train=train,
-                return_attention=True,
-                return_cgl_attention=return_cgl_attention,
-            )
+        elif return_attention or return_cgl_attention or return_feature_debug:
+            if return_feature_debug:
+                obs_enc, attention_map = self.encoder(
+                    observations,
+                    train=train,
+                    return_feature_debug=True,
+                )
+            else:
+                obs_enc, attention_map = self.encoder(
+                    observations,
+                    train=train,
+                    return_attention=return_attention,
+                    return_cgl_attention=return_cgl_attention,
+                )
         else:
             obs_enc = self.encoder(observations)
             attention_map = None
@@ -59,6 +67,6 @@ class GazeAttentionCritic(nn.Module):
             value = nn.Dense(1, kernel_init=default_init())(outputs)
         q_value = jnp.squeeze(value, -1)
 
-        if return_attention or return_cgl_attention:
+        if return_attention or return_cgl_attention or return_feature_debug:
             return q_value, attention_map
         return q_value

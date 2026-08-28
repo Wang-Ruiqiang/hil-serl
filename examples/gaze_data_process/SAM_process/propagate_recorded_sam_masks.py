@@ -1,16 +1,16 @@
-"""Propagate saved keyframe SAM masks through recorded demo frames.
+"""Propagate saved keyframe SAM3 masks through recorded demo frames.
 
 This script is intentionally separate from the SAM annotation script in this
-folder, so SAM3 annotation can exit and release GPU memory before SAM2 video
-propagation starts.
+folder, so SAM3 image annotation can exit and release GPU memory before SAM3
+video propagation starts.
 
 Input:
   - ``<frame_root>/frame_*/color_image.jpg``
   - keyframe masks saved by ``SAM_process/label_recorded_sam_masks.py`` in ``mask_dir``
 
 Output:
-  - propagated masks in ``<mask_dir>/propagated/frame_XXXXXX_mask1.png``
-  - propagated masks in ``<mask_dir>/propagated/frame_XXXXXX_mask2.png``
+  - propagated masks in ``<mask_dir>/propagated/frame_XXXXXX_ball_mask.png``
+  - propagated masks in ``<mask_dir>/propagated/frame_XXXXXX_basket_mask.png``
 """
 
 from __future__ import annotations
@@ -33,11 +33,18 @@ import numpy as np
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 DEFAULT_FRAME_ROOT = (
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1"
+    "/home/ealin/workspaces/DexTacHil/data/recorded_data/"
+    "tennis_ball_pick_and_place/"
+    "tennis_ball_pick_and_place-2026-08-14_12-18-59"
 )
-MASK_SLOTS = ("mask1", "mask2")
-SAM2_OBJECT_IDS = {"mask1": 1, "mask2": 2}
-SAM2_SLOTS_BY_OBJECT_ID = {value: key for key, value in SAM2_OBJECT_IDS.items()}
+MASK_SLOTS = ("mask1", "hand_mask", "mask2")
+MASK_FILE_STEMS = {
+    "mask1": "ball_mask",
+    "hand_mask": "hand_mask",
+    "mask2": "basket_mask",
+}
+SAM3_OBJECT_IDS = {"mask1": 1, "hand_mask": 2, "mask2": 3}
+SAM3_SLOTS_BY_OBJECT_ID = {value: key for key, value in SAM3_OBJECT_IDS.items()}
 
 
 @dataclass
@@ -76,44 +83,46 @@ def tensor_to_numpy(value: Any) -> np.ndarray:
     return np.asarray(value)
 
 
-def load_sam2_video_predictor(args: argparse.Namespace) -> Any:
+def mask_to_torch(mask: np.ndarray) -> Any:
+    """Convert a saved binary mask to the tensor expected by SAM3 tracker."""
+    import torch
+
+    array = np.squeeze(mask).astype(np.float32, copy=False)
+    if array.ndim != 2:
+        raise ValueError(f"Expected a 2-D mask, got shape={array.shape}")
+    return torch.from_numpy(array)
+
+
+def load_sam3_video_predictor(args: argparse.Namespace) -> Any:
     import torch
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    if args.sam2_checkpoint and args.sam2_model_cfg:
-        from sam2.build_sam import build_sam2_video_predictor
-
-        predictor = build_sam2_video_predictor(
-            args.sam2_model_cfg,
-            args.sam2_checkpoint,
-            device=device,
+    if not str(device).startswith("cuda"):
+        raise RuntimeError(
+            "The local SAM3 video tracker currently requires CUDA. "
+            "Pass --device cuda or run on a CUDA-enabled machine."
         )
-    else:
-        try:
-            from sam2.sam2_video_predictor import SAM2VideoPredictor
 
-            if hasattr(SAM2VideoPredictor, "from_pretrained"):
-                try:
-                    predictor = SAM2VideoPredictor.from_pretrained(
-                        args.sam2_repo_id,
-                        device=device,
-                    )
-                except TypeError:
-                    predictor = SAM2VideoPredictor.from_pretrained(args.sam2_repo_id)
-            else:
-                raise ImportError
-        except ImportError:
-            from sam2.build_sam import build_sam2_video_predictor_hf
+    from sam3.model_builder import build_sam3_video_model
 
-            predictor = build_sam2_video_predictor_hf(
-                args.sam2_repo_id,
-                device=device,
-            )
-    print(f"[SAM2] loaded video predictor on {device}")
+    model_kwargs: dict[str, Any] = {
+        "checkpoint_path": args.sam3_checkpoint or None,
+        "bpe_path": args.sam3_bpe_path or None,
+        "device": device,
+        "compile": args.sam3_compile,
+    }
+    model = build_sam3_video_model(**model_kwargs)
+    model.eval()
+
+    # SAM3's video model owns a tracker.  The tracker accepts add_new_mask,
+    # which lets us preserve the manually corrected binary keyframe masks.
+    predictor = model.tracker
+    predictor.backbone = model.detector.backbone
+    print(f"[SAM3] loaded video tracker on {device}")
     return predictor
 
 
-def prepare_sam2_video_frames(
+def prepare_sam3_video_frames(
     frames: list[tuple[int, Path]],
     image_name: str,
     video_dir: Path,
@@ -146,7 +155,7 @@ def prepare_sam2_video_frames(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run SAM2 propagation from saved keyframe mask1/mask2 annotations."
+        description="Run SAM3 propagation from saved ball/hand/basket annotations."
     )
     parser.add_argument("--frame_root", default=DEFAULT_FRAME_ROOT)
     parser.add_argument("--image_name", default="color_image.jpg")
@@ -178,25 +187,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end_frame", type=int, default=None)
     parser.add_argument("--device", default=None, help="cuda/cpu; default auto.")
     parser.add_argument(
-        "--sam2_repo_id",
-        default="facebook/sam2-hiera-small",
-        help="Used when SAM2VideoPredictor.from_pretrained is available.",
+        "--sam3_checkpoint",
+        default=os.environ.get("SAM3_CKPT", os.environ.get("SAM3_CHECKPOINT", "")),
+        help="Optional local SAM3 checkpoint. Empty uses the Hugging Face SAM3 checkpoint.",
     )
     parser.add_argument(
-        "--sam2_model_cfg",
-        default=os.environ.get("SAM2_MODEL_CFG", ""),
-        help="SAM2 yaml config, used with --sam2_checkpoint.",
+        "--sam3_bpe_path",
+        default=os.environ.get("SAM3_BPE_PATH", ""),
+        help="Optional SAM3 BPE vocabulary path.",
     )
     parser.add_argument(
-        "--sam2_checkpoint",
-        default=os.environ.get("SAM2_CKPT", os.environ.get("SAM2_CHECKPOINT", "")),
-        help="SAM2 checkpoint, used with --sam2_model_cfg.",
+        "--sam3_compile",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable torch.compile for SAM3. Disabled by default for easier debugging.",
     )
     parser.add_argument(
         "--mask_threshold",
         type=float,
         default=0.0,
-        help="Threshold applied to SAM2 video mask logits.",
+        help="Threshold applied to SAM3 video mask scores.",
     )
     parser.add_argument(
         "--overwrite",
@@ -208,7 +218,7 @@ def parse_args() -> argparse.Namespace:
         "--save_in_frame_dir",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Write propagated mask1.png/mask2.png into each frame_* folder.",
+        help="Write propagated ball_mask.png/hand_mask.png/basket_mask.png into each frame_* folder.",
     )
     parser.add_argument(
         "--save_central_masks",
@@ -244,26 +254,26 @@ def parse_args() -> argparse.Namespace:
         "--offload_video_to_cpu",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use SAM2 CPU video offload to reduce GPU memory.",
+        help="Use SAM3 CPU video offload to reduce GPU memory.",
     )
     parser.add_argument(
         "--offload_state_to_cpu",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use SAM2 CPU state offload to reduce GPU memory more.",
+        help="Use SAM3 CPU state offload to reduce GPU memory more.",
     )
     parser.add_argument(
-        "--sam2_autocast_bfloat16",
+        "--sam3_autocast_bfloat16",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use CUDA bfloat16 autocast during SAM2 propagation to reduce GPU memory.",
+        help="Use CUDA bfloat16 autocast during SAM3 propagation to reduce GPU memory.",
     )
     parser.add_argument(
         "--occlusion_mode",
         choices=("none", "keyframe", "until_next_visible"),
         default="keyframe",
         help=(
-            "How to treat annotated keyframes where mask1/mask2 is missing. "
+            "How to treat annotated keyframes where a ball/hand/basket mask is missing. "
             "'keyframe' clears only that frame; 'until_next_visible' clears from "
             "that keyframe until the next keyframe where the object has a mask."
         ),
@@ -360,6 +370,10 @@ def build_propagation_segments(
 
 
 def central_mask_path(mask_dir: Path, frame_id: int, slot: str) -> Path:
+    return mask_dir / f"frame_{frame_id:06d}_{MASK_FILE_STEMS.get(slot, slot)}.png"
+
+
+def legacy_central_mask_path(mask_dir: Path, frame_id: int, slot: str) -> Path:
     return mask_dir / f"frame_{frame_id:06d}_{slot}.png"
 
 
@@ -370,6 +384,8 @@ def metadata_path(mask_dir: Path, frame_id: int) -> Path:
 def load_mask(mask_dir: Path, frame_id: int, frame_dir: Path, slot: str) -> np.ndarray | None:
     candidates = [
         central_mask_path(mask_dir, frame_id, slot),
+        legacy_central_mask_path(mask_dir, frame_id, slot),
+        frame_dir / f"{MASK_FILE_STEMS.get(slot, slot)}.png",
         frame_dir / f"{slot}.png",
     ]
     for path in candidates:
@@ -384,7 +400,14 @@ def load_mask(mask_dir: Path, frame_id: int, frame_dir: Path, slot: str) -> np.n
 def is_annotation_keyframe(mask_dir: Path, frame_id: int) -> bool:
     if metadata_path(mask_dir, frame_id).exists():
         return True
-    return any(central_mask_path(mask_dir, frame_id, slot).exists() for slot in MASK_SLOTS)
+    return any(
+        path.exists()
+        for slot in MASK_SLOTS
+        for path in (
+            central_mask_path(mask_dir, frame_id, slot),
+            legacy_central_mask_path(mask_dir, frame_id, slot),
+        )
+    )
 
 
 def collect_annotations(
@@ -451,8 +474,9 @@ def build_occluded_indices(
 def clear_output_dir(output_dir: Path) -> None:
     if not output_dir.exists():
         return
-    for path in output_dir.glob("frame_*_mask*.png"):
-        path.unlink()
+    for pattern in ("frame_*_ball_mask.png", "frame_*_basket_mask.png", "frame_*_mask*.png"):
+        for path in output_dir.glob(pattern):
+            path.unlink()
     summary = output_dir / "propagation_summary.json"
     if summary.exists():
         summary.unlink()
@@ -490,24 +514,25 @@ def save_mask(
     save_central_masks: bool,
 ) -> Path:
     mask_uint8 = np.squeeze(mask).astype(np.uint8) * 255
-    path = frame_dir / f"{slot}.png"
+    file_stem = MASK_FILE_STEMS.get(slot, slot)
+    path = frame_dir / f"{file_stem}.png"
     if save_central_masks:
         output_dir.mkdir(parents=True, exist_ok=True)
-        path = output_dir / f"frame_{frame_id:06d}_{slot}.png"
+        path = output_dir / f"frame_{frame_id:06d}_{file_stem}.png"
         cv2.imwrite(str(path), mask_uint8)
     if save_in_frame_dir:
-        frame_path = frame_dir / f"{slot}.png"
+        frame_path = frame_dir / f"{file_stem}.png"
         cv2.imwrite(str(frame_path), mask_uint8)
         if not save_central_masks:
             path = frame_path
     return path
 
 
-def sam2_autocast_context(args: argparse.Namespace) -> Any:
+def sam3_autocast_context(args: argparse.Namespace) -> Any:
     import torch
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    if args.sam2_autocast_bfloat16 and str(device).startswith("cuda"):
+    if args.sam3_autocast_bfloat16 and str(device).startswith("cuda"):
         return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
     return nullcontext()
 
@@ -573,15 +598,15 @@ def propagate_slots(
 
     selected_seeds = [seed for seed in seeds if seed.slot in slots]
     seed_indices: list[int] = []
-    with sam2_autocast_context(args):
+    with sam3_autocast_context(args):
         for seed in selected_seeds:
             local_idx = frame_id_to_idx[seed.frame_id]
             seed_indices.append(local_idx)
             predictor.add_new_mask(
                 inference_state=inference_state,
                 frame_idx=local_idx,
-                obj_id=SAM2_OBJECT_IDS[seed.slot],
-                mask=seed.mask,
+                obj_id=SAM3_OBJECT_IDS[seed.slot],
+                mask=mask_to_torch(seed.mask),
             )
             print(f"[seed] frame={seed.frame_id} idx={local_idx} slot={seed.slot}")
 
@@ -590,21 +615,25 @@ def propagate_slots(
 
         def consume_outputs(*, reverse: bool) -> None:
             start_frame_idx = min(seed_indices) if reverse else None
-            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            propagate_preflight = True
+            for out_frame_idx, out_obj_ids, _, out_masks, _ in predictor.propagate_in_video(
                 inference_state,
                 start_frame_idx=start_frame_idx,
+                max_frame_num_to_track=len(frames),
                 reverse=reverse,
+                propagate_preflight=propagate_preflight,
             ):
+                propagate_preflight = False
                 local_idx = int(out_frame_idx)
                 if not 0 <= local_idx < len(frames):
                     continue
                 frame_id, frame_dir = frames[local_idx]
                 for obj_offset, obj_id in enumerate(out_obj_ids):
                     obj_id_int = int(obj_id.item()) if hasattr(obj_id, "item") else int(obj_id)
-                    slot = SAM2_SLOTS_BY_OBJECT_ID.get(obj_id_int)
+                    slot = SAM3_SLOTS_BY_OBJECT_ID.get(obj_id_int)
                     if slot not in slots:
                         continue
-                    mask = tensor_to_numpy(out_mask_logits[obj_offset] > args.mask_threshold)
+                    mask = tensor_to_numpy(out_masks[obj_offset] > args.mask_threshold)
                     mask = np.squeeze(mask).astype(bool)
                     if local_idx in occluded_indices_by_slot.get(slot, set()):
                         mask = np.zeros_like(mask, dtype=bool)
@@ -620,13 +649,13 @@ def propagate_slots(
                     saved_keys.add((frame_id, slot))
 
         print(
-            f"[sam2 propagate] slots={slots} direction=forward "
+            f"[sam3 propagate] slots={slots} direction=forward "
             f"frames={len(frames)}"
         )
         consume_outputs(reverse=False)
         if args.reverse and min(seed_indices) > 0:
             print(
-                f"[sam2 propagate] slots={slots} direction=reverse "
+                f"[sam3 propagate] slots={slots} direction=reverse "
                 f"frames=0..{min(seed_indices)} count={min(seed_indices) + 1}"
             )
             consume_outputs(reverse=True)
@@ -666,7 +695,7 @@ def propagate_slot_window(
     frame_id_to_idx = {frame_id: idx for idx, (frame_id, _) in enumerate(frames)}
     chunk_frames = frames[start_idx : end_idx + 1]
     clear_video_dir(chunk_video_dir)
-    prepare_sam2_video_frames(chunk_frames, args.image_name, chunk_video_dir)
+    prepare_sam3_video_frames(chunk_frames, args.image_name, chunk_video_dir)
 
     try:
         inference_state = predictor.init_state(
@@ -680,7 +709,7 @@ def propagate_slot_window(
 
     seed_indices: list[int] = []
     saved_keys: set[tuple[int, str]] = set()
-    with sam2_autocast_context(args):
+    with sam3_autocast_context(args):
         for seed in seed_inputs:
             global_idx = frame_id_to_idx[seed.frame_id]
             if not start_idx <= global_idx <= end_idx:
@@ -690,18 +719,20 @@ def propagate_slot_window(
             predictor.add_new_mask(
                 inference_state=inference_state,
                 frame_idx=local_idx,
-                obj_id=SAM2_OBJECT_IDS[slot],
-                mask=seed.mask,
+                obj_id=SAM3_OBJECT_IDS[slot],
+                mask=mask_to_torch(seed.mask),
             )
 
         if not seed_indices:
             return saved_keys
 
         start_frame_idx = max(seed_indices) if reverse else min(seed_indices)
-        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+        for out_frame_idx, out_obj_ids, _, out_masks, _ in predictor.propagate_in_video(
             inference_state,
             start_frame_idx=start_frame_idx,
+            max_frame_num_to_track=len(chunk_frames),
             reverse=reverse,
+            propagate_preflight=True,
         ):
             local_idx = int(out_frame_idx)
             if not 0 <= local_idx < len(chunk_frames):
@@ -710,9 +741,9 @@ def propagate_slot_window(
             frame_id, frame_dir = frames[global_idx]
             for obj_offset, obj_id in enumerate(out_obj_ids):
                 obj_id_int = int(obj_id.item()) if hasattr(obj_id, "item") else int(obj_id)
-                if SAM2_SLOTS_BY_OBJECT_ID.get(obj_id_int) != slot:
+                if SAM3_SLOTS_BY_OBJECT_ID.get(obj_id_int) != slot:
                     continue
-                mask = tensor_to_numpy(out_mask_logits[obj_offset] > args.mask_threshold)
+                mask = tensor_to_numpy(out_masks[obj_offset] > args.mask_threshold)
                 mask = np.squeeze(mask).astype(bool)
                 if global_idx in occluded_indices:
                     mask = np.zeros_like(mask, dtype=bool)
@@ -891,7 +922,7 @@ def propagate_segment(
 
     saved_keys: set[tuple[int, str]] = set()
     if args.chunked:
-        chunk_video_root = mask_dir / "_sam2_video_chunks" / f"episode_{segment.episode_index:04d}"
+        chunk_video_root = mask_dir / "_sam3_video_chunks" / f"episode_{segment.episode_index:04d}"
         chunk_video_root.mkdir(parents=True, exist_ok=True)
         for slot in MASK_SLOTS:
             slot_seeds = [seed for seed in seeds if seed.slot == slot]
@@ -913,13 +944,13 @@ def propagate_segment(
             )
             release_cuda_cache()
     else:
-        video_dir = mask_dir / "_sam2_video_frames" / f"episode_{segment.episode_index:04d}"
+        video_dir = mask_dir / "_sam3_video_frames" / f"episode_{segment.episode_index:04d}"
         clear_video_dir(video_dir)
         print(
             f"[prepare demo video] episode={segment.episode_index} "
             f"frames={len(segment.frames)} dir={video_dir}"
         )
-        prepare_sam2_video_frames(segment.frames, args.image_name, video_dir)
+        prepare_sam3_video_frames(segment.frames, args.image_name, video_dir)
         slot_groups = [(slot,) for slot in MASK_SLOTS] if args.separate_objects else [tuple(MASK_SLOTS)]
         for slots in slot_groups:
             slot_seeds = [seed for seed in seeds if seed.slot in slots]
@@ -999,7 +1030,7 @@ def save_summary(
         "save_central_masks": args.save_central_masks,
         "offload_video_to_cpu": args.offload_video_to_cpu,
         "offload_state_to_cpu": args.offload_state_to_cpu,
-        "sam2_autocast_bfloat16": args.sam2_autocast_bfloat16,
+        "sam3_autocast_bfloat16": args.sam3_autocast_bfloat16,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
     (output_dir / "propagation_summary.json").write_text(
@@ -1018,7 +1049,7 @@ def main() -> None:
         raise RuntimeError(f"No frame_* directories with {args.image_name} found under {frame_root}")
     seeds, annotated_slots_by_frame, _ = collect_annotations(frames, mask_dir)
     if not seeds:
-        raise RuntimeError(f"No saved mask1/mask2 keyframes found in {mask_dir}")
+        raise RuntimeError(f"No saved ball/hand/basket keyframes found in {mask_dir}")
     segments = build_propagation_segments(args, frame_root, frames)
 
     if args.overwrite:
@@ -1032,7 +1063,7 @@ def main() -> None:
         f"segment_by_demo={args.segment_by_demo}"
     )
 
-    predictor = load_sam2_video_predictor(args)
+    predictor = load_sam3_video_predictor(args)
     all_saved_keys: set[tuple[int, str]] = set()
     all_occluded_frame_ids_by_slot: dict[str, set[int]] = {slot: set() for slot in MASK_SLOTS}
     segment_summaries: list[dict[str, Any]] = []

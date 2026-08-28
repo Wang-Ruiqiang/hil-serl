@@ -30,17 +30,15 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-0",
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-1",
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-7-14-2",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-18-59",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-49-48",
     ],
     "Recorded data root(s) containing frame_xxx folders.",
 )
 flags.DEFINE_string("exp_name", "tennis_ball_pick", "Experiment name.")
 flags.DEFINE_string(
     "classifier_task",
-    "pick",
+    "place",
     "Classifier task: pick or place. Controls default label/range/output paths.",
 )
 flags.DEFINE_integer("enable_tactile", 1, "Whether to include tactile_data in observations.")

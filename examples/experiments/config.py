@@ -24,15 +24,25 @@ class DefaultTrainingConfig:
     #   "resnet": train ResNet10 from scratch.
     #   "resnet-pretrained": frozen ImageNet ResNet10 + trainable readout head.
     #   "vit" / "vit-small": trainable lightweight ViT-style image encoder.
+    #   "vit-grounded": ViT trunk with a spatial-learned-embeddings readout
+    #     and a grounding query supervised by the CGL mask loss; the trunk is
+    #     fine-tuned by TD + CGL together (never frozen).
     # Mask images, when present, go through the gaze agent's small mask CNN,
     # not through this visual encoder.
     encoder_type: str = "resnet-pretrained"
+    # Only read by "vit-grounded"; empty means train the trunk from scratch.
+    encoder_checkpoint_path: str | None = None
     demo_path: str = None
     checkpoint_period: int = 0
     buffer_period: int = 0
 
     eval_checkpoint_step: int = 0
     eval_n_trajs: int = 5
+
+    # Terminal reward assigned only when the actor operator presses "2" to
+    # mark the current episode as an unrecoverable manual failure. A value of
+    # 0 disables the extra penalty; max-length timeouts do not use this value.
+    manual_failure_penalty: float = 0.0
 
     image_keys: List[str] = None
     classifier_keys: List[str] = None

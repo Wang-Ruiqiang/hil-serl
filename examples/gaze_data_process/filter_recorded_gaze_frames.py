@@ -10,12 +10,19 @@ import numpy as np
 from absl import app, flags
 
 
+# ============================== 编辑这里 ==============================
+# 要标注的录制目录。换数据集直接改这一行。
+ROOT = ("/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/"
+        "tennis_ball_pick_and_place-2026-08-25_17-28-19")
+# =====================================================================
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
     "root",
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
-    "Recording root containing frame_* folders and recording_metadata.json.",
+    ROOT,
+    "Recording root containing frame_* folders and recording_metadata.json. "
+    "Defaults to the ROOT above.",
 )
 flags.DEFINE_string(
     "metadata",

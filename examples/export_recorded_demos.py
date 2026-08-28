@@ -24,12 +24,14 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ROBOT_INFRA_DIR))
 
+from serl_launcher.utils.gaze_mask_utils import gaze_phase_onehot  # noqa: E402
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_multi_string(
     "frame_root",
     [
-        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
+        "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-18-59",
     ],
     "Recorded data root(s) containing frame_xxx folders and recording_metadata.json.",
 )
@@ -90,6 +92,11 @@ flags.DEFINE_integer(
     0,
     "Optional debug limit. 0 means export all transitions.",
 )
+flags.DEFINE_integer(
+    "max_episodes",
+    30,
+    "Maximum successful episodes to export across each root. 0 means all.",
+)
 flags.DEFINE_boolean(
     "use_gaze_target_mask",
     True,
@@ -109,6 +116,16 @@ flags.DEFINE_string(
     "mask2_key",
     "front_camera_mask2",
     "Observation key for the second predicted/recorded target mask.",
+)
+flags.DEFINE_string(
+    "hand_mask_key",
+    "front_camera_hand_mask",
+    "Optional observation key for the recorded hand mask.",
+)
+flags.DEFINE_string(
+    "phase_scan_path",
+    "examples/encoder_training/runs/pick_classifier_phase_scan.json",
+    "Classifier phase scan used to assign pick/place state. Empty uses recorded gaze.",
 )
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
@@ -185,22 +202,30 @@ def _read_mask(mask_path: Path, target_shape=(128, 128)):
 def _mask_paths(frame_dir: Path):
     frame_id = _frame_number(frame_dir)
     central_names = {
-        "mask1": f"frame_{frame_id:06d}_mask1.png",
-        "mask2": f"frame_{frame_id:06d}_mask2.png",
+        "mask1": (f"frame_{frame_id:06d}_ball_mask.png", f"frame_{frame_id:06d}_mask1.png"),
+        "hand": (f"frame_{frame_id:06d}_hand_mask.png",),
+        "mask2": (f"frame_{frame_id:06d}_basket_mask.png", f"frame_{frame_id:06d}_mask2.png"),
     }
     root = frame_dir.parent
     return {
         "mask1": [
+            frame_dir / "ball_mask.png",
             frame_dir / "mask1.png",
             frame_dir / "rs_mask_obj0.png",
-            root / "sam_masks" / central_names["mask1"],
-            root / "sam_masks" / "propagated" / central_names["mask1"],
+            *(root / "sam_masks" / name for name in central_names["mask1"]),
+            *(root / "sam_masks" / "propagated" / name for name in central_names["mask1"]),
+        ],
+        "hand": [
+            frame_dir / "hand_mask.png",
+            *(root / "sam_masks" / name for name in central_names["hand"]),
+            *(root / "sam_masks" / "propagated" / name for name in central_names["hand"]),
         ],
         "mask2": [
+            frame_dir / "basket_mask.png",
             frame_dir / "mask2.png",
             frame_dir / "rs_mask_obj1.png",
-            root / "sam_masks" / central_names["mask2"],
-            root / "sam_masks" / "propagated" / central_names["mask2"],
+            *(root / "sam_masks" / name for name in central_names["mask2"]),
+            *(root / "sam_masks" / "propagated" / name for name in central_names["mask2"]),
         ],
     }
 
@@ -247,14 +272,10 @@ def _mask_bbox_inside(inner_mask, outer_mask, margin_px: int = 2):
 
 
 def _phase_onehot(selected_index):
-    phase = np.zeros((3,), dtype=np.float32)
-    if selected_index == 0:
-        phase[0] = 1.0
-    elif selected_index == 1:
-        phase[1] = 1.0
-    else:
-        phase[2] = 1.0
-    return phase
+    # Delegate to the shared implementation so this cannot drift from the
+    # width the env wrappers append -- a local copy is how demos would end up
+    # one column wider than the observation space they are replayed into.
+    return gaze_phase_onehot(selected_index)
 
 
 def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
@@ -313,8 +334,13 @@ def _read_front_camera_mask(
     frame_dir: Path,
     rgb_image,
     target_shape=(128, 128),
+    selected_index=None,
 ):
-    selected_mask, selected_index = _read_gaze_target_mask(frame_dir, target_shape)
+    if selected_index in (0, 1):
+        slot = "mask1" if selected_index == 0 else "mask2"
+        selected_mask = _first_existing_mask(frame_dir, slot, target_shape)
+    else:
+        selected_mask, selected_index = _read_gaze_target_mask(frame_dir, target_shape)
     return _mask_to_image(selected_mask), _phase_onehot(selected_index)
 
 
@@ -387,6 +413,7 @@ def _read_frame_data(
     frame_dir: Path,
     robot_urdf_path: str,
     image_keys,
+    phase_selected_index=None,
 ):
     obs = {}
     rgb_image = None
@@ -403,11 +430,14 @@ def _read_frame_data(
             obs[image_key], gaze_phase = _read_front_camera_mask(
                 frame_dir,
                 rgb_image,
+                selected_index=phase_selected_index,
             )
         elif image_key == FLAGS.mask1_key:
             obs[image_key] = _read_slot_mask_image(frame_dir, "mask1")
         elif image_key == FLAGS.mask2_key:
             obs[image_key] = _read_slot_mask_image(frame_dir, "mask2")
+        elif image_key == FLAGS.hand_mask_key:
+            obs[image_key] = _read_slot_mask_image(frame_dir, "hand")
         else:
             raise ValueError(f"Unsupported image key for RL demo export: {image_key}")
     if FLAGS.gaze_target_mask_key in image_keys and gaze_phase is None:
@@ -416,6 +446,7 @@ def _read_frame_data(
         obs[FLAGS.gaze_target_mask_key], gaze_phase = _read_front_camera_mask(
             frame_dir,
             rgb_image,
+            selected_index=phase_selected_index,
         )
 
     tcp_pos, tcp_ori = _read_ee_pose(frame_dir, robot_urdf_path)
@@ -480,8 +511,8 @@ def _episodes_from_metadata(root: Path):
         return _all_frame_ranges(root)
 
     episodes = metadata.get("episode_ranges", [])
-    if not FLAGS.use_filtered_ranges:
-        for episode in episodes:
+    for episode in episodes:
+        if not FLAGS.use_filtered_ranges or not episode.get("kept_frame_ranges"):
             episode["kept_frame_ranges"] = [
                 {
                     "start_frame": int(episode["start_frame"]),
@@ -490,6 +521,26 @@ def _episodes_from_metadata(root: Path):
                 }
             ]
     return episodes
+
+
+def _load_phase_switches(path: str):
+    if not path:
+        return {}
+    phase_path = Path(path).expanduser()
+    if not phase_path.is_absolute():
+        phase_path = REPO_ROOT / phase_path
+    if not phase_path.is_file():
+        raise FileNotFoundError(f"Phase scan does not exist: {phase_path}")
+    payload = json.loads(phase_path.read_text())
+    switches = {}
+    for result in payload.get("results", []):
+        first_place_frame = result.get("first_positive_frame")
+        if result.get("excluded") or first_place_frame is None:
+            continue
+        switches[(str(result["dataset"]), int(result["episode_index"]))] = int(
+            first_place_frame
+        )
+    return switches
 
 
 def _image_keys_from_config():
@@ -543,9 +594,25 @@ def _transition_from_frames(
     reward: float,
     done: bool,
     episode_index: int,
+    phase_switch_frame=None,
 ):
-    obs, action = _read_frame_data(current_frame, robot_urdf_path, image_keys)
-    next_obs, _ = _read_frame_data(next_frame, robot_urdf_path, image_keys)
+    def selected_index(frame):
+        if phase_switch_frame is None:
+            return None
+        return int(_frame_number(frame) >= phase_switch_frame)
+
+    obs, action = _read_frame_data(
+        current_frame,
+        robot_urdf_path,
+        image_keys,
+        phase_selected_index=selected_index(current_frame),
+    )
+    next_obs, _ = _read_frame_data(
+        next_frame,
+        robot_urdf_path,
+        image_keys,
+        phase_selected_index=selected_index(next_frame),
+    )
 
     action = np.asarray(action, dtype=np.float32)
     if action.shape != (7,):
@@ -574,7 +641,7 @@ def _transition_from_frames(
     return copy.deepcopy(transition)
 
 
-def _iter_episode_pairs(root: Path, episode):
+def _iter_episode_pairs(root: Path, episode, phase_switches):
     kept_ranges = episode.get("kept_frame_ranges") or []
     if FLAGS.success_only and not bool(episode.get("success", False)):
         return
@@ -582,7 +649,8 @@ def _iter_episode_pairs(root: Path, episode):
         return
 
     episode_index = int(episode.get("episode_index", 0))
-    for frame_range in kept_ranges:
+    phase_switch_frame = phase_switches.get((root.name, episode_index))
+    for range_index, frame_range in enumerate(kept_ranges):
         start = int(frame_range["start_frame"])
         end = int(frame_range["end_frame"])
         if end <= start:
@@ -592,11 +660,21 @@ def _iter_episode_pairs(root: Path, episode):
             next_frame = _frame_dir(root, frame_id + 1)
             if not current_frame.exists() or not next_frame.exists():
                 continue
+            is_final_transition = (
+                range_index == len(kept_ranges) - 1 and frame_id + 1 == end
+            )
             is_success_transition = bool(episode.get("success", False)) and (
                 _read_recorded_success(current_frame)
                 or _read_recorded_success(next_frame)
+                or is_final_transition
             )
-            yield current_frame, next_frame, episode_index, is_success_transition
+            yield (
+                current_frame,
+                next_frame,
+                episode_index,
+                is_success_transition,
+                phase_switch_frame,
+            )
             if is_success_transition:
                 return
 
@@ -606,6 +684,7 @@ def main(_):
         REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"
     )
     image_keys = _image_keys_from_config()
+    phase_switches = _load_phase_switches(FLAGS.phase_scan_path)
     output_dir = (REPO_ROOT / FLAGS.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -621,26 +700,47 @@ def main(_):
     print(f"[source] robot_urdf={robot_urdf_path}")
     print(f"[source] use_filtered_ranges={FLAGS.use_filtered_ranges}")
     print(f"[source] disable_image_crop={FLAGS.disable_image_crop}")
+    print(f"[source] phase_scan_path={FLAGS.phase_scan_path or '<recorded gaze>'}")
 
     transitions = []
     episode_count = 0
     skipped = 0
     for root in valid_roots:
         episodes = _episodes_from_metadata(root)
-        episode_count += sum(
-            1
+        selected_episodes = [
+            episode
             for episode in episodes
             if (not FLAGS.success_only or bool(episode.get("success", False)))
+        ]
+        if FLAGS.max_episodes > 0:
+            selected_episodes = selected_episodes[: FLAGS.max_episodes]
+        episode_count += len(selected_episodes)
+        pair_count = sum(
+            1
+            for episode in selected_episodes
+            for _ in _iter_episode_pairs(root, episode, phase_switches)
         )
-        pair_count = sum(1 for episode in episodes for _ in _iter_episode_pairs(root, episode))
-        print(f"[source] {root} episodes={len(episodes)} transition_pairs={pair_count}")
+        print(
+            f"[source] {root} episodes={len(episodes)} "
+            f"selected_episodes={len(selected_episodes)} transition_pairs={pair_count}"
+        )
 
         pbar = tqdm(
-            (item for episode in episodes for item in _iter_episode_pairs(root, episode)),
+            (
+                item
+                for episode in selected_episodes
+                for item in _iter_episode_pairs(root, episode, phase_switches)
+            ),
             total=pair_count,
             desc=root.name,
         )
-        for current_frame, next_frame, episode_index, is_last_transition in pbar:
+        for (
+            current_frame,
+            next_frame,
+            episode_index,
+            is_last_transition,
+            phase_switch_frame,
+        ) in pbar:
             try:
                 transition = _transition_from_frames(
                     current_frame,
@@ -650,6 +750,7 @@ def main(_):
                     reward=1.0 if is_last_transition else 0.0,
                     done=bool(is_last_transition),
                     episode_index=episode_index,
+                    phase_switch_frame=phase_switch_frame,
                 )
             except Exception as exc:
                 skipped += 1
@@ -678,7 +779,7 @@ def main(_):
                 f"[check] {FLAGS.gaze_target_mask_key} shape={mask_image.shape} "
                 f"active_pixels={int(np.count_nonzero(mask_image))}"
             )
-        for mask_key in (FLAGS.mask1_key, FLAGS.mask2_key):
+        for mask_key in (FLAGS.mask1_key, FLAGS.hand_mask_key, FLAGS.mask2_key):
             if mask_key in first_obs:
                 mask_image = np.asarray(first_obs[mask_key])
                 print(
@@ -687,7 +788,7 @@ def main(_):
                 )
         print(
             f"[check] state_shape={first_state.shape} "
-            f"phase_onehot={first_state[..., -3:]}"
+            f"phase_onehot={first_state[..., -2:]}"
         )
         first_action = np.asarray(transitions[0]["actions"], dtype=np.float32)
         print(f"[check] first_action_rpy={first_action[3:6]}")

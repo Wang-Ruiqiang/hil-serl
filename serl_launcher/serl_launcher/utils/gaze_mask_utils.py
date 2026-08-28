@@ -286,15 +286,31 @@ def mask_to_image(mask, reference_image=None, channels=3):
     return image
 
 
+# Width of the phase one-hot appended to the proprioceptive state. Every
+# consumer slices `state[..., -PHASE_ONEHOT_DIM:]`, so this is the single place
+# the width is defined.
+#
+# Two slots, not three: the old third slot meant "no target selected" and never
+# fired -- all 8015 recorded demo transitions carry [1,0,0] or [0,1,0] -- so it
+# was a dead input dimension. Dropping it changes the state width from 11 to 10,
+# which means demos and replay buffers recorded before this are one column wider;
+# train_rlpd's prepare_replay_transition truncates them with `state[..., :10]`,
+# and because the dead slot was last, that truncation is exactly the right
+# conversion rather than an approximation.
+PHASE_ONEHOT_DIM = 2
+
+
 def gaze_phase_onehot(selected_mask_index):
-    """Encode selected gaze target as [mask1, mask2, none]."""
-    phase = np.zeros((3,), dtype=np.float32)
+    """Encode selected gaze target as [mask1, mask2].
+
+    Neither slot is set when no target is selected, which the downstream
+    consumers read as "not picking" -- the same thing the old [0, 0, 1] meant.
+    """
+    phase = np.zeros((PHASE_ONEHOT_DIM,), dtype=np.float32)
     if selected_mask_index == 0:
         phase[0] = 1.0
     elif selected_mask_index == 1:
         phase[1] = 1.0
-    else:
-        phase[2] = 1.0
     return phase
 
 

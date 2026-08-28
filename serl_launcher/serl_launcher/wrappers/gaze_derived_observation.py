@@ -7,6 +7,7 @@ import numpy as np
 
 from serl_launcher.utils.gaze_mask_utils import (
     add_gaze_mask_image_to_obs,
+    PHASE_ONEHOT_DIM,
     append_gaze_phase_to_state,
     compute_all_index_target_mask_fields,
     compute_gaze_target_mask_fields,
@@ -104,7 +105,7 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         if self.use_gaze_target_mask and "state" in spaces:
             state_space = spaces["state"]
             state_shape = list(state_space.shape)
-            state_shape[-1] += 3
+            state_shape[-1] += PHASE_ONEHOT_DIM
             spaces["state"] = gym.spaces.Box(
                 low=-np.inf,
                 high=np.inf,

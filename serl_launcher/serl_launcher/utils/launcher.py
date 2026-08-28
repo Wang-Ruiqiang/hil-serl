@@ -14,7 +14,10 @@ from serl_launcher.agents.continuous.sac import SACAgent
 from serl_launcher.agents.continuous.sac_hybrid_single import SACAgentHybridSingleArm
 from serl_launcher.agents.continuous.sac_hybrid_single_gaze import SACAgentHybridSingleArmGaze
 from serl_launcher.agents.continuous.sac_hybrid_dual import SACAgentHybridDualArm
-from serl_launcher.vision.data_augmentations import batched_random_crop
+from serl_launcher.vision.data_augmentations import (
+    batched_random_crop,
+    batched_temporal_random_crop,
+)
 
 ##############################################################################
 
@@ -156,6 +159,13 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
     sample_action,
     image_keys=("image",),
     encoder_type="resnet-pretrained",
+    encoder_checkpoint_path=None,
+    freeze_encoder=False,
+    tactile_encoder_type="cnn",
+    vit_image_size=(224, 224),
+    vit_hidden_dim=192,
+    vit_num_layers=4,
+    vit_num_heads=6,
     reward_bias=0.0,
     target_entropy=None,
     discount=0.97,
@@ -170,12 +180,50 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
     mask_pick_place_phase_control=False,
     return_raw_attention=False,
     return_mask_encoder_attention=False,
+    return_feature_debug=False,
 ):
+    augmentation_image_keys = image_keys
+    latest_only_augmentation_keys = ()
+    if encoder_type == "vit-gaze":
+        # No mask keys: vit-gaze has no mask observation and no CGL target, so
+        # front_camera and tactile_data are the only images to crop. The shared
+        # rng that keeps the RGB and its masks aligned in the branch below is
+        # irrelevant here for the same reason.
+        augmentation_image_keys = tuple(
+            key for key in image_keys if key in ("front_camera", "tactile_data")
+        )
+        latest_only_augmentation_keys = ("tactile_data",)
+    elif encoder_type == "vit-grounded":
+        # front_camera_mask feeds the mask CNN branch and front_camera_mask1 is
+        # the CGL grounding target, so both must be cropped with the RGB --
+        # data_augmentation_fn reuses one rng across keys, which is what keeps
+        # the crops aligned. Leaving mask1 out shifts the supervision target by
+        # up to 4px against the image, roughly half a token cell.
+        # front_camera_mask2 is genuinely unused by this pipeline (no feature
+        # suppression), so it stays out.
+        augmentation_image_keys = tuple(
+            key
+            for key in image_keys
+            if key in (
+                "front_camera",
+                "front_camera_mask",
+                "front_camera_mask1",
+                "tactile_data",
+            )
+        )
+        latest_only_augmentation_keys = ("tactile_data",)
     agent = SACAgentHybridSingleArmGaze.create_pixels(
         jax.random.PRNGKey(seed),
         sample_obs,
         sample_action,
         encoder_type=encoder_type,
+        encoder_checkpoint_path=encoder_checkpoint_path,
+        freeze_encoder=freeze_encoder,
+        tactile_encoder_type=tactile_encoder_type,
+        vit_image_size=vit_image_size,
+        vit_hidden_dim=vit_hidden_dim,
+        vit_num_layers=vit_num_layers,
+        vit_num_heads=vit_num_heads,
         use_proprio=True,
         image_keys=image_keys,
         policy_kwargs={
@@ -206,7 +254,11 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
         critic_subsample_size=None,
         reward_bias=reward_bias,
         target_entropy=target_entropy,
-        augmentation_function=make_batch_augmentation_func(image_keys),
+        augmentation_function=make_batch_augmentation_func(
+            augmentation_image_keys,
+            temporal_consistent=False,
+            latest_only_keys=latest_only_augmentation_keys,
+        ),
         gaze_regularization_weight=gaze_regularization_weight,
         gaze_heatmap_key=gaze_heatmap_key,
         gaze_heatmap_size=gaze_heatmap_size,
@@ -218,6 +270,7 @@ def make_gaze_sac_pixel_agent_hybrid_single_arm(
         mask_pick_place_phase_control=mask_pick_place_phase_control,
         return_raw_attention=return_raw_attention,
         return_mask_encoder_attention=return_mask_encoder_attention,
+        return_feature_debug=return_feature_debug,
     )
     return agent
 
@@ -282,15 +335,43 @@ def linear_schedule(step):
     decayed_value = init_value + (end_value - init_value) * (linear_step / decay_steps)
     return decayed_value
     
-def make_batch_augmentation_func(image_keys) -> callable:
+def make_batch_augmentation_func(
+    image_keys,
+    *,
+    temporal_consistent=False,
+    latest_only_keys=(),
+) -> callable:
+
+    latest_only_keys = frozenset(latest_only_keys)
 
     def data_augmentation_fn(rng, observations):
         for pixel_key in image_keys:
+            image = observations[pixel_key]
+            if pixel_key in latest_only_keys:
+                if image.ndim != 5:
+                    raise ValueError(
+                        f"Expected BTHWC for latest-only augmentation, got "
+                        f"{pixel_key}={image.shape}."
+                    )
+                latest = batched_random_crop(
+                    image[:, -1],
+                    rng,
+                    padding=4,
+                    num_batch_dims=1,
+                )
+                augmented = image.at[:, -1].set(latest)
+            elif temporal_consistent:
+                augmented = batched_temporal_random_crop(image, rng, padding=4)
+            else:
+                augmented = batched_random_crop(
+                    image,
+                    rng,
+                    padding=4,
+                    num_batch_dims=2,
+                )
             observations = observations.copy(
                 add_or_replace={
-                    pixel_key: batched_random_crop(
-                        observations[pixel_key], rng, padding=4, num_batch_dims=2
-                    )
+                    pixel_key: augmented
                 }
             )
         return observations

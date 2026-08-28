@@ -61,6 +61,9 @@ class EpisodeDataRecorder:
         self.rmiddle_depth_buffer = []
         self.et_world_payload_buffer = []
         self.pupil_gaze_buffer = []
+        self.recorded_pick_success_buffer = []
+        self.recorded_place_success_buffer = []
+        self.record_classifier_success = False
 
         self._pupil_ctx = None
         self._pupil_sub = None
@@ -139,6 +142,27 @@ class EpisodeDataRecorder:
         finally:
             self.cur_ep_start = None
 
+    def set_recorded_success(self, frame_id, pick_success=False, place_success=False):
+        """Attach mutually exclusive classifier success labels to a frame."""
+        frame_id = int(frame_id)
+        if frame_id < 0:
+            return
+        while len(self.recorded_pick_success_buffer) <= frame_id:
+            self.recorded_pick_success_buffer.append(0)
+            self.recorded_place_success_buffer.append(0)
+
+        # A frame can be either a pick-success frame or a place-success frame.
+        if bool(place_success):
+            self.recorded_place_success_buffer[frame_id] = 1
+            self.recorded_pick_success_buffer[frame_id] = 0
+        elif bool(pick_success):
+            self.recorded_pick_success_buffer[frame_id] = 1
+            self.recorded_place_success_buffer[frame_id] = 0
+        else:
+            self.recorded_pick_success_buffer[frame_id] = 0
+            self.recorded_place_success_buffer[frame_id] = 0
+        self.record_classifier_success = True
+
     def _write_image(self, path, image):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         ok = cv2.imwrite(path, image)
@@ -186,10 +210,12 @@ class EpisodeDataRecorder:
             frame_dir = os.path.join(self.frame_save_path, f"frame_{frame_id}")
             os.makedirs(frame_dir, exist_ok=True)
 
+            front_image = None
             if len(self.front_color_buffer) > frame_id:
-                self._write_image(os.path.join(frame_dir, "color_image.jpg"), self.front_color_buffer[frame_id])
+                front_image = self.front_color_buffer[frame_id]
+                self._write_image(os.path.join(frame_dir, "color_image.jpg"), front_image)
                 if self.enable_gaze:
-                    self._write_image(os.path.join(self.rs_mirror_dir, f"{frame_id}.jpg"), self.front_color_buffer[frame_id])
+                    self._write_image(os.path.join(self.rs_mirror_dir, f"{frame_id}.jpg"), front_image)
                 if len(self.front_depth_buffer) > frame_id and self.front_depth_buffer[frame_id] is not None:
                     self._write_image(os.path.join(frame_dir, "depth_image.png"), self.front_depth_buffer[frame_id])
             if len(self.side_color_buffer) > frame_id:
@@ -230,6 +256,28 @@ class EpisodeDataRecorder:
                     fmt="%.6f",
                 )
 
+            if self.record_classifier_success:
+                pick_success = (
+                    self.recorded_pick_success_buffer[frame_id]
+                    if len(self.recorded_pick_success_buffer) > frame_id
+                    else 0
+                )
+                place_success = (
+                    self.recorded_place_success_buffer[frame_id]
+                    if len(self.recorded_place_success_buffer) > frame_id
+                    else 0
+                )
+                np.savetxt(
+                    os.path.join(frame_dir, "is_recorded_pick_success.txt"),
+                    [pick_success],
+                    fmt="%d",
+                )
+                np.savetxt(
+                    os.path.join(frame_dir, "is_recorded_success.txt"),
+                    [place_success],
+                    fmt="%d",
+                )
+
             if self.enable_gaze:
                 et_img = None
                 gaze = self._gaze_for_frame(frame_id)
@@ -249,6 +297,15 @@ class EpisodeDataRecorder:
                     if gaze_contact is not None:
                         with open(os.path.join(frame_dir, "gaze_contact.json"), "w") as f:
                             json.dump(gaze_contact, f, indent=2)
+                        if front_image is not None:
+                            front_gaze = self._draw_front_camera_gaze_point(
+                                front_image,
+                                gaze_contact,
+                            )
+                            self._write_image(
+                                os.path.join(frame_dir, "color_image_gaze.jpg"),
+                                front_gaze,
+                            )
             if len(self.action_buffer) > frame_id:
                 np.savetxt(
                     os.path.join(frame_dir, "action.txt"),
@@ -319,6 +376,38 @@ class EpisodeDataRecorder:
             return image_bgr
         vis = image_bgr.copy()
         u, v = uv
+        cv2.circle(vis, (u, v), 14, (0, 0, 255), 3)
+        cv2.circle(vis, (u, v), 4, (0, 255, 255), -1)
+        cv2.line(vis, (u - 22, v), (u + 22, v), (0, 0, 255), 2)
+        cv2.line(vis, (u, v - 22), (u, v + 22), (0, 0, 255), 2)
+        cv2.putText(
+            vis,
+            f"gaze ({u},{v})",
+            (max(0, u + 12), max(24, v - 12)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
+        return vis
+
+    def _draw_front_camera_gaze_point(self, image_bgr, gaze_contact):
+        """Draw the screen-mapped gaze point on the front-camera image."""
+        if image_bgr is None or gaze_contact is None:
+            return image_bgr
+        gaze_uv = gaze_contact.get("gaze_uv_in_realsense")
+        if gaze_uv is None or len(gaze_uv) < 2:
+            return image_bgr
+        try:
+            u = int(round(float(gaze_uv[0])))
+            v = int(round(float(gaze_uv[1])))
+        except (TypeError, ValueError):
+            return image_bgr
+
+        h, w = image_bgr.shape[:2]
+        if not (0 <= u < w and 0 <= v < h):
+            return image_bgr
+        vis = image_bgr.copy()
         cv2.circle(vis, (u, v), 14, (0, 0, 255), 3)
         cv2.circle(vis, (u, v), 4, (0, 255, 255), -1)
         cv2.line(vis, (u - 22, v), (u + 22, v), (0, 0, 255), 2)

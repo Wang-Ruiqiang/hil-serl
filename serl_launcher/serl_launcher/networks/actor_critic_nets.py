@@ -132,10 +132,19 @@ class Policy(nn.Module):
         temperature: float = 1.0,
         train: bool = False,
         non_squash_distribution: bool = False,
+        return_attention: bool = False,
     ) -> distrax.Distribution:
         # print("observations shape = ", observations["front_camera"].shape)
+        attention_map = None
         if self.encoder is None:
             obs_enc = observations
+        elif return_attention:
+            obs_enc, attention_map = self.encoder(
+                observations,
+                train=train,
+                stop_gradient=True,
+                return_attention=True,
+            )
         else:
             obs_enc = self.encoder(observations, train=train, stop_gradient=True)
 
@@ -179,6 +188,8 @@ class Policy(nn.Module):
                 scale_diag=stds,
             )
 
+        if return_attention:
+            return distribution, attention_map
         return distribution
     
     def get_features(self, observations):

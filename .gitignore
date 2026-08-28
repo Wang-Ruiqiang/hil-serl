@@ -33,6 +33,7 @@ sdk_log.log
 *.webm
 *.m4v
 
+docs/*
 examples/**/checkpoint_*/
 examples/**/checkpoints/
 examples/**/ckpt/
@@ -41,6 +42,8 @@ examples/**/videos/
 examples/**/wandb/
 examples/**/tensorboard/
 
+
+examples/encoder_training/runs/*
 examples/classifier_data*/*
 examples/classifier_ckpt*/*
 examples/classifier_ckpt_bottle_twist*/*

@@ -1,22 +1,23 @@
-"""Interactively label two SAM masks for recorded demo frames.
+"""Interactively label task-specific SAM masks for recorded demo frames.
 
 This script is intentionally offline: it reads saved ``frame_*`` folders and
 does not create a robot env or camera/tactile process.
 
 Controls:
-  - 1 / 2       select mask1 or mask2
+  - 1 / 2 / 3   select the task-specific mask slot
   - left drag   add a box prompt for the active mask
   - left click  add a positive point/polygon point for the active mask
   - right click add a negative point, or undo one polygon point in manual mode
-  - s           save the current frame's mask1/mask2 annotations
+  - s           save only the current frame's annotations
   - n / p       next / previous selected frame
   - c / z / d   clear active prompts / undo / delete active saved mask
-  - q / Esc     quit
+  - q / Esc     save all pending annotations and quit
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 from contextlib import nullcontext
@@ -29,15 +30,71 @@ import cv2
 import numpy as np
 
 
+DEFAULT_EXP_NAME = "tennis_ball_pick_and_place"
 DEFAULT_FRAME_ROOT = (
-    "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1"
+    "/home/ealin/workspaces/DexTacHil/data/recorded_data/"
+    "tennis_ball_pick_and_place/"
+    "tennis_ball_pick_and_place-2026-08-14_12-18-59"
 )
+CONTROL_PANEL_WIDTH = 320
 MASK_COLORS = {
     "mask1": (40, 220, 40),
+    "hand_mask": (0, 165, 255),
     "mask2": (220, 40, 220),
     "candidate": (0, 220, 255),
 }
+
+
+@dataclass(frozen=True)
+class MaskTaskSpec:
+    """Mask slots and default text prompts for one experiment."""
+
+    slots: tuple[str, ...]
+    labels: tuple[str, ...]
+    file_stems: dict[str, str]
+    prompts: dict[str, str]
+
+
+MASK_TASK_CONFIGS: dict[str, MaskTaskSpec] = {
+    "tennis_ball_pick": MaskTaskSpec(
+        slots=("mask1", "mask2"),
+        labels=("ball", "basket"),
+        file_stems={"mask1": "ball_mask", "mask2": "basket_mask"},
+        prompts={"mask1": "tennis ball", "mask2": "basket"},
+    ),
+    "tennis_ball_pick_and_place": MaskTaskSpec(
+        slots=("mask1", "hand_mask", "mask2"),
+        labels=("ball", "hand", "basket"),
+        file_stems={
+            "mask1": "ball_mask",
+            "hand_mask": "hand_mask",
+            "mask2": "basket_mask",
+        },
+        prompts={
+            "mask1": "tennis ball",
+            "hand_mask": "robot end effector",
+            "mask2": "basket",
+        },
+    ),
+}
+# Compatibility constant for older two-output helper scripts. The interactive
+# labeler itself uses the task-specific ``MaskTaskSpec.slots`` above.
 MASK_SLOTS = ("mask1", "mask2")
+
+
+def mask_color(slot: str) -> tuple[int, int, int]:
+    """Return a stable display color, including for future task-specific slots."""
+
+    fallback_colors = (
+        (40, 220, 40),
+        (0, 165, 255),
+        (220, 40, 220),
+        (255, 120, 40),
+        (120, 40, 220),
+    )
+    if slot in MASK_COLORS:
+        return MASK_COLORS[slot]
+    return fallback_colors[abs(hash(slot)) % len(fallback_colors)]
 
 
 @dataclass
@@ -63,6 +120,7 @@ class PromptState:
     slots: dict[str, SlotPrompt] = field(
         default_factory=lambda: {"mask1": SlotPrompt(), "mask2": SlotPrompt()}
     )
+    slot_labels: dict[str, str] = field(default_factory=dict)
     active_slot: str = "mask1"
     drag_start: tuple[int, int] | None = None
     drag_current: tuple[int, int] | None = None
@@ -136,9 +194,22 @@ class PromptState:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Label mask1/mask2 for recorded frame_* demo data."
+        description=(
+            "Label task-specific masks for recorded frame_* demo data. "
+            "The mask slots are selected from --exp_name."
+        )
     )
-    parser.add_argument("--frame_root", default=DEFAULT_FRAME_ROOT)
+    parser.add_argument(
+        "--exp_name",
+        default=DEFAULT_EXP_NAME,
+        choices=tuple(MASK_TASK_CONFIGS),
+        help="Experiment name used to select the number and names of mask slots.",
+    )
+    parser.add_argument(
+        "--frame_root",
+        default=DEFAULT_FRAME_ROOT,
+        help="Recorded demo directory. The default is explicitly set above.",
+    )
     parser.add_argument("--image_name", default="color_image.jpg")
     parser.add_argument(
         "--metadata_name",
@@ -213,13 +284,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--sam3_prompt_mask1",
-        default="tennis ball",
+        default=None,
         help="SAM3 text prompt used for mask1 when --sam3_prompt_mode uses text.",
     )
     parser.add_argument(
         "--sam3_prompt_mask2",
-        default="basket",
+        default=None,
         help="SAM3 text prompt used for mask2 when --sam3_prompt_mode uses text.",
+    )
+    parser.add_argument(
+        "--sam3_prompt_hand",
+        default=None,
+        help="SAM3 text prompt used for hand_mask when text prompting is enabled.",
     )
     parser.add_argument(
         "--sam3_prompt_mode",
@@ -259,6 +335,26 @@ def parse_args() -> argparse.Namespace:
         help="Use CUDA bfloat16 autocast for SAM3 inference, matching SAM3 examples.",
     )
     return parser.parse_args()
+
+
+def apply_task_config(args: argparse.Namespace) -> argparse.Namespace:
+    """Attach task-specific mask slots and resolve optional prompt overrides."""
+
+    spec = MASK_TASK_CONFIGS[args.exp_name]
+    args.mask_slots = spec.slots
+    args.mask_labels = dict(zip(spec.slots, spec.labels))
+    args.mask_file_stems = dict(spec.file_stems)
+    args.sam3_prompts = dict(spec.prompts)
+
+    prompt_overrides = {
+        "mask1": args.sam3_prompt_mask1,
+        "hand_mask": args.sam3_prompt_hand,
+        "mask2": args.sam3_prompt_mask2,
+    }
+    for slot, override in prompt_overrides.items():
+        if slot in args.sam3_prompts and override:
+            args.sam3_prompts[slot] = override
+    return args
 
 
 def frame_id_from_dir(frame_dir: Path) -> int | None:
@@ -490,7 +586,16 @@ def predict_sam2_mask(
 
 
 def sam3_prompt_for_slot(args: argparse.Namespace, slot: str) -> str:
-    return args.sam3_prompt_mask1 if slot == "mask1" else args.sam3_prompt_mask2
+    prompts = getattr(args, "sam3_prompts", None)
+    if prompts is not None:
+        return prompts.get(slot, slot.replace("_", " "))
+    # Compatibility for the older automatic SAM3 inference script.
+    legacy_prompts = {
+        "mask1": getattr(args, "sam3_prompt_mask1", "tennis ball"),
+        "mask2": getattr(args, "sam3_prompt_mask2", "basket"),
+        "hand_mask": getattr(args, "sam3_prompt_hand", "robot hand"),
+    }
+    return legacy_prompts.get(slot, slot.replace("_", " "))
 
 
 def xyxy_to_normalized_cxcywh(
@@ -638,13 +743,18 @@ def output_paths(
     slot: str,
     save_in_frame_dir: bool,
     save_legacy_rs_names: bool,
+    file_stem: str,
 ) -> list[Path]:
-    paths = [output_dir / f"frame_{frame_id:06d}_{slot}.png"]
+    paths = [output_dir / f"frame_{frame_id:06d}_{file_stem}.png"]
     if save_in_frame_dir:
-        paths.append(frame_dir / f"{slot}.png")
+        paths.append(frame_dir / f"{file_stem}.png")
         if save_legacy_rs_names:
-            legacy_name = "rs_mask_obj0.png" if slot == "mask1" else "rs_mask_obj1.png"
-            paths.append(frame_dir / legacy_name)
+            legacy_names = {
+                "mask1": "rs_mask_obj0.png",
+                "mask2": "rs_mask_obj1.png",
+            }
+            if slot in legacy_names:
+                paths.append(frame_dir / legacy_names[slot])
     return paths
 
 
@@ -667,6 +777,7 @@ def save_mask(
         slot,
         save_in_frame_dir=not args.no_save_in_frame_dir,
         save_legacy_rs_names=args.save_legacy_rs_names,
+        file_stem=args.mask_file_stems.get(slot, slot),
     )
     for path in paths:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -707,15 +818,22 @@ def load_saved_masks(
     args: argparse.Namespace,
 ) -> dict[str, np.ndarray]:
     masks: dict[str, np.ndarray] = {}
-    for slot in ("mask1", "mask2"):
+    for slot in args.mask_slots:
+        file_stem = args.mask_file_stems.get(slot, slot)
         candidates = [
+            output_dir / f"frame_{frame_id:06d}_{file_stem}.png",
+            frame_dir / f"{file_stem}.png",
+            # Read annotations produced by older versions of this script.
             output_dir / f"frame_{frame_id:06d}_{slot}.png",
             frame_dir / f"{slot}.png",
         ]
         if args.save_legacy_rs_names:
-            candidates.append(
-                frame_dir / ("rs_mask_obj0.png" if slot == "mask1" else "rs_mask_obj1.png")
-            )
+            legacy_names = {
+                "mask1": "rs_mask_obj0.png",
+                "mask2": "rs_mask_obj1.png",
+            }
+            if slot in legacy_names:
+                candidates.append(frame_dir / legacy_names[slot])
         for path in candidates:
             if not path.exists():
                 continue
@@ -740,6 +858,7 @@ def delete_mask(
         slot,
         save_in_frame_dir=not args.no_save_in_frame_dir,
         save_legacy_rs_names=args.save_legacy_rs_names,
+        file_stem=args.mask_file_stems.get(slot, slot),
     )
     for path in paths:
         if path.exists():
@@ -756,24 +875,37 @@ def blend_mask(image: np.ndarray, mask: np.ndarray, color: tuple[int, int, int],
     return out
 
 
-def draw_text_lines(image: np.ndarray, lines: list[str]) -> None:
-    if not lines:
-        return
+def draw_control_panel(panel: np.ndarray, lines: list[str]) -> None:
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 0.45
+    scale = 0.42
     thickness = 1
-    y = 18
+    y = 24
     for line in lines:
         (width, height), _ = cv2.getTextSize(line, font, scale, thickness)
-        cv2.rectangle(image, (4, y - height - 4), (10 + width, y + 4), (0, 0, 0), -1)
-        cv2.putText(image, line, (8, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        if width > panel.shape[1] - 20:
+            scale_for_line = max(0.28, scale * (panel.shape[1] - 20) / width)
+        else:
+            scale_for_line = scale
+        cv2.putText(
+            panel,
+            line,
+            (12, y),
+            font,
+            scale_for_line,
+            (235, 235, 235),
+            thickness,
+            cv2.LINE_AA,
+        )
         y += 17
+        if y >= panel.shape[0] - 8:
+            break
 
 
 def render_view(
     image: np.ndarray,
     state: PromptState,
     saved_masks: dict[str, np.ndarray],
+    hidden_saved_slots: set[str],
     frame_id: int,
     frame_index: int,
     total_frames: int,
@@ -783,10 +915,12 @@ def render_view(
 ) -> np.ndarray:
     view = image.copy()
     for slot, mask in saved_masks.items():
-        view = blend_mask(view, mask, MASK_COLORS[slot], alpha=0.38)
+        if slot in hidden_saved_slots:
+            continue
+        view = blend_mask(view, mask, mask_color(slot), alpha=0.38)
 
     for slot, prompt in state.slots.items():
-        slot_color = MASK_COLORS[slot]
+        slot_color = mask_color(slot)
         if prompt.candidate_mask is not None:
             view = blend_mask(view, prompt.candidate_mask, slot_color, alpha=0.32)
         for point, label in zip(prompt.points, prompt.labels):
@@ -813,7 +947,7 @@ def render_view(
             view,
             state.drag_start,
             state.drag_current,
-            MASK_COLORS[state.active_slot],
+            mask_color(state.active_slot),
             2,
         )
 
@@ -828,17 +962,48 @@ def render_view(
         )
 
     score = "none" if state.candidate_score is None else f"{state.candidate_score:.3f}"
-    prompt_suffix = ""
-    if model_name == "sam3":
-        prompt_suffix = "  sam3 manual box" if state.boxes else "  sam3 manual box: drag first"
-    draw_text_lines(
-        view,
-        [
-            f"frame={frame_id} ({frame_index + 1}/{total_frames}) model={model_name}",
-            f"active={state.active_slot} score={score}{prompt_suffix}",
-            "1:mask1  2:mask2  drag box/click point  s:save  n/p  c  z  d  q",
-        ],
+    prompt_status = "text+box" if model_name == "sam3" else model_name
+    panel = np.full(
+        (view.shape[0], CONTROL_PANEL_WIDTH, 3),
+        (28, 32, 38),
+        dtype=np.uint8,
     )
+    panel_lines = [
+        "SAM MASK LABELER",
+        "------------------------------",
+        f"frame: {frame_id} ({frame_index + 1}/{total_frames})",
+        f"model: {model_name}  mode: {prompt_status}",
+        f"active: {state.active_slot}",
+        f"candidate score: {score}",
+        "",
+        "MASK SLOTS",
+    ]
+    panel_lines.extend(
+        f"{index + 1}: {slot} ({state.slot_labels.get(slot, slot)})"
+        for index, slot in enumerate(state.slots)
+    )
+    panel_lines.extend(
+        [
+            "",
+            "CONTROLS",
+            "Left drag  : add/refine box",
+            "Left click : positive point",
+            "Right click: negative point",
+            "Middle click: undo",
+            "",
+            "c: clear active prompt",
+            "z/u: undo prompt",
+            "s: save current frame only",
+            "d: delete active saved mask",
+            "r: reload saved masks",
+            "n/. : next frame",
+            "p/, : previous frame",
+            "g: add/use gaze point",
+            "q / Esc: save all and quit",
+        ]
+    )
+    draw_control_panel(panel, panel_lines)
+    view = np.hstack((view, panel))
 
     if display_scale != 1.0:
         view = cv2.resize(
@@ -912,7 +1077,7 @@ def update_sam3_text_candidates(
 ) -> None:
     old_slot = state.active_slot
     try:
-        for slot in MASK_SLOTS:
+        for slot in state.slots:
             state.active_slot = slot
             prompt = state.active
             if prompt.candidate_mask is not None or prompt.boxes:
@@ -944,7 +1109,7 @@ def save_all_current_frame_annotations(
     saved_count = 0
     old_slot = state.active_slot
     try:
-        for slot in ("mask1", "mask2"):
+        for slot in state.slots:
             state.active_slot = slot
             prompt = state.active
             if not slot_has_annotation(prompt, args):
@@ -985,9 +1150,16 @@ def save_all_current_frame_annotations(
 
 
 def main() -> None:
-    args = parse_args()
+    args = apply_task_config(parse_args())
+    print(
+        f"[task] exp_name={args.exp_name} "
+        f"mask_slots={list(args.mask_slots)} "
+        f"labels={args.mask_labels}"
+    )
     frame_root = Path(args.frame_root).expanduser()
     output_dir = Path(args.output_dir).expanduser() if args.output_dir else frame_root / "sam_masks"
+    print(f"[data] frame_root={frame_root}")
+    print(f"[data] output_dir={output_dir}")
 
     frames = discover_frames(args)
     if not frames:
@@ -1022,13 +1194,55 @@ def main() -> None:
     window_name = "label_recorded_sam_masks"
     cv2.namedWindow(window_name, window_flags())
 
-    state = PromptState()
+    state = PromptState(
+        slots={slot: SlotPrompt() for slot in args.mask_slots},
+        slot_labels=args.mask_labels,
+        active_slot=args.mask_slots[0],
+    )
     frame_index = 0
     saved_masks: dict[str, np.ndarray] = {}
     image: np.ndarray | None = None
     gaze_point: tuple[int, int] | None = None
+    hidden_saved_slots: set[str] = set()
+    # Navigation stages edits in memory. Explicit `s` saves only the current
+    # frame; the final flush saves every staged frame before exiting.
+    pending_annotations: dict[
+        int, tuple[PromptState, np.ndarray, tuple[int, int] | None]
+    ] = {}
+    final_flush_done = False
     dirty = False
     current_display_scale = max(0.1, float(args.display_scale))
+
+    def stage_current_frame() -> None:
+        if image is None:
+            return
+        pending_annotations[frame_index] = (
+            copy.deepcopy(state),
+            image.copy(),
+            gaze_point,
+        )
+
+    def save_all_pending_annotations() -> int:
+        nonlocal final_flush_done
+        stage_current_frame()
+        saved_count = 0
+        for pending_index in sorted(pending_annotations):
+            pending_state, pending_image, pending_gaze = pending_annotations[pending_index]
+            pending_frame_id, pending_frame_dir = frames[pending_index]
+            saved_count += save_all_current_frame_annotations(
+                pending_state,
+                args,
+                predictor,
+                pending_image,
+                pending_gaze,
+                pending_frame_id,
+                pending_frame_dir,
+                output_dir,
+                model_name,
+            )
+        pending_annotations.clear()
+        final_flush_done = True
+        return saved_count
 
     def load_frame(index: int) -> None:
         nonlocal image, saved_masks, gaze_point, dirty
@@ -1036,7 +1250,8 @@ def main() -> None:
         image = read_image(frame_dir, args.image_name)
         saved_masks = load_saved_masks(output_dir, frame_id, frame_dir, args)
         gaze_point = load_gaze_point(frame_dir)
-        state.active_slot = "mask1"
+        hidden_saved_slots.clear()
+        state.active_slot = args.mask_slots[0]
         state.clear_all()
         dirty = False
         if args.auto_gaze_prompt and args.model == "sam2":
@@ -1053,10 +1268,14 @@ def main() -> None:
         nonlocal dirty
         if image is None:
             return
+        image_display_width = int(round(image.shape[1] * current_display_scale))
+        if x >= image_display_width:
+            return
         px, py = scaled_point(x, y, current_display_scale, image.shape)
 
         if args.model == "manual":
             if event == cv2.EVENT_LBUTTONDOWN:
+                hidden_saved_slots.add(state.active_slot)
                 state.polygon.append((px, py))
                 dirty = True
             elif event in (cv2.EVENT_RBUTTONDOWN, cv2.EVENT_MBUTTONDOWN):
@@ -1066,6 +1285,7 @@ def main() -> None:
 
         if args.model == "sam3":
             if event == cv2.EVENT_LBUTTONDOWN:
+                hidden_saved_slots.add(state.active_slot)
                 state.drag_start = (px, py)
                 state.drag_current = (px, py)
             elif event == cv2.EVENT_MOUSEMOVE and state.drag_start is not None:
@@ -1083,11 +1303,14 @@ def main() -> None:
                 state.drag_start = None
                 state.drag_current = None
             elif event in (cv2.EVENT_RBUTTONDOWN, cv2.EVENT_MBUTTONDOWN):
+                if event == cv2.EVENT_RBUTTONDOWN:
+                    hidden_saved_slots.add(state.active_slot)
                 state.undo(args.model)
                 dirty = True
             return
 
         if event == cv2.EVENT_LBUTTONDOWN:
+            hidden_saved_slots.add(state.active_slot)
             state.drag_start = (px, py)
             state.drag_current = (px, py)
         elif event == cv2.EVENT_MOUSEMOVE and state.drag_start is not None:
@@ -1106,6 +1329,7 @@ def main() -> None:
             state.drag_current = None
             dirty = True
         elif event == cv2.EVENT_RBUTTONDOWN:
+            hidden_saved_slots.add(state.active_slot)
             state.points.append([float(px), float(py)])
             state.labels.append(0)
             dirty = True
@@ -1117,7 +1341,10 @@ def main() -> None:
     if image is not None:
         cv2.resizeWindow(
             window_name,
-            max(100, int(image.shape[1] * current_display_scale)),
+            max(
+                100,
+                int((image.shape[1] + CONTROL_PANEL_WIDTH) * current_display_scale),
+            ),
             max(100, int(image.shape[0] * current_display_scale)),
         )
     cv2.setMouseCallback(window_name, on_mouse)
@@ -1137,6 +1364,7 @@ def main() -> None:
                 image,
                 state,
                 saved_masks,
+                hidden_saved_slots,
                 frame_id,
                 frame_index,
                 len(frames),
@@ -1146,17 +1374,30 @@ def main() -> None:
             )
             cv2.imshow(window_name, view)
             key = cv2.waitKey(30) & 0xFF
+            slot_by_key = {
+                ord(str(index + 1)): slot
+                for index, slot in enumerate(args.mask_slots)
+            }
 
             if key in (27, ord("q")):
                 break
             if key in (ord("n"), ord(".")):
-                frame_index = min(frame_index + 1, len(frames) - 1)
+                stage_current_frame()
+                if frame_index >= len(frames) - 1:
+                    saved_count = save_all_pending_annotations()
+                    print(
+                        f"[save] reached final frame; saved_slots={saved_count}; exiting"
+                    )
+                    break
+                frame_index += 1
                 load_frame(frame_index)
             elif key in (ord("p"), ord(",")):
+                stage_current_frame()
                 frame_index = max(frame_index - 1, 0)
                 load_frame(frame_index)
             elif key == ord("c"):
                 state.clear_active()
+                hidden_saved_slots.add(state.active_slot)
             elif key in (ord("z"), ord("u")):
                 state.undo(args.model)
                 dirty = True
@@ -1176,9 +1417,8 @@ def main() -> None:
                     print(f"[gaze] added positive prompt {gaze_point}")
                 else:
                     print("[gaze] no valid gaze_contact.json point for this frame.")
-            elif key in (ord("1"), ord("2")):
-                slot = "mask1" if key == ord("1") else "mask2"
-                state.active_slot = slot
+            elif key in slot_by_key:
+                state.active_slot = slot_by_key[key]
                 if sam3_can_predict_from_text(args) and state.candidate_mask is None:
                     dirty = True
                 print(f"[active] {state.active_slot}")
@@ -1194,14 +1434,28 @@ def main() -> None:
                     output_dir,
                     model_name,
                 )
+                pending_annotations.pop(frame_index, None)
                 saved_masks = load_saved_masks(output_dir, frame_id, frame_dir, args)
+                hidden_saved_slots.intersection_update(
+                    set(args.mask_slots) - set(saved_masks)
+                )
+                print(
+                    f"[save] current frame_index={frame_index} "
+                    f"frame_id={frame_id} saved_slots={saved_count}"
+                )
             elif key == ord("d"):
                 delete_mask(output_dir, frame_id, frame_dir, state.active_slot, args)
+                state.clear_active()
+                hidden_saved_slots.add(state.active_slot)
+                pending_annotations.pop(frame_index, None)
                 saved_masks = load_saved_masks(output_dir, frame_id, frame_dir, args)
             elif key == ord("r"):
                 saved_masks = load_saved_masks(output_dir, frame_id, frame_dir, args)
                 print(f"[reload] frame={frame_id} saved={sorted(saved_masks.keys())}")
     finally:
+        if not final_flush_done:
+            saved_count = save_all_pending_annotations()
+            print(f"[save] exit flush saved_slots={saved_count}")
         cv2.destroyWindow(window_name)
 
 

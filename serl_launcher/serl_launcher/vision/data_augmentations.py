@@ -35,6 +35,44 @@ def batched_random_crop(img, rng, *, padding, num_batch_dims: int = 1):
     img = jnp.reshape(img, original_shape)
     return img
 
+
+@partial(jax.jit, static_argnames=("padding",))
+def batched_temporal_random_crop(img, rng, *, padding):
+    """Crop BTHWC sequences with one shared spatial offset per sequence."""
+    if img.ndim != 5:
+        raise ValueError(
+            f"Expected a BTHWC image sequence, got shape {img.shape}."
+        )
+
+    def crop_sequence(sequence, sequence_rng):
+        crop_from = jax.random.randint(
+            sequence_rng,
+            (2,),
+            0,
+            2 * padding + 1,
+        )
+        crop_from = jnp.concatenate(
+            (
+                jnp.zeros((1,), dtype=jnp.int32),
+                crop_from,
+                jnp.zeros((1,), dtype=jnp.int32),
+            )
+        )
+        padded = jnp.pad(
+            sequence,
+            (
+                (0, 0),
+                (padding, padding),
+                (padding, padding),
+                (0, 0),
+            ),
+            mode="edge",
+        )
+        return jax.lax.dynamic_slice(padded, crop_from, sequence.shape)
+
+    rngs = jax.random.split(rng, img.shape[0])
+    return jax.vmap(crop_sequence)(img, rngs)
+
 def resize(image, image_dim):
     assert len(image_dim) == 2
     new_shape = list(image.shape)

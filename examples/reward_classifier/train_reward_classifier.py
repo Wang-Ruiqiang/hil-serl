@@ -33,7 +33,7 @@ flags.DEFINE_integer("num_epochs", 50, "Number of training epochs.")
 flags.DEFINE_integer("batch_size", 256, "Batch size.")
 flags.DEFINE_enum(
     "classifier_task",
-    "pick",
+    "place",
     ["pick", "place"],
     "Reward classifier stage to train for tennis_ball_pick.",
 )
@@ -45,6 +45,20 @@ flags.DEFINE_multi_string(
     "image_key",
     None,
     "Image keys used by the classifier. Defaults to keys found in the pkl.",
+)
+flags.DEFINE_multi_string(
+    "extra_pattern",
+    None,
+    "Substring(s) matched against pkl basenames. Matching files form a separate "
+    "'extra' pool per polarity that is sampled with its own weight (see --extra_frac). "
+    "Empty keeps the original single-pool behaviour.",
+)
+flags.DEFINE_float(
+    "extra_frac",
+    -1.0,
+    "Fraction of each half-batch drawn from the extra pool, applied to positives and "
+    "negatives alike. -1 means auto: use max(n_extra_pos/n_pos, n_extra_neg/n_neg) so "
+    "neither side's newly collected samples are diluted relative to the other.",
 )
 flags.DEFINE_string(
     "data_dir",
@@ -189,12 +203,27 @@ def main(_):
     if not failure_paths:
         raise FileNotFoundError(f"No failure pkl files found in {data_dir}")
 
-    success_data = []
-    for path in success_paths:
-        success_data.extend(_load_pickle_stream(path))
-    failure_data = []
-    for path in failure_paths:
-        failure_data.extend(_load_pickle_stream(path))
+    patterns = [pat for pat in (FLAGS.extra_pattern or []) if pat]
+
+    def _is_extra(path):
+        base = os.path.basename(path)
+        return any(pat in base for pat in patterns)
+
+    def _load_split(paths):
+        base_data, extra_data = [], []
+        for path in sorted(paths):
+            data = _load_pickle_stream(path)
+            (extra_data if _is_extra(path) else base_data).extend(data)
+            tag = "extra" if _is_extra(path) else "base"
+            print(f"[source]   {os.path.basename(path)}: {len(data)} ({tag})")
+        return base_data, extra_data
+
+    print("[source] success files:")
+    success_base, success_extra = _load_split(success_paths)
+    print("[source] failure files:")
+    failure_base, failure_extra = _load_split(failure_paths)
+    success_data = success_base + success_extra
+    failure_data = failure_base + failure_extra
 
     if not success_data:
         raise ValueError(f"No success transitions loaded from {data_dir}")
@@ -207,50 +236,83 @@ def main(_):
     print(f"[source] image_keys={image_keys}")
     print(f"[source] replay_state_shape={observation_space['state'].shape}")
 
-    pos_buffer = ReplayBuffer(
-        observation_space=observation_space,
-        action_space=action_space,
-        capacity=max(len(success_data), 1),
-        include_label=True,
-    )
+    half = FLAGS.batch_size // 2
+
+    if patterns:
+        nat_pos = len(success_extra) / max(len(success_data), 1)
+        nat_neg = len(failure_extra) / max(len(failure_data), 1)
+        frac = FLAGS.extra_frac
+        if frac < 0:
+            frac = max(nat_pos, nat_neg)
+        frac = float(min(max(frac, 0.0), 1.0))
+        n_pos_extra = int(round(frac * half)) if success_extra else 0
+        n_neg_extra = int(round(frac * half)) if failure_extra else 0
+        print(
+            f"[sampling] extra_frac={frac:.3f} (natural pos={nat_pos:.3f} neg={nat_neg:.3f})"
+        )
+    else:
+        frac = 0.0
+        n_pos_extra = n_neg_extra = 0
+    n_pos_base = half - n_pos_extra
+    n_neg_base = half - n_neg_extra
+    # If one side of a polarity is empty, hand its slots to the other so the
+    # batch always ends up exactly batch_size.
+    if not success_base:
+        n_pos_extra, n_pos_base = n_pos_extra + n_pos_base, 0
+    if not success_extra:
+        n_pos_base, n_pos_extra = n_pos_base + n_pos_extra, 0
+    if not failure_base:
+        n_neg_extra, n_neg_base = n_neg_extra + n_neg_base, 0
+    if not failure_extra:
+        n_neg_base, n_neg_extra = n_neg_base + n_neg_extra, 0
+
+    def _make_iterator(data, batch_size):
+        if batch_size <= 0 or not data:
+            return None
+        buffer = ReplayBuffer(
+            observation_space=observation_space,
+            action_space=action_space,
+            capacity=len(data),
+            include_label=True,
+        )
+        for trans in data:
+            buffer.insert(trans)
+        return buffer.get_iterator(
+            sample_args={"batch_size": batch_size},
+            device=sharding.replicate(),
+        )
+
     for trans in success_data:
         trans["labels"] = 1
-        pos_buffer.insert(trans)
-
-    pos_iterator = pos_buffer.get_iterator(
-        sample_args={
-            "batch_size": FLAGS.batch_size // 2,
-        },
-        device=sharding.replicate(),
-    )
-    
-    # Create buffer for negative transitions
-    neg_buffer = ReplayBuffer(
-        observation_space=observation_space,
-        action_space=action_space,
-        capacity=max(len(failure_data), 1),
-        include_label=True,
-    )
-
     for trans in failure_data:
         trans["labels"] = 0
-        neg_buffer.insert(trans)
-            
-    neg_iterator = neg_buffer.get_iterator(
-        sample_args={
-            "batch_size": FLAGS.batch_size // 2,
-        },
-        device=sharding.replicate(),
+
+    iterators = [
+        _make_iterator(success_base, n_pos_base),
+        _make_iterator(success_extra, n_pos_extra),
+        _make_iterator(failure_base, n_neg_base),
+        _make_iterator(failure_extra, n_neg_extra),
+    ]
+    iterators = [it for it in iterators if it is not None]
+
+    def next_batch():
+        batch = next(iterators[0])
+        for it in iterators[1:]:
+            batch = concat_batches(batch, next(it), axis=0)
+        return batch
+
+    print(
+        f"[sampling] per batch: pos base={n_pos_base}/{len(success_base)} "
+        f"extra={n_pos_extra}/{len(success_extra)} | "
+        f"neg base={n_neg_base}/{len(failure_base)} extra={n_neg_extra}/{len(failure_extra)}"
     )
 
-    print(f"failed buffer size: {len(neg_buffer)}")
-    print(f"success buffer size: {len(pos_buffer)}")
+    print(f"failed buffer size: {len(failure_data)}")
+    print(f"success buffer size: {len(success_data)}")
 
     rng = jax.random.PRNGKey(0)
     rng, key = jax.random.split(rng)
-    pos_sample = next(pos_iterator)
-    neg_sample = next(neg_iterator)
-    sample = concat_batches(pos_sample, neg_sample, axis=0)
+    sample = next_batch()
 
     rng, key = jax.random.split(rng)
     classifier = create_classifier(key, 
@@ -292,12 +354,7 @@ def main(_):
 
     for epoch in tqdm(range(FLAGS.num_epochs)):
         # Sample equal number of positive and negative examples
-        pos_sample = next(pos_iterator)
-        neg_sample = next(neg_iterator)
-        # Merge and create labels
-        batch = concat_batches(
-            pos_sample, neg_sample, axis=0
-        )
+        batch = next_batch()
         rng, key = jax.random.split(rng)
         obs = data_augmentation_fn(key, batch["observations"])
         batch = batch.copy(

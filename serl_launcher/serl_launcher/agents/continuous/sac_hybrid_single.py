@@ -369,7 +369,11 @@ class SACAgentHybridSingleArm(flax.struct.PyTreeNode):
         """
         batch_size = batch["rewards"].shape[0]
         chex.assert_tree_shape_prefix(batch, (batch_size,))
-        chex.assert_shape(batch["actions"], (batch_size, 7))
+        # The action layout is (continuous arm dims..., discrete grasp). The arm
+        # part is task dependent: 7 with the rpy slots present, 4 once
+        # ArmActionSubspaceWrapper drops the axes franka_env ignores. Assert
+        # rank instead of a hardcoded width.
+        chex.assert_rank(batch["actions"], 2)
 
         if self.config["image_keys"][0] not in batch["next_observations"]:
             batch = _unpack(batch)

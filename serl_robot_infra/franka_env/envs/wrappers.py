@@ -46,13 +46,20 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
 
     SUPPORTED_EXPS = {"tennis_ball_pick", "tennis_ball_pick_and_place"}
 
-    def __init__(self, env: Env, reward_classifier_func, target_hz=None):
+    def __init__(
+        self,
+        env: Env,
+        reward_classifier_func,
+        target_hz=None,
+        start_in_pick_phase=True,
+    ):
         super().__init__(env)
         self.reward_classifier_func = reward_classifier_func
         self.target_hz = target_hz
         self.config = env.config
         self.exp_name = self.config.EXP_NAME
-        self.is_pick = True
+        self.start_in_pick_phase = bool(start_in_pick_phase)
+        self.is_pick = self.start_in_pick_phase
         if self.exp_name not in self.SUPPORTED_EXPS:
             raise ValueError(
                 "MultiCameraBinaryRewardClassifierWrapper currently supports only "
@@ -125,7 +132,7 @@ class MultiCameraBinaryRewardClassifierWrapper(gym.Wrapper):
         return obs, rew, done, truncated, info
 
     def reset(self, **kwargs):
-        self.is_pick = True
+        self.is_pick = self.start_in_pick_phase
         obs, info = self.env.reset(**kwargs)
         info["succeed"] = False
         info["is_pick"] = self.is_pick
@@ -294,14 +301,88 @@ class KeyboardIntervention(gym.ActionWrapper):
             self.env.close()
     
 
+class ArmActionSubspaceWrapper(gym.ActionWrapper):
+    """Expose only the arm axes the environment actually acts on.
+
+    franka_env hardcodes ``rpy_delta = [0, 0, 0]`` and forces the end-effector
+    orientation to a constant quaternion, so ``action[3:6]`` never reaches the
+    robot. Those slots are not harmless dead weight: ``zero_action_rpy`` in
+    train_rlpd also zeroes them before a transition is stored, so the critic is
+    trained exclusively on ``a[3:6] == 0`` while the actor evaluates Q at the
+    nonzero values its Gaussian keeps producing (measured std 0.76-0.81 at 48k
+    steps, larger than on the xyz axes). Those three dimensions are permanent
+    extrapolation that no data ever corrects, and the actor can raise Q along
+    them without changing anything in the world.
+
+    Outward the action is ``(x, y, z, grip)``; inward it is expanded back to the
+    7-dim vector the robot expects, with zeros in the rotation slots. The
+    SpaceMouse still reads and reports rpy, so that interface stays available
+    for later experiments -- it simply no longer reaches the policy.
+    """
+
+    KEEP = (0, 1, 2, 6)
+
+    def __init__(self, env):
+        super().__init__(env)
+        inner = env.action_space
+        if inner.shape != (7,):
+            raise ValueError(
+                f"ArmActionSubspaceWrapper expects a 7-dim action space, got {inner.shape}"
+            )
+        keep = list(self.KEEP)
+        self.action_space = gym.spaces.Box(
+            low=np.asarray(inner.low)[keep],
+            high=np.asarray(inner.high)[keep],
+            dtype=inner.dtype,
+        )
+        print(f"[ArmActionSubspaceWrapper] action space {inner.shape} -> "
+              f"{self.action_space.shape} (kept indices {keep}; rpy pinned to 0)")
+
+    def action(self, action: np.ndarray) -> np.ndarray:
+        full = np.zeros((7,), dtype=np.float32)
+        full[list(self.KEEP)] = np.asarray(action, dtype=np.float32).reshape(-1)
+        return full
+
+    def step(self, action):
+        obs, rew, done, truncated, info = self.env.step(self.action(action))
+        if "intervene_action" in info:
+            # The interventions below still speak the 7-dim language.
+            info["intervene_action"] = np.asarray(
+                info["intervene_action"], dtype=np.float32
+            )[..., list(self.KEEP)]
+        return obs, rew, done, truncated, info
+
+
 class SpacemouseIntervention(gym.ActionWrapper):
-    def __init__(self, env, action_indices=None):
+    def __init__(self, env, action_indices=None, gain: float = 1.0):
+        """Replace the policy action with the SpaceMouse action while a human drives.
+
+        ``gain`` scales the raw device reading before it becomes an RL action.
+        pyspacemouse already normalizes to [-1, 1], but in practice a full
+        physical deflection lands well short of it, so a human demonstration
+        never populates the outer part of the action box that the policy can
+        reach through its tanh. The critic then has to extrapolate exactly
+        where the actor likes to operate. Measured on the 30-demo buffer of
+        tennis_ball_pick_and_place: only 3.8% of arm action components exceeded
+        0.6 and 0.4% exceeded 0.8, while the policy at 48k steps was emitting
+        |a| ~= 0.9 on every xyz dimension.
+
+        The gain is applied AFTER the intervention test, so `translation_deadband`
+        keeps its original meaning in raw device units. It does not change the
+        action-to-motion mapping (`action_scale` is untouched), so previously
+        recorded demonstrations stay physically valid -- the only thing that
+        changes is which action values a human tends to produce from now on.
+        """
         super().__init__(env)
         self.expert = SpaceMouseExpert()
         self.left = False
         self.right = False
         self.action_indices = action_indices
         self.translation_deadband = 0.03
+        self.gain = float(gain)
+        if self.gain != 1.0:
+            print(f"[SpacemouseIntervention] action gain = {self.gain:.2f} "
+                  f"(clipped to [-1, 1]; deadband still on raw device units)")
 
     def action(self, action: np.ndarray) -> tuple[np.ndarray, bool]:
         """
@@ -321,7 +402,9 @@ class SpacemouseIntervention(gym.ActionWrapper):
 
         new_action = np.zeros_like(action, dtype=np.float32)
         arm_dims = min(6, new_action.shape[0], expert_a.shape[0])
-        new_action[:arm_dims] = expert_a[:arm_dims]
+        new_action[:arm_dims] = np.clip(
+            expert_a[:arm_dims] * self.gain, -1.0, 1.0
+        )
 
         if self.left:
             new_action[6] = -1.0

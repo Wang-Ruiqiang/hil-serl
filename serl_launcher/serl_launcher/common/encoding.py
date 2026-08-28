@@ -5,6 +5,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from einops import rearrange, repeat
+from serl_launcher.utils.gaze_mask_utils import PHASE_ONEHOT_DIM
 
 
 class EncodingWrapper(nn.Module):
@@ -19,6 +20,8 @@ class EncodingWrapper(nn.Module):
 
     encoder: nn.Module
     use_proprio: bool
+    tactile_encoder: Optional[nn.Module] = None
+    tactile_image_key: str = "tactile_data"
     proprio_latent_dim: int = 64
     enable_stacking: bool = False
     image_keys: Iterable[str] = ("image",)
@@ -98,12 +101,16 @@ class EncodingWrapper(nn.Module):
         if state is None:
             return jnp.asarray(1.0, dtype=dtype)
         state = jnp.asarray(state)
-        if state.shape[-1] < 3:
+        if state.shape[-1] < PHASE_ONEHOT_DIM:
             return jnp.asarray(1.0, dtype=dtype)
         if state.ndim >= 3:
-            phase = state[:, -1, -3:] if state.ndim == 3 else state[..., -1, -3:]
+            phase = (
+                state[:, -1, -PHASE_ONEHOT_DIM:]
+                if state.ndim == 3
+                else state[..., -1, -PHASE_ONEHOT_DIM:]
+            )
         else:
-            phase = state[..., -3:]
+            phase = state[..., -PHASE_ONEHOT_DIM:]
         return phase[..., 0].astype(dtype)
 
     def _broadcast_gate(self, gate, target):
@@ -223,6 +230,7 @@ class EncodingWrapper(nn.Module):
         is_encoded=False,
         return_attention=False,
         return_cgl_attention=False,
+        return_feature_debug=False,
     ) -> jnp.ndarray:
         # encode images with encoder
         encoded = []
@@ -230,6 +238,7 @@ class EncodingWrapper(nn.Module):
         cgl_attention_maps = []
         selected_attention_map = None
         selected_cgl_attention_map = None
+        debug_features = {}
         mask_target_pairs = dict(self.mask_target_pairs)
         mask_encoder_pairs = dict(self.mask_encoder_pairs)
         mask_suppress_pairs = dict(self.mask_suppress_pairs)
@@ -252,6 +261,7 @@ class EncodingWrapper(nn.Module):
             needs_spatial_features = (
                 return_attention
                 or return_cgl_attention
+                or return_feature_debug
                 or image_key in mask_target_pairs
             )
             needs_spatial_features = needs_spatial_features or image_key in mask_suppress_pairs
@@ -286,6 +296,7 @@ class EncodingWrapper(nn.Module):
                 mask_feature_map = None
                 mask_head_global_feature = None
                 mask_head_task_features = None
+                raw_global_feature = None
                 pick_phase_gate = None
                 attention_spatial_features = suppressed_spatial_features
                 if self.use_mask_feature_head and image_key in mask_target_pairs:
@@ -343,8 +354,28 @@ class EncodingWrapper(nn.Module):
                     cgl_attention_maps.append(cgl_attention_map)
                     if image_key == self.attention_image_key:
                         selected_cgl_attention_map = cgl_attention_map
+                if return_feature_debug:
+                    debug_features[image_key] = {
+                        "raw_spatial": jnp.mean(
+                            jnp.square(spatial_features), axis=-1
+                        ),
+                        "head_spatial": (
+                            jnp.mean(jnp.square(mask_head_task_features), axis=-1)
+                            if mask_head_task_features is not None
+                            else None
+                        ),
+                        "raw_vector": None,
+                        "head_vector": mask_head_global_feature,
+                    }
             else:
                 image = self.encoder[image_key](image, train=train, encode=not is_encoded)
+                if return_feature_debug:
+                    debug_features[image_key] = {
+                        "raw_spatial": None,
+                        "head_spatial": None,
+                        "raw_vector": None,
+                        "head_vector": None,
+                    }
 
             if stop_gradient:
                 image = jax.lax.stop_gradient(image)
@@ -355,13 +386,12 @@ class EncodingWrapper(nn.Module):
                     raise KeyError(
                         f"Mask feature head for {image_key} requires observation key {mask_key}."
                     )
-                fused_features = [
-                    self._global_feature_from_spatial(
-                        suppressed_spatial_features,
-                        image.shape[-1],
-                        name=f"mask2_suppressed_raw_global_{image_key}",
-                    )
-                ]
+                raw_global_feature = self._global_feature_from_spatial(
+                    suppressed_spatial_features,
+                    image.shape[-1],
+                    name=f"mask2_suppressed_raw_global_{image_key}",
+                )
+                fused_features = [raw_global_feature]
                 if mask_head_global_feature is not None:
                     fused_features.append(mask_head_global_feature)
                 if fused_features:
@@ -385,6 +415,14 @@ class EncodingWrapper(nn.Module):
 
             encoded.append(image)
 
+            if return_feature_debug and image_key in debug_features:
+                debug_features[image_key]["pre_mlp_vector"] = image
+                if image_key in mask_target_pairs:
+                    debug_features[image_key]["raw_vector"] = raw_global_feature
+                    debug_features[image_key]["head_vector"] = (
+                        mask_head_global_feature
+                    )
+
             if (
                 self.use_mask_encoder
                 and image_key in mask_encoder_pairs
@@ -404,6 +442,21 @@ class EncodingWrapper(nn.Module):
                     encoded.append(mask_encoder_feature)
                 else:
                     encoded.append(mask_encoder_output)
+
+        if (
+            self.tactile_encoder is not None
+            and self.tactile_image_key in observations
+        ):
+            tactile = jnp.asarray(observations[self.tactile_image_key])
+            if self.enable_stacking:
+                if tactile.ndim == 4:
+                    tactile = tactile[-1]
+                elif tactile.ndim == 5:
+                    tactile = tactile[:, -1]
+            tactile_feature = self.tactile_encoder(tactile, train=train)
+            if stop_gradient:
+                tactile_feature = jax.lax.stop_gradient(tactile_feature)
+            encoded.append(tactile_feature)
 
         if self.use_proprio:
             # project state to embeddings as well
@@ -434,6 +487,20 @@ class EncodingWrapper(nn.Module):
         encoded = jnp.concatenate(encoded, axis=-1)
         # print(f"Concatenated encoded shape: {encoded.shape}")
 
+        if return_feature_debug:
+            debug = {"features": debug_features, "encoded": encoded}
+            if return_attention or return_cgl_attention:
+                selected_map = (
+                    selected_cgl_attention_map
+                    if return_cgl_attention
+                    else selected_attention_map
+                )
+                maps = cgl_attention_maps if return_cgl_attention else attention_maps
+                if selected_map is None and maps:
+                    selected_map = jnp.mean(jnp.stack(maps, axis=0), axis=0)
+                debug["attention_map"] = selected_map
+            return encoded, debug
+
         if return_attention or return_cgl_attention:
             selected_map = (
                 selected_cgl_attention_map
@@ -449,3 +516,182 @@ class EncodingWrapper(nn.Module):
             return encoded, attention_map
 
         return encoded
+
+
+class ViTGroundedEncodingWrapper(nn.Module):
+    """Encoder pipeline for the ``vit-grounded`` encoder type.
+
+    Deliberately a separate module from ``EncodingWrapper``: the ResNet
+    baseline's parameter names and code path must not change, so nothing here
+    reaches back into it.
+
+    Layout::
+
+        front_camera      -> ViT (spatial-learned-embeddings readout
+                             + grounding query)                     -> 256D
+        front_camera_mask -> MaskCNNEncoder                         ->  64D
+        tactile_data      -> SharedTactileCNNEncoder                -> 256D
+        state             -> Dense + LayerNorm + tanh               ->  64D
+
+    The ViT's grounding-query attention logits are surfaced as the CGL
+    attention map, which is what ``_mask_grounding_loss`` supervises against
+    ``front_camera_mask1``.
+
+    With ``grounding_phase_conditioned`` the phase one-hot already carried in
+    ``state`` is also handed to the ViT, which selects its grounding query by
+    phase rather than inferring the phase from pixels. That inference is the
+    known failure: on a 2D camera a hand occluding the ball reads like a
+    completed grasp, so the attention slid onto the basket mid-pick (measured
+    on occluded demo frames: 0.35 of the attention mass on the basket, versus
+    0.00 once conditioned).
+    """
+
+    task_encoder: nn.Module
+    mask_encoder: Optional[nn.Module] = None
+    tactile_encoder: Optional[nn.Module] = None
+    use_proprio: bool = True
+    proprio_latent_dim: int = 64
+    enable_stacking: bool = True
+    task_image_key: str = "front_camera"
+    mask_image_key: str = "front_camera_mask"
+    tactile_image_key: str = "tactile_data"
+    grounding_tactile_conditioned: bool = False
+    grounding_phase_conditioned: bool = False
+
+    def _grounding_phase(self, observations):
+        """The phase one-hot the grounding query is indexed by.
+
+        This is the same signal the mask wrapper uses to choose which slot
+        `front_camera_mask` holds, so the query and the CGL target it is scored
+        against can never disagree about which phase it is.
+        """
+        if not self.grounding_phase_conditioned:
+            return None
+        state = observations.get("state")
+        if state is None:
+            raise ValueError(
+                "grounding_phase_conditioned=True needs 'state' in the "
+                "observations to read the phase one-hot from."
+            )
+        state = jnp.asarray(state)
+        if state.shape[-1] < PHASE_ONEHOT_DIM:
+            raise ValueError(
+                f"state has width {state.shape[-1]}, too narrow to hold a "
+                f"{PHASE_ONEHOT_DIM}-wide phase one-hot."
+            )
+        # Stacked observations carry a time axis; the current phase is the last
+        # frame's, matching how _pick_phase_gate reads it.
+        if state.ndim == 3:
+            return state[:, -1, -PHASE_ONEHOT_DIM:]
+        if state.ndim == 2:
+            return state[:, -PHASE_ONEHOT_DIM:]
+        return state[None, -PHASE_ONEHOT_DIM:]
+
+    def _flatten_image_stack(self, image: jnp.ndarray) -> jnp.ndarray:
+        if not self.enable_stacking:
+            return image
+        if image.ndim == 4:
+            return rearrange(image, "T H W C -> H W (T C)")
+        if image.ndim == 5:
+            return rearrange(image, "B T H W C -> B H W (T C)")
+        return image
+
+    @nn.compact
+    def __call__(
+        self,
+        observations: Dict[str, jnp.ndarray],
+        train=False,
+        stop_gradient=False,
+        is_encoded=False,
+        return_attention=False,
+        return_cgl_attention=False,
+        return_feature_debug=False,
+    ) -> jnp.ndarray:
+        if is_encoded:
+            raise ValueError(
+                "ViTGroundedEncodingWrapper requires raw image observations."
+            )
+
+        task_image = self._flatten_image_stack(observations[self.task_image_key])
+        task_vector, spatial_features, grounding_logits = self.task_encoder(
+            task_image,
+            train=train,
+            encode=True,
+            return_grounding=True,
+            phase=self._grounding_phase(observations),
+            # The conditioner lives inside the ViT, so it travels with the
+            # pretrained subtree; the wrapper only has to hand it the same
+            # tactile frame the encoder saw offline.
+            tactile=(
+                self._flatten_image_stack(observations[self.tactile_image_key])
+                if (self.grounding_tactile_conditioned
+                    and self.tactile_image_key in observations)
+                else None
+            ),
+        )
+        if stop_gradient:
+            task_vector = jax.lax.stop_gradient(task_vector)
+        encoded = [task_vector]
+
+        if self.mask_encoder is not None and self.mask_image_key in observations:
+            mask_image = self._flatten_image_stack(observations[self.mask_image_key])
+            mask_vector = self.mask_encoder(mask_image)
+            if stop_gradient:
+                mask_vector = jax.lax.stop_gradient(mask_vector)
+            encoded.append(mask_vector)
+
+        if (
+            self.tactile_encoder is not None
+            and self.tactile_image_key in observations
+        ):
+            tactile = jnp.asarray(observations[self.tactile_image_key])
+            if self.enable_stacking:
+                if tactile.ndim == 4:
+                    tactile = tactile[-1]
+                elif tactile.ndim == 5:
+                    tactile = tactile[:, -1]
+            tactile_vector = self.tactile_encoder(tactile, train=train)
+            if stop_gradient:
+                tactile_vector = jax.lax.stop_gradient(tactile_vector)
+            encoded.append(tactile_vector)
+
+        if self.use_proprio:
+            state = jnp.asarray(observations["state"])
+            if self.enable_stacking:
+                if state.ndim == 2:
+                    state = rearrange(state, "T C -> (T C)")
+                    encoded = [feature.reshape(-1) for feature in encoded]
+                elif state.ndim == 3:
+                    state = rearrange(state, "B T C -> B (T C)")
+            state = nn.Dense(
+                self.proprio_latent_dim,
+                kernel_init=nn.initializers.xavier_uniform(),
+                name="proprio_projection",
+            )(state)
+            state = nn.LayerNorm(name="proprio_projection_ln")(state)
+            encoded.append(nn.tanh(state))
+
+        encoded_vector = jnp.concatenate(encoded, axis=-1)
+
+        if return_feature_debug:
+            debug = {
+                "features": {
+                    self.task_image_key: {
+                        "raw_spatial": jnp.mean(
+                            jnp.square(spatial_features), axis=-1
+                        ),
+                        "head_spatial": grounding_logits,
+                        "raw_vector": None,
+                        "head_vector": None,
+                        "pre_mlp_vector": task_vector,
+                    }
+                },
+                "encoded": encoded_vector,
+                "attention_map": grounding_logits,
+            }
+            return encoded_vector, debug
+        if return_attention or return_cgl_attention:
+            # Both the actor overlay and the CGL loss want the grounding
+            # attention. The loss softmaxes these logits itself.
+            return encoded_vector, grounding_logits
+        return encoded_vector

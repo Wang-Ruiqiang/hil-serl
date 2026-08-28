@@ -63,7 +63,9 @@ def heatmap_confidence_from_logits(
     heatmaps whose peak location is stable.
     """
     batch_size = logits.shape[0]
-    heatmap = jax.nn.sigmoid(logits).reshape(batch_size, -1)
+    # softmax, matching how the head is trained. A sigmoid here would saturate:
+    # softmax-trained logits span a much wider range than sigmoid expects.
+    heatmap = jax.nn.softmax(logits.reshape(batch_size, -1), axis=-1)
     saliency = heatmap - jnp.min(heatmap, axis=-1, keepdims=True)
     saliency = jnp.maximum(saliency, 0.0)
     num_pixels = saliency.shape[-1]
@@ -117,14 +119,25 @@ def _build_spatial_encoders(image_keys: List[str], encoder_variant: str):
     }
 
 
+def _has_shape(value):
+    """A parameter leaf, whatever array type it happens to be.
+
+    Flax parameter leaves are jax.Array (ArrayImpl), not np.ndarray, so an
+    isinstance check against np.ndarray alone rejects every leaf and the merge
+    below becomes a no-op -- which is how the ImageNet weights were being
+    dropped without any error.
+    """
+    return hasattr(value, "shape") and hasattr(value, "dtype")
+
+
 def _safe_merge(dst, src):
     if isinstance(dst, dict) and isinstance(src, dict):
         for key, value in src.items():
             if key in dst:
                 dst[key] = _safe_merge(dst[key], value)
         return dst
-    if isinstance(dst, np.ndarray) and isinstance(src, np.ndarray) and dst.shape == src.shape:
-        return src
+    if _has_shape(dst) and _has_shape(src) and tuple(dst.shape) == tuple(src.shape):
+        return jnp.asarray(src, dtype=dst.dtype)
     return dst
 
 
@@ -140,15 +153,39 @@ def _load_backbone_params(params_tree, image_keys: List[str], encoder_variant: s
     encoder_params = load_resnet10_encoder_params()
     new_params = unfreeze(params_tree) if isinstance(params_tree, FrozenDict) else params_tree
     for image_key in image_keys:
-        encoder_scope = None
-        if "encoder_defs" in new_params:
+        # Flax names a submodule held in a dict-valued attribute as
+        # "{attribute}_{key}" and ignores the `name=` given to its constructor,
+        # so the encoder lives at "encoder_defs_front_camera" -- not under an
+        # "encoder_defs" subtree, and not at "encoder_front_camera". Getting
+        # this wrong used to print a warning and carry on, which silently threw
+        # away the ImageNet weights and trained the backbone from scratch.
+        candidates = (
+            f"encoder_defs_{image_key}",
+            f"encoder_{image_key}",
+        )
+        encoder_scope = next(
+            (new_params[name] for name in candidates if name in new_params), None
+        )
+        if encoder_scope is None and "encoder_defs" in new_params:
             encoder_scope = new_params["encoder_defs"].get(f"encoder_{image_key}")
         if encoder_scope is None:
-            encoder_scope = new_params.get(f"encoder_{image_key}")
-        if encoder_scope is None:
-            print(f"[warn] encoder scope not found under encoder_{image_key}")
-            continue
+            raise KeyError(
+                f"Could not find the encoder parameters for image_key={image_key!r}. "
+                f"Tried {candidates}; the tree has {sorted(new_params)}. "
+                "Refusing to continue, because silently skipping this trains the "
+                "backbone from scratch."
+            )
+        before = jax.tree_util.tree_leaves(encoder_scope)
         _safe_merge(encoder_scope, encoder_params)
+        after = jax.tree_util.tree_leaves(encoder_scope)
+        replaced = sum(
+            1 for a, b in zip(before, after)
+            if a.shape == b.shape and not np.array_equal(np.asarray(a), np.asarray(b))
+        )
+        shared = sorted(set(encoder_scope) & set(encoder_params))
+        print(f"[gaze-heatmap][init] loaded ImageNet ResNet-10 into "
+              f"encoder for {image_key!r}: {len(shared)} submodules "
+              f"({', '.join(shared)}), {replaced}/{len(before)} arrays changed")
     return freeze(new_params)
 
 
@@ -201,8 +238,14 @@ def load_gaze_point_predictor_func(
         outputs = state.apply_fn({"params": state.params}, observations, train=False)
         heatmap_logits = outputs["heatmap_logits"]
         gaze_conf = heatmap_confidence_from_logits(heatmap_logits)
+        # Spatial softmax rescaled so the peak is 1.0. Downstream only takes the
+        # argmax and displays the map, both of which are unchanged by the
+        # rescale, but keeping it in [0, 1] preserves what callers expect.
+        shape = heatmap_logits.shape
+        probs = jax.nn.softmax(heatmap_logits.reshape(shape[0], -1), axis=-1)
+        probs = probs / jnp.maximum(probs.max(axis=-1, keepdims=True), 1e-12)
         return {
-            "gaze_heat": jax.nn.sigmoid(heatmap_logits),
+            "gaze_heat": probs.reshape(shape),
             "gaze_conf": gaze_conf,
         }
 
