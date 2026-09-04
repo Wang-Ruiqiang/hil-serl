@@ -1,39 +1,57 @@
 # Evaluate one checkpoint of a ViT run.
 #
-#   bash run_eval_vit.sh                    # uses the settings below
-#   MODE=gaze40 bash run_eval_vit.sh        # the 2026-08-25 gaze encoder (default)
-#   MODE=phase bash run_eval_vit.sh         # the mask-supervised phase run
+#   MODE=gaze3q bash run_eval_vit.sh        # the gaze run
+#   MODE=phase  bash run_eval_vit.sh        # the 2026-08-20b run that succeeded (default)
 #   bash run_eval_vit.sh 120000             # a bare number overrides CKPT_STEP
-#   bash run_eval_vit.sh --save_video       # extra flags are passed through
+#   bash run_eval_vit.sh --eval_n_trajs=20  # extra flags are passed through
 #
-# MODE must match how the run was trained -- see run_learner_vit.sh. gaze loads
-# no mask predictor, no gaze predictor and no pick classifier for the encoder,
-# and the ViT is frozen; phase is the mask-supervised, phase-conditioned run.
+# MODE must match how the run was trained -- see run_learner_vit.sh. Modes for
+# the runs that failed (nohand, gazemask, gaze40) were removed; their encoders
+# and checkpoints are still on disk, see RUNS.md.
 #
-# Recordings land in <RUN_DIR>/eval_recordings: raw_*.mp4/.webm,
-# attention_*.mp4/.webm, episode_*.npz and a cumulative summary.json. Every
-# invocation gets its own timestamped prefix, so repeated evals accumulate
-# instead of overwriting. Afterwards:
+# Two kinds of video come out of an eval, and they are not the same thing:
+#
+#   <RUN_DIR>/eval_recordings/  raw_*.mp4/.webm is the 128x128 front_camera
+#                               OBSERVATION the policy actually sees, plus
+#                               attention_*.mp4/.webm (raw | attention |
+#                               attention^gamma), episode_*.npz and a cumulative
+#                               summary.json. Written by eval_recorder.py, on by
+#                               default via --eval_record.
+#   <RUN_DIR>/videos/<episode>/ the full-resolution camera feed, one mp4 per
+#                               camera per episode, written by the env itself.
+#                               This is the one to show people. On by default
+#                               here; --nosave_video turns it off. FrankaEnv
+#                               writes it to ./videos relative to the working
+#                               directory, which is why the run is launched from
+#                               inside RUN_DIR. It buffers a whole episode of
+#                               full-res frames in RAM first, roughly 350 MB for
+#                               a 200-step episode across two cameras.
+#
+# Every eval_recordings invocation gets its own timestamped prefix, so repeated
+# evals accumulate instead of overwriting. Afterwards:
 #
 #   python examples/analyze_eval.py --run_dir <RUN_DIR> \
 #       --encoder_checkpoint <ENCODER_CKPT>
 
-MODE="${MODE:-gaze40}"
+MODE="${MODE:-phase}"
 
 # ============================ edit these ============================
-N_TRAJS=5                   # episodes to run
-if [ "$MODE" = "gaze40" ]; then
-    CKPT_STEP=148000        # which checkpoint_<N> to evaluate
-    RUN_NAME=2026-8-27_0_ball_pick_and_place_vit_gaze40_rl_run
-    ENCODER_RUN=newgaze40_dil1
-elif [ "$MODE" = "gaze" ]; then
-    CKPT_STEP=166000
-    RUN_NAME=2026-8-24_0_ball_pick_and_place_vit_gaze_rl_run
-    ENCODER_RUN=tennis_ball_pick_and_place_vit_grounded_gaze
-else
+N_TRAJS=10                   # episodes to run
+if [ "$MODE" = "gaze3q" ]; then
+    CKPT_STEP=176000
+    RUN_NAME=2026-09-02b_vit_gaze3q_noGazeState
+    ENCODER_RUN=gaze3q
+elif [ "$MODE" = "replicate" ]; then
     CKPT_STEP=134000
-    RUN_NAME=2026-8-20_1_ball_pick_and_place_vit_phase_rl_run
+    RUN_NAME=2026-09-02_vit_phase_replication
     ENCODER_RUN=tennis_ball_pick_and_place_vit_grounded_phase
+elif [ "$MODE" = "phase" ]; then
+    CKPT_STEP=134000
+    RUN_NAME=2026-08-20b_vit_attnPlusHand_phase_maskobs_SUCCESS
+    ENCODER_RUN=tennis_ball_pick_and_place_vit_grounded_phase
+else
+    echo "unknown MODE='$MODE'. Use gaze3q, replicate or phase." >&2
+    exit 1
 fi
 # ====================================================================
 
@@ -62,31 +80,46 @@ export PYTHONPATH="$ROOT:${PYTHONPATH:-}"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export XLA_PYTHON_CLIENT_MEM_FRACTION=.2
 
-if [ "$MODE" = "gaze40" ] || [ "$MODE" = "gaze" ]; then
-    python "$ROOT/examples/train_rlpd.py" \
-        --exp_name=tennis_ball_pick_and_place \
-        --encoder_type=vit-gaze \
-        --encoder_checkpoint_path="$ROOT/examples/encoder_training/runs/$ENCODER_RUN/best.msgpack" \
-        --checkpoint_path="$RUN_DIR" \
-        --actor_feature_overlay \
-        --actor_feature_overlay_gamma=1.0 \
-        --actor \
-        --eval_checkpoint_step="$CKPT_STEP" \
-        --eval_n_trajs="$N_TRAJS" \
-        "$@"
+# Must match the predictor the run trained with, or the masks the policy sees at
+# eval are not the masks it learned on.
+if [ "$MODE" = "gaze3q" ]; then
+    MASK_PREDICTOR="$ROOT/examples/gaze_data_process/SAM_process/mask_predictor_ckpt_0814/best.pt"
 else
-    python "$ROOT/examples/train_rlpd.py" \
-        --exp_name=tennis_ball_pick_and_place \
-        --encoder_type=vit-grounded \
-        --encoder_checkpoint_path="$ROOT/examples/encoder_training/runs/$ENCODER_RUN/best.msgpack" \
-        --checkpoint_path="$RUN_DIR" \
-        --gaze_predictor_checkpoint_path="$ROOT/examples/gaze_data_process/gaze_heatmap_ckpt" \
-        --mask_predictor_checkpoint_path="$ROOT/examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt" \
-        --mask_selection_mode=pick_classifier \
-        --pick_classifier_checkpoint_path="$ROOT/examples/reward_classifier/classifier_ckpt_ball_pick" \
-        --actor_feature_overlay \
-        --actor \
-        --eval_checkpoint_step="$CKPT_STEP" \
-        --eval_n_trajs="$N_TRAJS" \
-        "$@"
+    MASK_PREDICTOR="$ROOT/examples/gaze_data_process/SAM_process/mask_predictor_ckpt/best.pt"
 fi
+
+# gazehybrid selects the mask from predicted gaze and loads no pick classifier;
+# the other two select it from the classifier. Mixing them would feed the frozen
+# grounding query the wrong two state columns.
+if [ "$MODE" = "gaze3q" ]; then
+    SELECTION=(--mask_selection_mode=gaze
+               --gaze_predictor_checkpoint_path="$ROOT/examples/gaze_data_process/gaze_heatmap_ckpt_0825")
+else
+    SELECTION=(--mask_selection_mode=pick_classifier
+               --pick_classifier_checkpoint_path="$ROOT/examples/reward_classifier/classifier_ckpt_ball_pick")
+fi
+
+# Launched from inside RUN_DIR so FrankaEnv's hard-coded ./videos lands with the
+# run instead of wherever the shell happened to be. Every path handed to
+# train_rlpd is absolute, so the working directory does not affect anything
+# else. A subshell keeps the change local.
+mkdir -p "$RUN_DIR/videos"
+(
+cd "$RUN_DIR" && python "$ROOT/examples/train_rlpd.py" \
+    --exp_name=tennis_ball_pick_and_place \
+    --encoder_type=vit-grounded \
+    --encoder_checkpoint_path="$ROOT/examples/encoder_training/runs/$ENCODER_RUN/best.msgpack" \
+    --checkpoint_path="$RUN_DIR" \
+    --mask_predictor_checkpoint_path="$MASK_PREDICTOR" \
+    "${SELECTION[@]}" \
+    --actor_feature_overlay \
+    --save_video \
+    --actor \
+    --eval_checkpoint_step="$CKPT_STEP" \
+    --eval_n_trajs="$N_TRAJS" \
+    "$@"
+)
+
+echo
+echo "full-resolution video: $RUN_DIR/videos/<episode>/"
+echo "observation + attention: $RUN_DIR/eval_recordings/"

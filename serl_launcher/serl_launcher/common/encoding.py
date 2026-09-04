@@ -556,22 +556,29 @@ class ViTGroundedEncodingWrapper(nn.Module):
     mask_image_key: str = "front_camera_mask"
     tactile_image_key: str = "tactile_data"
     grounding_tactile_conditioned: bool = False
+    # Read the last two state columns as a gaze position rather than a phase
+    # one-hot. Same slot, same width; only the meaning differs, so demos
+    # exported under either convention load unchanged.
+    grounding_gaze_conditioned: bool = False
     grounding_phase_conditioned: bool = False
 
     def _grounding_phase(self, observations):
-        """The phase one-hot the grounding query is indexed by.
+        """The last two state columns the grounding query is conditioned on.
 
-        This is the same signal the mask wrapper uses to choose which slot
-        `front_camera_mask` holds, so the query and the CGL target it is scored
-        against can never disagree about which phase it is.
+        Under phase conditioning they hold a one-hot the mask wrapper also uses
+        to choose which slot `front_camera_mask` carries, so the query and the
+        CGL target can never disagree about the phase. Under gaze conditioning
+        they hold the gaze position instead -- same two columns, so demos and
+        replay buffers written under either convention stay loadable.
         """
-        if not self.grounding_phase_conditioned:
+        if not (self.grounding_phase_conditioned or self.grounding_gaze_conditioned):
             return None
         state = observations.get("state")
         if state is None:
             raise ValueError(
-                "grounding_phase_conditioned=True needs 'state' in the "
-                "observations to read the phase one-hot from."
+                "grounding_phase_conditioned / grounding_gaze_conditioned "
+                "need 'state' in the observations to read their last two "
+                "columns from."
             )
         state = jnp.asarray(state)
         if state.shape[-1] < PHASE_ONEHOT_DIM:
@@ -628,6 +635,11 @@ class ViTGroundedEncodingWrapper(nn.Module):
                     and self.tactile_image_key in observations)
                 else None
             ),
+            gaze_xy=(
+                self._grounding_phase(observations)
+                if self.grounding_gaze_conditioned
+                else None
+            ),
         )
         if stop_gradient:
             task_vector = jax.lax.stop_gradient(task_vector)
@@ -657,6 +669,22 @@ class ViTGroundedEncodingWrapper(nn.Module):
 
         if self.use_proprio:
             state = jnp.asarray(observations["state"])
+            if self.grounding_gaze_conditioned:
+                # Under gaze conditioning the last two columns hold the gaze
+                # position, and the policy must not see it. Measured on the
+                # 2026-09-02 run: during pick those columns track the ball's
+                # image centroid at r=0.68/0.89 with a 5.8 px median error --
+                # 82% of the ball's own 7 px diameter -- while the mask branch
+                # already supplies the same centroid to 0.84 px. Two competing
+                # ball positions, one of them wrong by most of a ball, and
+                # nothing telling the policy which to trust; pick stalled at a
+                # 38% intervention rate while place, whose 55 px target makes
+                # 5.8 px irrelevant, learned faster than the phase-one-hot run.
+                # The ViT still gets the full position: _grounding_phase reads
+                # the untouched observation, so only this projection loses it.
+                # Phase conditioning keeps its one-hot -- that path has to stay
+                # bit-identical to the run that worked.
+                state = state[..., :-PHASE_ONEHOT_DIM]
             if self.enable_stacking:
                 if state.ndim == 2:
                     state = rearrange(state, "T C -> (T C)")

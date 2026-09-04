@@ -722,6 +722,21 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                 "encoder_norm",
                 "cls",
                 "grounding_query",
+                # The conditioners belong with the query, not with the readout.
+                # They decide WHICH of the query table's rows gets asked, so a
+                # trainable conditioner in front of a frozen table is the same
+                # thing as a trainable query. Leaving them out cost the
+                # 2026-09-02 run its gaze conditioning: after 152k steps
+                # gaze_conditioner/Dense_0's bias had moved 261% of its
+                # pretrained magnitude under TD alone, and the query stopped
+                # following the fixation -- the attention answered "ball" while
+                # the gaze, the selected mask and the operator were all on the
+                # basket. The phase-conditioned encoder never showed this
+                # because it has no conditioner: its one-hot goes straight from
+                # the observation into the einsum with the frozen table, with
+                # nothing learnable in between.
+                "gaze_conditioner",
+                "tactile_conditioner",
             )
             if freeze_vit_trunk
             else ()
@@ -935,7 +950,18 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                 grounding_phase_dim = int(
                     checkpoint_config.get("grounding_phase_dim", 0)
                 )
-                if grounding_phase_dim not in (0, PHASE_ONEHOT_DIM):
+                grounding_tactile_cfg = bool(
+                    checkpoint_config.get("grounding_tactile_conditioned", False))
+                grounding_gaze_cfg = bool(
+                    checkpoint_config.get("grounding_gaze_conditioned", False))
+                # The width only has to match a one-hot when a one-hot is what
+                # feeds the query. A gaze-conditioned query reads two state
+                # columns holding a position and maps them, through its own
+                # head, onto however many rows the table has -- three, once the
+                # hand gets a row of its own. Tactile is the same: its
+                # conditioner reads an image, not the state.
+                if (not (grounding_tactile_cfg or grounding_gaze_cfg)
+                        and grounding_phase_dim not in (0, PHASE_ONEHOT_DIM)):
                     raise ValueError(
                         f"encoder checkpoint declares grounding_phase_dim="
                         f"{grounding_phase_dim}, but the state carries a "
@@ -943,6 +969,12 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                     )
                 grounding_tactile = bool(
                     checkpoint_config.get("grounding_tactile_conditioned", False))
+                # Gaze conditioning reads the same two state columns a phase
+                # one-hot would, but they hold the gaze position instead. The
+                # observation wrapper is told to write them that way; see
+                # condition_on_gaze_xy in GazeDerivedObservationWrapper.
+                grounding_gaze = bool(
+                    checkpoint_config.get("grounding_gaze_conditioned", False))
                 if use_vit_gaze_pipeline:
                     # A phase-conditioned checkpoint would make the query read
                     # state[..., -2:], and under vit-gaze those two columns are
@@ -953,7 +985,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                     # query's conditioning then comes from the tactile frame
                     # inside the encoder, not from state columns that hold
                     # proprioception under this pipeline.
-                    if grounding_phase_dim != 0 and not grounding_tactile:
+                    if grounding_phase_dim != 0 and not (grounding_tactile or grounding_gaze):
                         raise ValueError(
                             "vit-gaze requires an unconditioned grounding query, "
                             f"but {encoder_checkpoint_path} declares "
@@ -968,7 +1000,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                     # Neither puts a mask into the observation, so the RL side is
                     # identical either way -- what differs is only what the frozen
                     # query was taught to look at.
-                    if source not in ("gaze", "gaze_mask"):
+                    if source not in ("gaze", "gaze_mask", "gaze_hybrid"):
                         raise ValueError(
                             "vit-gaze expects an encoder pretrained with "
                             "grounding_source=gaze or gaze_mask, but "
@@ -994,6 +1026,7 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
                 use_grounding_query=True,
                 grounding_phase_dim=grounding_phase_dim,
                 grounding_tactile_conditioned=grounding_tactile,
+                grounding_gaze_conditioned=grounding_gaze,
                 dropout_rate=0.0,
                 attention_dropout_rate=0.0,
                 normalize_method="unit",
@@ -1002,8 +1035,11 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             encoder_def = ViTGroundedEncodingWrapper(
                 task_encoder=task_encoder,
                 grounding_phase_conditioned=(
-                    grounding_phase_dim > 0 and not grounding_tactile),
+                    grounding_phase_dim > 0
+                    and not grounding_tactile
+                    and not grounding_gaze),
                 grounding_tactile_conditioned=grounding_tactile,
+                grounding_gaze_conditioned=grounding_gaze,
                 mask_encoder=(
                     MaskCNNEncoder(
                         latent_dim=mask_encoder_latent_dim,
@@ -1172,6 +1208,15 @@ class SACAgentHybridSingleArmGaze(SACAgentHybridSingleArm):
             )
             if grounding_tactile:
                 regime += "; grounding query conditioned on TACTILE"
+            elif grounding_gaze:
+                # Checked before the phase branch: a gaze-conditioned encoder
+                # also has grounding_phase_dim > 0, so the old ordering printed
+                # PHASE-CONDITIONED for every gaze run.
+                regime += (
+                    f"; grounding query GAZE-CONDITIONED on state[..., -2:] "
+                    f"({grounding_phase_dim} query rows), and those two columns "
+                    "are withheld from the policy's proprio projection"
+                )
             elif grounding_phase_dim:
                 regime += "; grounding query PHASE-CONDITIONED on state[..., -2:]"
             else:

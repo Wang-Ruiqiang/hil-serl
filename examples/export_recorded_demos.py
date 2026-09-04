@@ -24,7 +24,10 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ROBOT_INFRA_DIR))
 
-from serl_launcher.utils.gaze_mask_utils import gaze_phase_onehot  # noqa: E402
+from serl_launcher.utils.gaze_mask_utils import (  # noqa: E402
+    gaze_phase_onehot,
+    select_gaze_target_mask,
+)
 
 FLAGS = flags.FLAGS
 
@@ -46,6 +49,20 @@ flags.DEFINE_boolean(
     "require_gaze_hit",
     False,
     "Skip frames whose gaze JSON has hit=false.",
+)
+flags.DEFINE_enum(
+    "state_gaze_slot",
+    "phase",
+    ["phase", "gaze_xy"],
+    "What the last two state columns carry. Both are two numbers, so the "
+    "observation space is identical either way -- only the meaning differs, "
+    "and it has to match what the encoder's grounding query was trained to "
+    "read. 'phase' writes the [mask1, mask2] one-hot the pick_classifier "
+    "pipeline uses. 'gaze_xy' writes the recorded fixation, normalised over "
+    "the full RealSense frame exactly as train_encoder.py does, for encoders "
+    "built with --grounding_gaze_conditioned. Frames without a usable "
+    "fixation get (-1, -1), the same out-of-frame value append_gaze_xy_to_state "
+    "uses, so the conditioner can tell 'no gaze' from a corner.",
 )
 flags.DEFINE_boolean(
     "disable_image_crop",
@@ -129,8 +146,10 @@ flags.DEFINE_string(
 )
 flags.DEFINE_integer(
     "gaze_target_mask_dilation",
-    0,
-    "Dilation radius in exported 128x128 mask pixels when checking gaze hits.",
+    2,
+    "Dilation radius in exported 128x128 mask pixels when checking gaze hits. "
+    "Defaults to the same 2 train_rlpd.py uses, so a demo frame and the "
+    "identical frame online resolve to the same slot.",
 )
 def _frame_number(path: Path) -> int:
     match = re.search(r"frame_(\d+)", path.name)
@@ -211,18 +230,25 @@ def _mask_paths(frame_dir: Path):
         "mask1": [
             frame_dir / "ball_mask.png",
             frame_dir / "mask1.png",
+            # The 2026-08-25 sessions name it target_ball_mask.png. Without
+            # this the export silently finds nothing and writes blank masks --
+            # which is exactly how new30_demos.pkl ended up with all three
+            # mask images empty in all 5822 transitions.
+            frame_dir / "target_ball_mask.png",
             frame_dir / "rs_mask_obj0.png",
             *(root / "sam_masks" / name for name in central_names["mask1"]),
             *(root / "sam_masks" / "propagated" / name for name in central_names["mask1"]),
         ],
         "hand": [
             frame_dir / "hand_mask.png",
+            frame_dir / "sam_hand_mask.png",
             *(root / "sam_masks" / name for name in central_names["hand"]),
             *(root / "sam_masks" / "propagated" / name for name in central_names["hand"]),
         ],
         "mask2": [
             frame_dir / "basket_mask.png",
             frame_dir / "mask2.png",
+            frame_dir / "sam_basket_mask.png",
             frame_dir / "rs_mask_obj1.png",
             *(root / "sam_masks" / name for name in central_names["mask2"]),
             *(root / "sam_masks" / "propagated" / name for name in central_names["mask2"]),
@@ -237,40 +263,6 @@ def _first_existing_mask(frame_dir: Path, slot: str, target_shape=(128, 128)):
     return np.zeros(target_shape, dtype=bool)
 
 
-def _dilate_mask(mask, radius: int):
-    if radius <= 0:
-        return mask
-    kernel_size = int(radius) * 2 + 1
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (kernel_size, kernel_size),
-    )
-    return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
-
-
-def _mask_bbox(mask):
-    ys, xs = np.where(np.asarray(mask, dtype=bool))
-    if xs.size == 0 or ys.size == 0:
-        return None
-    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
-
-
-def _mask_bbox_inside(inner_mask, outer_mask, margin_px: int = 2):
-    inner_bbox = _mask_bbox(inner_mask)
-    outer_bbox = _mask_bbox(outer_mask)
-    if inner_bbox is None or outer_bbox is None:
-        return False
-    ix0, iy0, ix1, iy1 = inner_bbox
-    ox0, oy0, ox1, oy1 = outer_bbox
-    margin_px = int(margin_px)
-    return (
-        ix0 >= ox0 - margin_px
-        and iy0 >= oy0 - margin_px
-        and ix1 <= ox1 + margin_px
-        and iy1 <= oy1 + margin_px
-    )
-
-
 def _phase_onehot(selected_index):
     # Delegate to the shared implementation so this cannot drift from the
     # width the env wrappers append -- a local copy is how demos would end up
@@ -279,47 +271,35 @@ def _phase_onehot(selected_index):
 
 
 def _read_gaze_target_mask(frame_dir: Path, target_shape=(128, 128)):
+    """Pick the mask the recorded fixation lands on, using the wrapper's rule.
+
+    Delegated rather than reimplemented, for the same reason _phase_onehot is:
+    a local copy drifts. The copy this replaced dilated by a different default
+    and broke ties by mask area, so a demo frame whose gaze sat between the two
+    objects went to the basket -- 60x the ball's area -- while the identical
+    frame online went to whichever was nearer.
+    """
     try:
         gaze_xy = _read_recorded_gaze_xy(frame_dir)
     except Exception:
         return np.zeros(target_shape, dtype=bool), None
 
-    mask1 = _first_existing_mask(frame_dir, "mask1", target_shape)
-    mask2 = _first_existing_mask(frame_dir, "mask2", target_shape)
-    masks = [mask1, mask2]
-
-    height, width = target_shape
-    gaze_x = int(round(float(np.clip(gaze_xy[0], 0.0, 1.0)) * (width - 1)))
-    gaze_y = int(round(float(np.clip(gaze_xy[1], 0.0, 1.0)) * (height - 1)))
-
-    search_masks = [
-        _dilate_mask(mask, FLAGS.gaze_target_mask_dilation) for mask in masks
-    ]
-    candidate_indices = [
-        index
-        for index, mask in enumerate(search_masks)
-        if bool(mask[gaze_y, gaze_x])
-    ]
-    if not candidate_indices:
-        selected_index = 0
-        selected = masks[selected_index]
-    elif len(candidate_indices) == 1:
-        selected_index = candidate_indices[0]
-        selected = masks[selected_index]
-    elif 0 in candidate_indices and 1 in candidate_indices and _mask_bbox_inside(
-        masks[0],
-        masks[1],
-    ):
-        selected_index = 1
-        selected = masks[1]
-    else:
-        selected_index = max(
-            candidate_indices,
-            key=lambda index: int(masks[index].sum()),
-        )
-        selected = masks[selected_index]
-
-    return selected, selected_index
+    mask_probs = np.stack(
+        [
+            _first_existing_mask(frame_dir, slot, target_shape).astype(np.float32)
+            for slot in ("mask1", "mask2")
+        ],
+        axis=0,
+    )
+    selected, info = select_gaze_target_mask(
+        mask_probs,
+        None,
+        target_shape=target_shape,
+        dilation_px=FLAGS.gaze_target_mask_dilation,
+        gaze_xy_norm=gaze_xy,
+        return_info=True,
+    )
+    return selected > 0.5, info["selected_mask_index"]
 
 
 def _mask_to_image(mask):
@@ -460,7 +440,27 @@ def _read_frame_data(
         np.asarray(tcp_ori, dtype=np.float32).reshape(-1),
         np.asarray(hand_state, dtype=np.float32).reshape(-1),
     ]
-    if gaze_phase is not None:
+    if FLAGS.state_gaze_slot == "gaze_xy":
+        # _read_recorded_gaze_xy already returns the fixation normalised over
+        # the full frame -- _front_camera_bounds is (0, 0, w, h) and the env
+        # resizes the whole frame rather than cropping it -- so this is the
+        # same convention train_encoder.py fed the grounding query offline and
+        # the same one gaze_xy_norm_from_heatmap produces online.
+        # hit=False means the homography did not place the fixation in the
+        # frame, so the stored uv is stale. train_encoder.py drops those frames
+        # outright; the slot has to agree, or the query is conditioned on a
+        # position the operator was never looking at.
+        gaze_slot = np.asarray([-1.0, -1.0], dtype=np.float32)
+        try:
+            gaze_json = json.loads(
+                (frame_dir / FLAGS.gaze_json_name).read_text()
+            )
+            if bool(gaze_json.get("hit", False)):
+                gaze_slot = _read_recorded_gaze_xy(frame_dir)
+        except Exception:
+            pass
+        state_parts.append(np.asarray(gaze_slot, dtype=np.float32).reshape(-1)[:2])
+    elif gaze_phase is not None:
         state_parts.append(gaze_phase)
     obs["state"] = np.concatenate(state_parts, axis=0).astype(np.float32)
     action = _read_numeric_file(

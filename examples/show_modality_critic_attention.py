@@ -32,8 +32,8 @@ DEFAULT_CHECKPOINT_PATH = str(
     / "examples"
     / "experiments"
     / "tennis_ball_pick_and_place"
-    # / "2026-7-21_0_ball_pick_and_place_rl_run"
-    / "2026-8-13_0_ball_pick_and_place_vit_rl_run"
+    # / "2026-07-21_resnet_maskhead_maskobs_SUCCESS"
+    / "2026-08-13_vit_noattn_maskobs_fail"
 )
 DEFAULT_ROBOT_URDF_PATH = str(
     REPO_ROOT / "examples" / "urdf" / "fr3_moveit_servo.urdf"

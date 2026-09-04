@@ -36,9 +36,13 @@ DEFAULT_DATA_ROOTS = [
     "/media/user/data3/wrq/recorded_data/tennis_ball_pick/tennis_ball_pick-6-23-1",
 ]
 MASK_SLOTS = ("mask1", "mask2")
+# Same aliases train_encoder.py resolves, so both consume one labelling. The
+# 2026-08-25 sessions store the ball as target_ball_mask.png and the basket as
+# sam_basket_mask.png; without these entries a run on that data silently finds
+# no labels at all.
 MASK_FILE_CANDIDATES = {
-    "mask1": ("ball_mask.png", "mask1.png"),
-    "mask2": ("basket_mask.png", "mask2.png"),
+    "mask1": ("ball_mask.png", "mask1.png", "target_ball_mask.png"),
+    "mask2": ("basket_mask.png", "mask2.png", "sam_basket_mask.png"),
 }
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = str(SCRIPT_DIR / "mask_predictor_ckpt")

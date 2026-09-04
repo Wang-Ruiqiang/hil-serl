@@ -229,8 +229,18 @@ def _load_phase_scan(path: Path) -> Dict[Tuple[str, int], int]:
     return transitions
 
 
-def find_phase_demos(root: Path, stride: int, phase_scan_path: Path) -> List[DemoRecord]:
-    """Expand recording metadata into episode-level, phase-aware demos."""
+def find_phase_demos(
+    root: Path, stride: int, phase_scan_path: Path, kept_ranges_only: bool = False
+) -> List[DemoRecord]:
+    """Expand recording metadata into episode-level, phase-aware demos.
+
+    ``kept_ranges_only`` mirrors find_episode_demos: it restricts each episode to
+    its ``kept_frame_ranges``. It defaults to False because the frames the gaze
+    filter dropped are dropped for gaze reasons, and this branch is supervised by
+    masks, not gaze -- the 2026-08-20 phase run that succeeded used full episode
+    ranges. The body already referenced this name without the signature declaring
+    it, which made every call raise NameError.
+    """
     transitions = _load_phase_scan(phase_scan_path)
     demos: List[DemoRecord] = []
     skipped = []
@@ -301,10 +311,22 @@ def load_gaze_point(frame_dir: Path, gaze_json_name: str):
 PHASE_DIM = 2  # (pick, place); see _batch_to_jax for why not 3
 
 
+# Fallbacks are tried in order, so a session that carries the manual annotation
+# keeps using it and only sessions without one fall through to the SAM3 output.
+# The 2026-08-25 recordings were never hand-annotated: they have
+# target_ball_mask.png (SAM3's ball, completed to a circle where the grasp
+# occludes it) and sam_basket_mask.png, and no hand mask at all.
 MASK_FILE_ALIASES = {
-    "ball_mask.png": ("ball_mask.png", "mask1.png"),
-    "basket_mask.png": ("basket_mask.png", "mask2.png"),
-    "hand_mask.png": ("hand_mask.png",),
+    "ball_mask.png": ("ball_mask.png", "mask1.png", "target_ball_mask.png"),
+    "basket_mask.png": ("basket_mask.png", "mask2.png", "sam_basket_mask.png"),
+    # sam_hand_mask.png comes from a SAM3 point prompt placed by a probe that
+    # predicts the hand centroid from the encoder's own features (fitted on the
+    # 2026-08-14 manual masks, 0.88 px). Measured against those manual masks it
+    # reaches IoU 0.746 -- far from perfect, but the target is pooled onto a
+    # 14x14 grid where the hand spans ~20 cells, so edge error costs little.
+    # Text prompts were tried first and are unusable on this hand: 0.41, with
+    # 0% of frames above 0.7.
+    "hand_mask.png": ("hand_mask.png", "sam_hand_mask.png"),
 }
 
 
@@ -332,6 +354,8 @@ class TaskDemoFrameDataset(Dataset):
         augment: bool = False,
         crop_padding: int = 4,
         grounding_source: str = "mask",
+        gaze_ball_dilate_frac: float = 0.4,
+        gaze_xy_jitter_px: float = 0.0,
         token_grid: Tuple[int, int] = (14, 14),
         gaze_sigma_cells: float = DEFAULT_SIGMA_CELLS,
         gaze_dilate_cells: float = DEFAULT_DILATE_CELLS,
@@ -342,6 +366,8 @@ class TaskDemoFrameDataset(Dataset):
         self.demos = list(demos)
         self.image_size = image_size
         self.grounding_source = str(grounding_source)
+        self.gaze_ball_dilate_frac = float(gaze_ball_dilate_frac)
+        self.gaze_xy_jitter_px = float(gaze_xy_jitter_px)
         self.token_grid = (int(token_grid[0]), int(token_grid[1]))
         self.gaze_sigma_cells = float(gaze_sigma_cells)
         self.gaze_dilate_cells = float(gaze_dilate_cells)
@@ -357,7 +383,7 @@ class TaskDemoFrameDataset(Dataset):
                 )
                 for demo in self.demos
             ]
-            if self.grounding_source == "gaze"
+            if self.grounding_source in ("gaze", "gaze_hybrid")
             else []
         )
         self.mask_files = list(mask_files)
@@ -506,6 +532,10 @@ class TaskDemoFrameDataset(Dataset):
         # the pixels it is supervising.
         gaze_target = np.zeros(self.token_grid, dtype=np.float32)
         gaze_valid = 0.0
+        # Which query row this frame should select, and whether gaze said so
+        # clearly enough to be worth teaching. Only set on the gaze_hybrid path.
+        cond_label = 0.0
+        cond_valid = 0.0
         if self.grounding_source == "gaze_mask":
             # target_mask.png is whichever SAM3 mask gaze selected, written by
             # gaze_sam/build_mask_targets.py. Cropped with the same offset as
@@ -525,6 +555,142 @@ class TaskDemoFrameDataset(Dataset):
                 if cells.sum() > 0:
                     gaze_target = cells / cells.sum()
                     gaze_valid = 1.0
+        elif self.grounding_source == "gaze_hybrid":
+            # Gaze picks the target, but never defines its shape.
+            #
+            #   gaze inside the DILATED ball  -> target is the ORIGINAL ball mask
+            #   gaze inside the basket        -> target is the basket mask
+            #   gaze on neither               -> target is a blob at the gaze point
+            #
+            # The dilation only widens the containment test, so an operator
+            # looking at the contact seam a few pixels off the ball still
+            # selects the ball -- and still gets the ball's true silhouette as
+            # the target, not a square or a disc. Measured on the 2026-08-25
+            # recordings: gaze lands on the ball 15.5%, the basket 32.6%, and
+            # neither 51.8% of frames, and that last group sits a median 9.1 px
+            # from the ball centre, i.e. on the fingers closing around it. That
+            # group is why the blob branch exists: those frames are the contact
+            # region, and discarding them would throw away half the data.
+            frame_id = _frame_id(frame)
+            points = self.gaze_points[demo_index]
+            gaze_xy = points.get(frame_id)
+            if gaze_xy is not None:
+                gx = int(np.clip(gaze_xy[0] * self.image_size, 0, self.image_size - 1))
+                gy = int(np.clip(gaze_xy[1] * self.image_size, 0, self.image_size - 1))
+
+                def _mask(name):
+                    path = resolve_mask_path(frame, name)
+                    raw = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE) if path else None
+                    if raw is None:
+                        return None
+                    raw = cv2.resize(raw, (self.image_size, self.image_size),
+                                     interpolation=cv2.INTER_NEAREST)
+                    return (raw > 127).astype(np.float32)
+
+                ball = _mask("ball_mask.png")
+                basket = _mask("basket_mask.png")
+                chosen = None
+                hand_first = _mask("hand_mask.png")
+                # Hand before ball. Once the ball is grown by a fraction of its
+                # radius the grown region covers the fingers closing on it, so a
+                # fixation on the contact seam satisfies both tests. Checking the
+                # ball first labelled those frames "ball", which put near
+                # identical gaze positions in two different classes and left the
+                # conditioner unable to commit: it answered 0.463 ball / 0.336
+                # hand / 0.201 basket on ball frames, and that 0.201 is basket
+                # attention during the grasp. Hand first also matches what the
+                # operator is doing -- when the fingers are on the ball, the
+                # thing being watched is the contact.
+                if hand_first is not None and hand_first.sum() > 0:
+                    if hand_first[gy, gx] > 0.5:
+                        chosen = hand_first
+                if chosen is None and ball is not None and ball.sum() > 0:
+                    # Grow the ball by a fraction of its OWN radius, the way a
+                    # 5 mm ball becomes 7 mm. An absolute pixel count would mean
+                    # something different at every resolution and every distance:
+                    # the first version used 40 px, a figure borrowed from masks
+                    # stored at 640x480, and applied it at 128x128 -- a disc a
+                    # third of the image wide, which swallowed 67% of all frames
+                    # into the "looking at the ball" branch.
+                    ball_radius = float(np.sqrt(ball.sum() / np.pi))
+                    radius = max(1, int(round(ball_radius
+                                              * self.gaze_ball_dilate_frac)))
+                    kernel = cv2.getStructuringElement(
+                        cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
+                    if cv2.dilate(ball, kernel)[gy, gx] > 0.5:
+                        chosen = ball            # original silhouette, not the dilated one
+                hand = hand_first
+                if chosen is None and basket is not None and basket.sum() > 0:
+                    if basket[gy, gx] > 0.5:
+                        chosen = basket
+                # The hand gets its own branch rather than being swept into the
+                # blob. Without it the ball's query row has to serve two
+                # incompatible jobs -- a tight silhouette on ball frames and a
+                # diffuse patch on contact frames -- and it showed: the ball
+                # branch scored worst of the three (0.683 against 0.976 for the
+                # basket) and the two query rows drifted together, cosine +0.68.
+                # Neither the basket nor the hand is dilated; only the ball is,
+                # because only the ball is small enough for a few pixels of gaze
+                # error to miss it entirely.
+                if chosen is None and hand is not None and hand.sum() > 0:
+                    if hand[gy, gx] > 0.5:
+                        chosen = hand
+
+                if chosen is not None:
+                    # The branch gaze took is exactly the question the query
+                    # should be asking, so it can supervise the conditioner
+                    # directly. Frames where gaze picked neither object are left
+                    # unlabelled: their target is a blob near the fingers, and
+                    # calling that "ball" or "basket" would be inventing a fact.
+                    cond_label = (0.0 if chosen is ball
+                                  else 1.0 if chosen is basket else 2.0)
+                    cond_valid = 1.0
+                    tensor = torch.from_numpy(chosen)[None]
+                    if self.augment:
+                        tensor = self._edge_pad_crop(tensor, offset_y, offset_x,
+                                                     self.crop_padding)
+                    cells = torch.nn.functional.adaptive_avg_pool2d(
+                        tensor, self.token_grid)[0].numpy()
+                    cells = (cells > 0.04).astype(np.float32)
+                    if cells.sum() > 0:
+                        gaze_target = cells / cells.sum()
+                        gaze_valid = 1.0
+                else:
+                    # Nothing contains the fixation, so give it to the nearest
+                    # object. Once the hand has a mask of its own this is a small
+                    # and well-behaved set: 12.7% of frames, sitting a median
+                    # 3.6 px from the nearest mask against 13.3 px from the
+                    # second, and only 0.3% further than 15 px from anything.
+                    # They are fixations on the seam between the fingers and the
+                    # ball, not looks at empty table.
+                    #
+                    # A Gaussian blob at the gaze point used to cover this case.
+                    # It was dropped because it is a much broader target than a
+                    # silhouette, and mixing two target widths in one KL teaches
+                    # the query to hedge between sharp and diffuse depending on
+                    # which branch a frame happened to take.
+                    best, best_d = None, None
+                    for candidate in (hand_first, ball, basket):
+                        if candidate is None or candidate.sum() <= 0:
+                            continue
+                        ys, xs = np.nonzero(candidate)
+                        d = float(np.min(np.hypot(xs - gx, ys - gy)))
+                        if best_d is None or d < best_d:
+                            best, best_d = candidate, d
+                    if best is not None:
+                        cond_label = (0.0 if best is ball
+                                      else 1.0 if best is basket else 2.0)
+                        cond_valid = 1.0
+                        tensor = torch.from_numpy(best)[None]
+                        if self.augment:
+                            tensor = self._edge_pad_crop(tensor, offset_y, offset_x,
+                                                         self.crop_padding)
+                        cells = torch.nn.functional.adaptive_avg_pool2d(
+                            tensor, self.token_grid)[0].numpy()
+                        cells = (cells > 0.04).astype(np.float32)
+                        if cells.sum() > 0:
+                            gaze_target = cells / cells.sum()
+                            gaze_valid = 1.0
         elif self.grounding_source == "gaze":
             points = self.gaze_points[demo_index]
             frame_id = _frame_id(frame)
@@ -544,7 +710,45 @@ class TaskDemoFrameDataset(Dataset):
                 )
                 gaze_valid = 1.0
 
+        # The conditioner reads the gaze position, not the target: it has to
+        # decide *which question to ask*, and at RL time the same two numbers
+        # arrive from the gaze predictor. -1 marks "no gaze this frame" so the
+        # network can learn a distinct response instead of reading (0, 0) as a
+        # real fixation in the top-left corner.
+        gaze_xy_out = np.full((2,), -1.0, dtype=np.float32)
+        if self.grounding_source in ("gaze", "gaze_hybrid"):
+            _pt = self.gaze_points[demo_index].get(_frame_id(frame))
+            if _pt is not None:
+                _gx, _gy = float(_pt[0]), float(_pt[1])
+                if self.augment:
+                    # shift_points_for_crop works in normalized [0, 1]
+                    # coordinates, not pixels: it multiplies by (width - 1),
+                    # applies the crop offset, divides back and clips. Handing
+                    # it pixels sent every value through that clip and collapsed
+                    # the whole batch to ~0.03, which is why the conditioner sat
+                    # at exactly ln 2 -- its input carried no information at all.
+                    _shift = shift_points_for_crop(
+                        np.asarray([[_gx, _gy]], dtype=np.float32),
+                        offset_y, offset_x, self.crop_padding,
+                        self.image_size, self.image_size,
+                    )
+                    _gx = float(_shift[0, 0])
+                    _gy = float(_shift[0, 1])
+                if self.augment and self.gaze_xy_jitter_px > 0:
+                    # At RL time the conditioner is fed the predictor's estimate,
+                    # not the eye tracker. Measured on held-out episodes, that
+                    # estimate sits a median 8.7 px from the real fixation, so
+                    # train the conditioner on inputs of the same accuracy rather
+                    # than on a clean signal it will never see again.
+                    _sd = self.gaze_xy_jitter_px / float(self.image_size)
+                    _gx = float(np.clip(_gx + np.random.normal(0.0, _sd), 0.0, 1.0))
+                    _gy = float(np.clip(_gy + np.random.normal(0.0, _sd), 0.0, 1.0))
+                gaze_xy_out = np.asarray([_gx, _gy], dtype=np.float32)
+
         return {
+            "gaze_xy": torch.from_numpy(gaze_xy_out),
+            "cond_label": torch.tensor(float(cond_label), dtype=torch.float32),
+            "cond_valid": torch.tensor(float(cond_valid), dtype=torch.float32),
             "gaze_target": torch.from_numpy(gaze_target),
             "gaze_valid": torch.tensor(gaze_valid, dtype=torch.float32),
             "tactile": self._load_tactile(frame),
@@ -625,6 +829,9 @@ class ViTPretrainModel(nn.Module):
     # Tactile drives the grounding query instead of a caller-supplied phase.
     # Nothing supervises what it should mean; the CGL loss is its only gradient.
     grounding_tactile_conditioned: bool = False
+    # Gaze drives the grounding query. Same slot as the tactile conditioner, but
+    # sourced from the signal the target itself is built from.
+    grounding_gaze_conditioned: bool = False
 
     def setup(self):
         self.encoder = ViTImageEncoder(
@@ -640,6 +847,7 @@ class ViTPretrainModel(nn.Module):
             use_grounding_query=True,
             grounding_phase_dim=self.grounding_phase_dim,
             grounding_tactile_conditioned=self.grounding_tactile_conditioned,
+            grounding_gaze_conditioned=self.grounding_gaze_conditioned,
             normalize_method="unit",
             name=VIT_MODULE_NAME,
         )
@@ -657,10 +865,12 @@ class ViTPretrainModel(nn.Module):
         train: bool,
         phase: Optional[jax.Array] = None,
         tactile: Optional[jax.Array] = None,
+        gaze_xy: Optional[jax.Array] = None,
     ) -> Dict[str, jax.Array]:
-        vector, spatial, grounding_logits = self.encoder(
-            image, train=train, encode=True, return_grounding=True, phase=phase,
-            tactile=tactile,
+        vector, spatial, grounding_logits, query_phase = self.encoder(
+            image, train=train, encode=True, return_grounding=True,
+            return_query_phase=True, phase=phase,
+            tactile=tactile, gaze_xy=gaze_xy,
         )
         segmentation_logits = self.segmentation_head(spatial)
         # (B, h, w, C) -> (B, C, h, w) for mask_supervision_loss
@@ -683,6 +893,7 @@ class ViTPretrainModel(nn.Module):
             "segmentation_logits": segmentation_logits,
             "geometry_predictions": geometry,
             "presence_logits": self.presence_head(vector),
+            "query_phase": query_phase,
         }
 
     def __call__(
@@ -693,14 +904,15 @@ class ViTPretrainModel(nn.Module):
         state: Optional[jax.Array] = None,
         phase: Optional[jax.Array] = None,
         tactile: Optional[jax.Array] = None,
+        gaze_xy: Optional[jax.Array] = None,
         train: bool = True,
     ) -> Dict[str, jax.Array]:
-        output = self.encode(image, train, phase, tactile)
+        output = self.encode(image, train, phase, tactile, gaze_xy)
         if future_image is not None:
             # The future frame is one step away, so it is still in the same
             # phase; reusing the phase here keeps the inverse-dynamics pair
             # consistent instead of asking two different queries.
-            future = self.encode(future_image, train, phase, tactile)
+            future = self.encode(future_image, train, phase, tactile, gaze_xy)
             if state is None:
                 state = jnp.zeros(
                     (*output["vector"].shape[:-1], self.state_dim),
@@ -736,6 +948,9 @@ def _batch_to_jax(batch):
         "transition_valid": arr("transition_valid"),
         "pick_phase": arr("pick_phase"),
         "place_phase": arr("place_phase"),
+        "gaze_xy": arr("gaze_xy"),
+        "cond_label": arr("cond_label"),
+        "cond_valid": arr("cond_valid"),
         "gaze_target": arr("gaze_target"),
         "gaze_valid": arr("gaze_valid"),
         "tactile": jnp.asarray(
@@ -896,9 +1111,41 @@ def _compute_losses_gaze(output, batch, args):
         jnp.mean(jnp.square(output["inverse_action"] - batch["action"]), axis=-1),
         batch["transition_valid"],
     )
+    # The conditioner picks which query row the frame uses. Leaving that to the
+    # grounding KL alone did not work: measured on the first gazehybrid encoder,
+    # it returned (0.515, 0.485) for gaze on the ball and (0.471, 0.529) for gaze
+    # on the basket -- a 0.044 spread, i.e. a permanent half-and-half blend. The
+    # KL has an easier way out, because 67% of frames are supervised on or beside
+    # the ball, so "always look at the ball" fits most of the data with the
+    # conditioner left flat. This term hands it the answer directly, using the
+    # branch gaze already took. It adds no information: that label IS where the
+    # target came from.
+    cond_loss = jnp.zeros((), dtype=jnp.float32)
+    query_phase = output.get("query_phase")
+    cond_weight = float(getattr(args, "cond_loss_weight", 0.0))
+    if query_phase is not None and cond_weight > 0:
+        probs = jnp.clip(query_phase.reshape(query_phase.shape[0], -1), 1e-6, 1.0)
+        label = batch["cond_label"]
+        n_rows = probs.shape[-1]
+        onehot = jax.nn.one_hot(label.astype(jnp.int32), n_rows)
+        picked = jnp.sum(probs * onehot, axis=-1)
+        # Balance the two classes by their frequency in this batch. Without it
+        # the conditioner just learns the marginal: measured on the first run,
+        # 79.4% of labelled frames said "ball", and a constant "ball" output
+        # scores a cross-entropy of ~0.6 -- almost exactly the 0.543 that run
+        # plateaued at, with the gaze position doing no work at all.
+        valid_c = batch["cond_valid"]
+        counts = jnp.sum(onehot * valid_c[:, None], axis=0)
+        per_class = (1.0 / n_rows) / jnp.maximum(counts, 1.0)
+        cls_w = jnp.sum(onehot * per_class[None, :], axis=-1)
+        cond_loss = jnp.sum(-jnp.log(picked) * valid_c * cls_w) / jnp.maximum(
+            jnp.sum(valid_c * cls_w), 1e-6
+        )
+
     total = (
         args.grounding_loss_weight * grounding_loss
         + args.inverse_loss_weight * inverse_loss
+        + cond_weight * cond_loss
     )
     zero = jnp.zeros((), dtype=jnp.float32)
     # Channel order follows task_configs' target_names, and a task may declare
@@ -934,11 +1181,12 @@ def _compute_losses_gaze(output, batch, args):
         "center_loss": zero,
         "presence_loss": zero,
         "inverse_loss": inverse_loss,
+        "cond_loss": cond_loss,
     }
 
 
 def compute_losses(output, batch, args):
-    if getattr(args, "grounding_source", "mask") in ("gaze", "gaze_mask"):
+    if getattr(args, "grounding_source", "mask") in ("gaze", "gaze_mask", "gaze_hybrid"):
         return _compute_losses_gaze(output, batch, args)
 
     segmentation = mask_supervision_loss(
@@ -1070,6 +1318,7 @@ def make_steps(model, optimizer, args):
             state=batch["state"],
             phase=batch["phase_onehot"] if args.phase_conditioned else None,
             tactile=batch["tactile"] if args.grounding_tactile_conditioned else None,
+            gaze_xy=batch["gaze_xy"] if args.grounding_gaze_conditioned else None,
             train=train,
             rngs={"dropout": jax.random.PRNGKey(0)},
         )
@@ -1246,7 +1495,8 @@ def parse_args() -> argparse.Namespace:
              "on one batch and evaluating on another is a domain shift, not a "
              "held-out split.")
     parser.add_argument(
-        "--grounding_source", choices=("mask", "gaze", "gaze_mask"), default="mask",
+        "--grounding_source",
+        choices=("mask", "gaze", "gaze_mask", "gaze_hybrid"), default="mask",
         help="What the grounding query is scored against. 'mask' is the "
              "existing vit-grounded recipe and is left untouched. 'gaze' scores "
              "against the operator's recorded gaze instead, and switches off "
@@ -1270,6 +1520,43 @@ def parse_args() -> argparse.Namespace:
              "falls inside the target's strongest cells on 81 / 85 / 88 / 90 / "
              "92% of frames while pre-grasp mass on the basket rises 0.02 -> "
              "0.09 against a 0.19 chance baseline. 1.0 is the knee.")
+    parser.add_argument(
+        "--grounding_gaze_conditioned", type=int, default=0,
+        help="Condition the grounding query on the gaze position (two numbers "
+             "through a small MLP to a softmax over the query rows). Pairs with "
+             "--grounding_source=gaze_hybrid: the question asked and the answer "
+             "taught then come from the same signal, which is what the tactile "
+             "conditioner could not guarantee.",
+    )
+    parser.add_argument(
+        "--grounding_query_rows", type=int, default=2,
+        help="How many questions the grounding query table holds when the query "
+             "is gaze-conditioned. 3 gives the hand its own row instead of "
+             "making the ball's row cover both the ball and the contact region.",
+    )
+    parser.add_argument(
+        "--cond_loss_weight", type=float, default=0.0,
+        help="Cross-entropy on the grounding query conditioner, using the "
+             "branch gaze took as the label. Only frames where gaze clearly "
+             "selected the ball or the basket are scored; the 51.8%% that fall "
+             "on neither are left unlabelled rather than guessed.",
+    )
+    parser.add_argument(
+        "--gaze_xy_jitter_px", type=float, default=0.0,
+        help="Gaussian jitter, in 128px units, added to the gaze position fed to "
+             "the conditioner during training. Set it to the gaze predictor's "
+             "own error so the conditioner is trained on the accuracy it will "
+             "be deployed with.",
+    )
+    parser.add_argument(
+        "--gaze_ball_dilate_frac", type=float, default=0.4,
+        help="Grow the ball by this fraction of its own radius for the "
+             "containment test only -- 0.4 turns a 5 mm ball into 7 mm. The "
+             "target always keeps the ball's original silhouette; this only "
+             "decides whether a fixation just off the ball still counts as "
+             "looking at it. Relative rather than absolute so it means the same "
+             "thing at any resolution and any distance.",
+    )
     parser.add_argument(
         "--grounding_tactile_conditioned", type=int, default=0,
         help="Condition the grounding query on tactile. Nothing tells the model "
@@ -1356,7 +1643,7 @@ def main():
     data_root = args.data_root or task.data_root
     # Phase-conditioned runs land in their own directory so the unconditioned
     # checkpoint stays available for the comparison.
-    if args.grounding_source in ("gaze", "gaze_mask") and args.phase_conditioned:
+    if args.grounding_source in ("gaze", "gaze_mask", "gaze_hybrid") and args.phase_conditioned:
         # The gaze already carries the phase: the operator looks inside the
         # basket on 1.5% of pre-grasp frames against 32.9% after the grasp, and
         # 37 of 41 episodes contain no pre-grasp basket look at all. Feeding a
@@ -1365,7 +1652,7 @@ def main():
         print("grounding_source=gaze: forcing --phase_conditioned off")
         args.phase_conditioned = False
     default_name = f"{args.exp_name}_vit_grounded"
-    if args.grounding_source in ("gaze", "gaze_mask"):
+    if args.grounding_source in ("gaze", "gaze_mask", "gaze_hybrid"):
         default_name += "_" + args.grounding_source
     if args.phase_conditioned:
         default_name += "_phase"
@@ -1373,7 +1660,7 @@ def main():
     mask_files = list(task.mask_files)
     target_names = list(task.target_names)
 
-    if args.grounding_source in ("gaze", "gaze_mask"):
+    if args.grounding_source in ("gaze", "gaze_mask", "gaze_hybrid"):
         # Episode-scoped demos, and deliberately not find_phase_demos: that one
         # reads pick_classifier_phase_scan.json, i.e. the pick classifier this
         # mode exists to remove. Episode scoping also stops the temporal pooling
@@ -1402,6 +1689,8 @@ def main():
         target_names=target_names,
         sample_stride=args.frame_stride,
         grounding_source=args.grounding_source,
+        gaze_ball_dilate_frac=args.gaze_ball_dilate_frac,
+        gaze_xy_jitter_px=args.gaze_xy_jitter_px,
         token_grid=token_grid,
         gaze_sigma_cells=args.gaze_sigma_cells,
         gaze_dilate_cells=args.gaze_dilate_cells,
@@ -1409,7 +1698,7 @@ def main():
         gaze_max_gap=args.gaze_max_gap,
         gaze_decay=args.gaze_decay,
     )
-    if args.grounding_source in ("gaze", "gaze_mask"):
+    if args.grounding_source in ("gaze", "gaze_mask", "gaze_hybrid"):
         print(f"grounding_source={args.grounding_source}: token grid {token_grid}, "
               f"sigma {args.gaze_sigma_cells} cells, "
               f"dilate {args.gaze_dilate_cells} cells, window +/-{args.gaze_window}")
@@ -1458,10 +1747,13 @@ def main():
         output_dim=args.output_dim,
         num_spatial_blocks=args.num_spatial_blocks,
         grounding_phase_dim=(
-            PHASE_DIM if (args.phase_conditioned or args.grounding_tactile_conditioned)
+            args.grounding_query_rows if args.grounding_gaze_conditioned
+            else PHASE_DIM if (args.phase_conditioned
+                               or args.grounding_tactile_conditioned)
             else 0
         ),
         grounding_tactile_conditioned=bool(args.grounding_tactile_conditioned),
+        grounding_gaze_conditioned=bool(args.grounding_gaze_conditioned),
     )
     dummy_image = jnp.zeros((1, args.input_size, args.input_size, 3), jnp.float32)
     params = model.init(
@@ -1477,6 +1769,11 @@ def main():
         tactile=(
             jnp.zeros((1, 128, 256, 3), jnp.float32)
             if args.grounding_tactile_conditioned
+            else None
+        ),
+        gaze_xy=(
+            jnp.zeros((1, 2), jnp.float32)
+            if args.grounding_gaze_conditioned
             else None
         ),
         train=False,
@@ -1515,12 +1812,19 @@ def main():
                 # Readers must build the encoder with a matching
                 # grounding_phase_dim; the query param's leading axis differs.
                 "grounding_phase_dim": (
-                    PHASE_DIM
+                    args.grounding_query_rows
+                    if args.grounding_gaze_conditioned
+                    else PHASE_DIM
                     if (args.phase_conditioned or args.grounding_tactile_conditioned)
                     else 0
                 ),
                 "grounding_tactile_conditioned": bool(
                     args.grounding_tactile_conditioned),
+                "grounding_gaze_conditioned": bool(args.grounding_gaze_conditioned),
+                "gaze_ball_dilate_frac": float(args.gaze_ball_dilate_frac),
+                "gaze_xy_jitter_px": float(args.gaze_xy_jitter_px),
+                "cond_loss_weight": float(args.cond_loss_weight),
+                "grounding_query_rows": int(args.grounding_query_rows),
                 # Consumed by eval_encoder / check_rl_grounding to pick the
                 # matching target. "ball_pick_only" was the previous scheme.
                 "grounding_target": "phase_selected_mask_plus_hand",

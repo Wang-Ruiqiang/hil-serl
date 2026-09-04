@@ -1,0 +1,21 @@
+{
+  "data_roots": [
+    "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-18-59",
+    "/home/ealin/workspaces/DexTacHil/data/recorded_data/tennis_ball_pick_and_place/tennis_ball_pick_and_place-2026-08-14_12-49-48"
+  ],
+  "output_dir": "examples/gaze_data_process/SAM_process/mask_predictor_ckpt_0814",
+  "image_size": 128,
+  "batch_size": 32,
+  "num_epochs": 40,
+  "learning_rate": 0.0001,
+  "weight_decay": 1e-05,
+  "val_ratio": 0.15,
+  "seed": 42,
+  "num_workers": 4,
+  "checkpoint_period": 10,
+  "mask_bce_weight": 1.0,
+  "mask_dice_weight": 1.0,
+  "base_channels": 32,
+  "min_mask_pixels": 8,
+  "max_samples": null
+}

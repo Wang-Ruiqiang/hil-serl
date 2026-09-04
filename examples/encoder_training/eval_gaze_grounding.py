@@ -192,14 +192,21 @@ def main():
         output_dim=int(config["output_dim"]),
         num_spatial_blocks=int(config["num_spatial_blocks"]),
         grounding_phase_dim=phase_dim,
+        grounding_tactile_conditioned=bool(
+            config.get("grounding_tactile_conditioned", False)),
     )
 
+    tactile_conditioned = bool(config.get("grounding_tactile_conditioned", False))
+
     @jax.jit
-    def attention_of(images):
+    def attention_of(images, tactile):
+        # A tactile-conditioned query takes no phase vector: the encoder derives
+        # its conditioning from the tactile frame itself. Passing None for both
+        # would make the query raise rather than silently attend wrongly.
         output = model.apply(
             {"params": params}, images,
             future_image=images, state=jnp.zeros((images.shape[0], 7)),
-            phase=None, train=False)
+            phase=None, tactile=tactile, train=False)
         logits = output["grounding_logits"].reshape(images.shape[0], -1)
         return jax.nn.softmax(logits, axis=-1).reshape(
             images.shape[0], grid[0], grid[1])
@@ -221,15 +228,18 @@ def main():
             gaze_window=int(config.get("gaze_window", 5)),
             gaze_max_gap=int(config.get("gaze_max_gap", 3)),
             gaze_decay=float(config.get("gaze_decay", 0.15)))
-        images, targets, frames = [], [], []
+        images, targets, frames, tactiles = [], [], [], []
         for index in range(len(dataset)):
             sample = dataset[index]
             images.append(np.asarray(sample["image"]).transpose(1, 2, 0))
             targets.append(np.asarray(sample["gaze_target"]))
             frames.append(Path(sample["frame"]))
+            tactiles.append(np.asarray(sample["tactile"]).transpose(1, 2, 0))
         if not images:
             continue
-        attention = np.asarray(attention_of(jnp.asarray(np.stack(images))))
+        attention = np.asarray(attention_of(
+            jnp.asarray(np.stack(images)),
+            jnp.asarray(np.stack(tactiles)) if tactile_conditioned else None))
         writers = None
         if args.render is not None:
             args.render.mkdir(parents=True, exist_ok=True)

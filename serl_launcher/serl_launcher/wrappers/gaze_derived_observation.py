@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from serl_launcher.utils.gaze_mask_utils import (
+    append_gaze_xy_to_state,
     add_gaze_mask_image_to_obs,
     PHASE_ONEHOT_DIM,
     append_gaze_phase_to_state,
@@ -57,7 +58,9 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         pick_classifier_checkpoint_path="examples/reward_classifier/classifier_ckpt_ball_pick",
         pick_classifier_threshold=0.95,
         pick_classifier_image_keys=("front_camera", "tactile_data"),
+        condition_on_gaze_xy=False,
         gaze_target_mask_dilation=0,
+        gaze_selection_hysteresis=3,
         channels=3,
         log_fn=print,
     ):
@@ -70,10 +73,26 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
         self.gaze_predictor_checkpoint_path = gaze_predictor_checkpoint_path
         self.mask_predictor_checkpoint_path = mask_predictor_checkpoint_path
         self.mask_selection_mode = str(mask_selection_mode)
+        # Write the gaze position into the two state columns the phase one-hot
+        # occupies, for encoders whose grounding query is conditioned on gaze.
+        # Same width, so the observation space and the demos are unchanged.
+        self.condition_on_gaze_xy = bool(condition_on_gaze_xy)
         self.pick_classifier_checkpoint_path = pick_classifier_checkpoint_path
         self.pick_classifier_threshold = float(pick_classifier_threshold)
         self.pick_classifier_image_keys = tuple(pick_classifier_image_keys)
         self.gaze_target_mask_dilation = int(gaze_target_mask_dilation)
+        # Consecutive frames a new gaze selection must repeat before it replaces
+        # the committed one. Both directions, deliberately: a one-way pick->place
+        # latch strands the episode in "place" when the ball is dropped and the
+        # operator looks back at it. Measured on the 2026-09-02 buffer, per-step
+        # switch rate 2.45% -> 0.85% (N=2) -> 0.75% (N=3), against 1.51% for the
+        # pick-classifier run that succeeded; the cost is that the pick->place
+        # handover lands N-1 steps late, which nothing depends on. Past N=3 the
+        # rate barely moves (0.64% at N=8) while the lag grows linearly.
+        self.gaze_selection_hysteresis = max(1, int(gaze_selection_hysteresis))
+        self._gaze_committed_index = None
+        self._gaze_pending_index = None
+        self._gaze_pending_run = 0
         self.channels = int(channels)
         self.log_fn = log_fn
         self.gaze_predictor = None
@@ -117,7 +136,31 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
     def reset(self, **kwargs):
         self.pick_latched = False
         self.last_pick_classifier_prob = 0.0
+        self._gaze_committed_index = None
+        self._gaze_pending_index = None
+        self._gaze_pending_run = 0
         return super().reset(**kwargs)
+
+    def _commit_gaze_selection(self, raw_index):
+        """Hold the previous selection until a new one repeats `hysteresis` times."""
+        if raw_index is None:
+            return self._gaze_committed_index
+        if self._gaze_committed_index is None:
+            self._gaze_committed_index = raw_index
+            self._gaze_pending_index = raw_index
+            self._gaze_pending_run = 1
+            return self._gaze_committed_index
+        if raw_index == self._gaze_pending_index:
+            self._gaze_pending_run += 1
+        else:
+            self._gaze_pending_index = raw_index
+            self._gaze_pending_run = 1
+        if (
+            raw_index != self._gaze_committed_index
+            and self._gaze_pending_run >= self.gaze_selection_hysteresis
+        ):
+            self._gaze_committed_index = raw_index
+        return self._gaze_committed_index
 
     def _image_keys(self):
         return list(self.observation_space.spaces.keys())
@@ -261,6 +304,24 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
                 heatmap_shape,
                 dilation_px=self.gaze_target_mask_dilation,
             )
+            raw_index = fields.get("selected_mask_index")
+            committed = self._commit_gaze_selection(raw_index)
+            fields["raw_selected_mask_index"] = raw_index
+            if committed is not None and committed != raw_index:
+                # Rebuild the target from the committed slot. gaze_xy_norm is
+                # deliberately left untouched: the ViT's query conditioner is
+                # supposed to see where the operator is actually looking, and
+                # smoothing that would blunt the signal this pipeline exists to
+                # use. Only the mask observation and the CGL target are held.
+                held = compute_index_target_mask_fields(
+                    obs,
+                    self.mask_predictor,
+                    heatmap_shape,
+                    selected_mask_index=committed,
+                )
+                fields["gaze_target_mask"] = held["gaze_target_mask"]
+                fields["selected_mask_index"] = held["selected_mask_index"]
+                fields["selected_mask_slot"] = held["selected_mask_slot"]
         obs = add_gaze_mask_image_to_obs(
             obs,
             gaze_target_mask=fields["gaze_target_mask"],
@@ -284,7 +345,10 @@ class GazeDerivedObservationWrapper(gym.ObservationWrapper):
                 image_key=image_key,
                 reference_key=self.source_image_key,
             )
-        obs = append_gaze_phase_to_state(obs, fields.get("selected_mask_index"))
+        if self.condition_on_gaze_xy:
+            obs = append_gaze_xy_to_state(obs, fields.get("gaze_xy_norm"))
+        else:
+            obs = append_gaze_phase_to_state(obs, fields.get("selected_mask_index"))
 
         for mask_key in (self.gaze_target_mask_key, self.mask1_key, self.mask2_key):
             obs.setdefault(mask_key, self._zero_image(mask_key))

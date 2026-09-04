@@ -75,7 +75,7 @@ class EnvConfig(DefaultEnvConfig):
     RANDOM_RESET = True
     RANDOM_XY_RANGE = 0.02
     RANDOM_RZ_RANGE = 0.05
-    ACTION_SCALE = (0.004, 0.004, 0.004)
+    ACTION_SCALE = (0.004, 0.005, 0.005)
     CMD_POSE_RESYNC_THRESHOLD = 0.05
     DISPLAY_IMAGE = True
     GAZE_DISPLAY_MARKERS = True
@@ -127,6 +127,7 @@ class TrainConfig(DefaultTrainingConfig):
     buffer_period = 1000
     checkpoint_period = 2000
     steps_per_update = 100
+    discount = 0.99
     # Frozen ResNet RGB backbone with pick-phase mask2 suppression, mask1 head,
     # raw/head fusion, and a separate lightweight CNN for tactile heatmaps.
     #   front_camera      -> frozen ResNet10 -> mask2 suppression -> mask1
@@ -147,7 +148,7 @@ class TrainConfig(DefaultTrainingConfig):
     # the RL target has no hand mask and would push that attention back off.
     freeze_encoder = True
     observation_horizon = 1
-    wandb_project = "tennis_ball_pick-and-place-gazemask-8-28-0"
+    wandb_project = "tennis_ball_pick-and-place-gaze-predictor-9-3-0"
     setup_mode = "single-arm-fixed-gripper"
     pick_reward_threshold = 0.8
     place_reward_threshold = 0.8
@@ -203,6 +204,11 @@ class TrainConfig(DefaultTrainingConfig):
             / "best.pt"
         ),
         mask_selection_mode="pick_classifier",
+        # Write the gaze position into the two state columns the phase one-hot
+        # occupies, for encoders whose grounding query is conditioned on gaze.
+        # Only meaningful with mask_selection_mode="gaze", which is where a
+        # gaze position exists at all.
+        condition_on_gaze_xy=False,
         encoder_type=None,
         pick_classifier_checkpoint_path=_reward_classifier_ckpt("classifier_ckpt_ball_pick"),
         pick_classifier_threshold=0.8,
@@ -257,6 +263,7 @@ class TrainConfig(DefaultTrainingConfig):
                 gaze_predictor_checkpoint_path=gaze_predictor_checkpoint_path,
                 mask_predictor_checkpoint_path=mask_predictor_checkpoint_path,
                 mask_selection_mode=mask_selection_mode,
+                condition_on_gaze_xy=condition_on_gaze_xy,
                 pick_classifier_checkpoint_path=pick_classifier_checkpoint_path,
                 pick_classifier_threshold=pick_classifier_threshold,
                 gaze_target_mask_dilation=gaze_target_mask_dilation,
@@ -277,6 +284,21 @@ class TrainConfig(DefaultTrainingConfig):
             act_exec_horizon=None,
         )
         if classifier:
+            # The pick classifier stays loaded even in gaze runs, and it is
+            # not there to give a pick reward -- reward_func returns 0 for the
+            # whole pick phase. It is the gate that decides when the place
+            # classifier starts being evaluated, and that gate is load-bearing:
+            # on the 2026-08-28 sample sets, all labelled not-success, the place
+            # classifier clears its own 0.8 threshold on 38.5% of
+            # classifier_fail_frame (probability median 0.680) and 12.8% of
+            # negtive_frames -- 18.3% of the negatives taken with the hand
+            # within 12 cm of the basket. Evaluating it from step 0 would end
+            # episodes with a spurious reward whenever the hand passed over the
+            # basket empty. The RL buffer cannot show this: across both the
+            # earliest and latest 8000 transitions the arm never brings the TCP
+            # closer than 0.108 m to the basket before the grasp, so the
+            # configuration simply is not in it. The cost of keeping the gate is
+            # 0.71 ms per control step, 0.24% of the actor's wall time.
             place_only_reward = active_encoder_type == "vit-gaze"
             sample = env.observation_space.sample()
             # Reward classifiers were trained with horizon=1; keep only the
@@ -359,6 +381,9 @@ class TrainConfig(DefaultTrainingConfig):
                 start_in_pick_phase=not place_only_reward,
             )
             if place_only_reward:
-                print("[vit-gaze] reward classifier: place-only (pick classifier not loaded)")
+                print(
+                    "[reward] place-only: pick classifier not loaded, and the "
+                    "episode is judged by the place classifier from step 0"
+                )
         env = GripperPenaltyWrapper(env, exp_name=env_config.EXP_NAME, penalty=-0.02)
         return env

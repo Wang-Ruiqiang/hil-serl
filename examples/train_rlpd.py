@@ -109,6 +109,14 @@ flags.DEFINE_integer(
     2,
     "Dilation radius in mask-predictor pixels when checking whether gaze hits a mask.",
 )
+flags.DEFINE_float(
+    "discount",
+    -1.0,
+    "Overrides the experiment config's discount when >= 0. Per-run rather than "
+    "in TrainConfig on purpose: the phase and replicate modes exist to be "
+    "comparable to runs already on disk, and a shared value would silently "
+    "retune them too.",
+)
 flags.DEFINE_boolean(
     "debug", False, "Debug mode."
 )  # debug mode will disable wandb logging
@@ -1006,12 +1014,53 @@ def main(_):
         # no phase one-hot, so the config must not build them or load the
         # predictors that produce them.
         env_kwargs["encoder_type"] = FLAGS.encoder_type or config.encoder_type
-    if "pick_classifier_checkpoint_path" in env_signature:
-        env_kwargs["pick_classifier_checkpoint_path"] = FLAGS.pick_classifier_checkpoint_path
-    if "pick_classifier_threshold" in env_signature:
-        env_kwargs["pick_classifier_threshold"] = FLAGS.pick_classifier_threshold
+    # Only the pick_classifier selection mode has any use for it. Passing the
+    # path in the other modes left a live checkpoint reference in the run's
+    # recorded configuration for a network that is never built, which reads as
+    # if the classifier were still part of the gaze pipeline. The wrapper
+    # already gates the load on the mode; this makes the flags agree.
+    if FLAGS.mask_selection_mode == "pick_classifier":
+        if "pick_classifier_checkpoint_path" in env_signature:
+            env_kwargs["pick_classifier_checkpoint_path"] = (
+                FLAGS.pick_classifier_checkpoint_path
+            )
+        if "pick_classifier_threshold" in env_signature:
+            env_kwargs["pick_classifier_threshold"] = FLAGS.pick_classifier_threshold
+    elif FLAGS.pick_classifier_checkpoint_path:
+        print_green(
+            f"[gaze] mask_selection_mode={FLAGS.mask_selection_mode}: "
+            "pick classifier not loaded."
+        )
     if "gaze_target_mask_dilation" in env_signature:
         env_kwargs["gaze_target_mask_dilation"] = FLAGS.gaze_target_mask_dilation
+    if "condition_on_gaze_xy" in env_signature:
+        # Read it off the encoder rather than taking a flag: the two state
+        # columns hold either a phase one-hot or a gaze position, and only the
+        # checkpoint knows which one its grounding query was trained to read.
+        # Pairing them by hand is a silent failure -- the query would mix its
+        # rows by whatever happened to be in those columns.
+        _enc_ckpt = FLAGS.encoder_checkpoint_path or getattr(
+            config, "encoder_checkpoint_path", None
+        )
+        _gaze_cond = False
+        if _enc_ckpt:
+            try:
+                from serl_launcher.vision.encoder_utils import (
+                    load_encoder_checkpoint_config,
+                )
+                _gaze_cond = bool(
+                    load_encoder_checkpoint_config(_enc_ckpt).get(
+                        "grounding_gaze_conditioned", False
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - config is advisory here
+                print_red(f"[gaze] could not read encoder config: {exc}")
+        env_kwargs["condition_on_gaze_xy"] = _gaze_cond
+        if _gaze_cond:
+            print_green(
+                "[gaze] encoder is gaze-conditioned: state[..., -2:] will carry "
+                "the gaze position instead of a phase one-hot"
+            )
     env = config.get_environment(**env_kwargs)
     env = RecordEpisodeStatistics(env)
     sample_obs = env.observation_space.sample()
@@ -1038,7 +1087,7 @@ def main(_):
         sample_action=env.action_space.sample(),
         image_keys=config.image_keys,
         encoder_type=encoder_type,
-        discount=config.discount,
+        discount=(FLAGS.discount if FLAGS.discount >= 0 else config.discount),
     )
     if encoder_checkpoint_path:
         agent_kwargs["encoder_checkpoint_path"] = encoder_checkpoint_path

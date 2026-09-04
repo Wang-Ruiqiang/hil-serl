@@ -188,6 +188,29 @@ def _dilate_binary_mask(mask, radius: int):
     return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
 
 
+def _dilate_prob_map(prob, radius: int):
+    """Local max of a probability map over the same neighbourhood as the mask dilation.
+
+    The containment test asks "is any mask pixel within `radius` of the gaze?",
+    which on a binarised map is exactly a dilation. Scoring the candidates has
+    to ask the same question of the probabilities, or the two disagree: the
+    2026-09-02 run picked the basket on frames where the raw probabilities under
+    the gaze pixel were 0.000 (ball) against 0.066 (basket) -- both far below
+    the 0.5 threshold, so the winner was decided by noise, and the basket
+    channel carries broader sub-threshold residue than a 7 px ball. A grayscale
+    dilation makes the score the same evidence the candidacy used, which also
+    floors it: a candidate exists only where this value clears the threshold.
+    """
+    if radius <= 0:
+        return np.asarray(prob, dtype=np.float32)
+    kernel_size = int(radius) * 2 + 1
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_size, kernel_size),
+    )
+    return cv2.dilate(np.asarray(prob, dtype=np.float32), kernel, iterations=1)
+
+
 def _morph_binary_mask(mask, radius: int, op):
     mask = np.asarray(mask, dtype=bool)
     if radius <= 0:
@@ -324,6 +347,29 @@ def append_gaze_phase_to_state(obs, selected_mask_index):
     return obs
 
 
+def append_gaze_xy_to_state(obs, gaze_xy_norm):
+    """Append the gaze position to the state, in the slot the one-hot used.
+
+    Two numbers either way, so the observation space is unchanged and demos
+    exported under the phase one-hot still load. What changes is the meaning:
+    the grounding query is conditioned on where the operator is looking rather
+    than on a classifier's verdict about which phase it is. Absent gaze becomes
+    (-1, -1), outside the image box, so the conditioner can respond to "no
+    fixation" instead of reading it as a corner.
+    """
+    obs = dict(obs)
+    state = np.asarray(obs["state"], dtype=np.float32)
+    if gaze_xy_norm is None:
+        xy = np.asarray([-1.0, -1.0], dtype=np.float32)
+    else:
+        xy = np.asarray(gaze_xy_norm, dtype=np.float32).reshape(-1)[:2]
+        if xy.shape[0] < 2:
+            xy = np.asarray([-1.0, -1.0], dtype=np.float32)
+    xy = np.broadcast_to(xy, (*state.shape[:-1], 2))
+    obs["state"] = np.concatenate([state, xy], axis=-1).astype(np.float32)
+    return obs
+
+
 def add_gaze_mask_image_to_obs(
     obs,
     *,
@@ -349,9 +395,19 @@ def select_gaze_target_mask(
     target_shape,
     threshold: float = 0.5,
     dilation_px: int = 2,
+    gaze_xy_norm=None,
     return_info: bool = False,
 ):
-    """Return the predicted object mask containing the gaze peak, or zeros."""
+    """Return the predicted object mask containing the gaze peak, or zeros.
+
+    ``gaze_xy_norm`` supplies the fixation directly and skips the heatmap,
+    which is how the offline demo export reuses this: it has the eye tracker's
+    own position and only needs the selection rule. Sharing the rule is the
+    point -- the export used to carry a copy whose tie-break preferred the
+    larger mask, and since the basket outweighs the ball by 60x, every
+    ambiguous frame in a demo went to the basket while the same frame online
+    went to whichever object the gaze was nearer.
+    """
     target = np.zeros(target_shape, dtype=np.float32)
     info = {
         "selected_mask_index": None,
@@ -359,7 +415,10 @@ def select_gaze_target_mask(
         "gaze_xy_norm": None,
         "gaze_hit_mask": False,
     }
-    xy_norm = gaze_xy_norm_from_heatmap(gaze_heatmap)
+    if gaze_xy_norm is not None:
+        xy_norm = tuple(float(v) for v in np.asarray(gaze_xy_norm).reshape(-1)[:2])
+    else:
+        xy_norm = gaze_xy_norm_from_heatmap(gaze_heatmap)
     info["gaze_xy_norm"] = xy_norm
     if mask_probs is None or xy_norm is None:
         return (target, info) if return_info else target
@@ -373,18 +432,20 @@ def select_gaze_target_mask(
     gaze_y = int(round(np.clip(xy_norm[1], 0.0, 1.0) * (mask_height - 1)))
     binary_masks = mask_probs >= float(threshold)
 
-    search_masks = binary_masks.copy()
-    if dilation_px > 0:
-        search_masks = np.stack(
-            [
-                _dilate_binary_mask(mask, dilation_px)
-                for mask in search_masks
-            ],
-            axis=0,
-        )
+    # One evidence source for both questions: the neighbourhood max of each
+    # channel's probability at the gaze pixel. Thresholding it reproduces the
+    # old dilated-mask containment test exactly, and scoring with it stops the
+    # tie-break from ranking two sub-threshold noise values against each other.
+    search_probs = np.stack(
+        [_dilate_prob_map(prob, dilation_px) for prob in mask_probs],
+        axis=0,
+    )
+    gaze_scores = search_probs[:, gaze_y, gaze_x]
 
     candidate_indices = [
-        index for index, mask in enumerate(search_masks) if bool(mask[gaze_y, gaze_x])
+        index
+        for index in range(search_probs.shape[0])
+        if float(gaze_scores[index]) >= float(threshold)
     ]
     info["candidate_mask_indices"] = candidate_indices
     if not candidate_indices:
@@ -397,17 +458,31 @@ def select_gaze_target_mask(
     ):
         selected_index = 1
     else:
-        selected_index = max(
-            candidate_indices,
-            key=lambda index: float(mask_probs[index, gaze_y, gaze_x]),
-        )
+        # Nearest mask wins, which is the rule the encoder's grounding target
+        # is built with offline -- so the mask the policy sees and the mask the
+        # query was taught to answer with agree on the ambiguous frames instead
+        # of being decided by two unrelated criteria. Ranking by probability
+        # was what broke here: on the frames that flipped, the values compared
+        # were 0.000 (ball) against 0.066 (basket), both far under threshold,
+        # because the candidacy test looks in a neighbourhood while the score
+        # read the single gaze pixel. Distance is measured to the thresholded
+        # silhouettes, the same ones the containment test used.
+        def _gaze_distance(index):
+            ys, xs = np.nonzero(binary_masks[index])
+            if xs.size == 0:
+                return np.inf
+            return float(np.min(np.hypot(xs - gaze_x, ys - gaze_y)))
+
+        selected_index = min(candidate_indices, key=_gaze_distance)
 
     selected_slot = f"mask{selected_index + 1}"
     selected = binary_masks[selected_index].astype(np.float32)
     selected = _resize_2d(selected, target_shape, method="nearest")
     selected = _postprocess_slot_mask(selected, selected_slot)
     info["selected_mask_index"] = selected_index
-    info["gaze_hit_mask"] = True
+    # False when the fallback fired: nothing contained the fixation and index 0
+    # was chosen by default, which is not the same as gaze landing on a mask.
+    info["gaze_hit_mask"] = bool(candidate_indices)
     selected = selected.astype(np.float32)
     return (selected, info) if return_info else selected
 

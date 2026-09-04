@@ -153,6 +153,46 @@ class ViTGroundingQuery(nn.Module):
         return summary[:, 0, :], grounding_logits
 
 
+class GazeQueryConditioner(nn.Module):
+    """Turn a gaze position into a soft choice over the grounding query rows.
+
+    Deliberately reads the gaze *position* and nothing else, and emits only a
+    convex mixture over the query table -- two numbers. That keeps the division
+    of labour honest: gaze says which object is being attended to, the ViT still
+    has to find it in the image and produce its silhouette. Feeding the position
+    itself deeper into the network would let the attention degenerate into a
+    copy of its own input.
+
+    Measured on the 2026-08-25 recordings, gaze lands on the ball in 15.5% of
+    frames and on neither object in 51.8%, sitting a median 9.1 px from the ball
+    centre. So the position is a coarse pointer, not a segmentation -- there is
+    real work left for the trunk.
+
+    A frame with no gaze arrives as (-1, -1), outside the [0, 1] image box, so
+    the network can learn a distinct response rather than reading it as a
+    fixation in the top-left corner.
+    """
+
+    out_dim: int
+    features: int = 32
+    dtype: Any = jnp.float32
+
+    @nn.compact
+    def __call__(self, gaze_xy):
+        x = jnp.asarray(gaze_xy, dtype=jnp.float32)
+        if x.ndim == 1:
+            x = x[None]
+        missing = jnp.all(x < -0.5, axis=-1, keepdims=True).astype(jnp.float32)
+        # Centre the box on 0 and flag absence explicitly rather than letting
+        # the sentinel value blend into the coordinate range.
+        x = jnp.concatenate([jnp.clip(x, 0.0, 1.0) * 2.0 - 1.0, missing], axis=-1)
+        x = nn.Dense(self.features, dtype=self.dtype)(x)
+        x = nn.relu(x)
+        x = nn.Dense(self.features, dtype=self.dtype)(x)
+        x = nn.relu(x)
+        return jax.nn.softmax(nn.Dense(self.out_dim, dtype=self.dtype)(x), axis=-1)
+
+
 class TactileQueryConditioner(nn.Module):
     """Turn a tactile frame into a soft choice over the grounding query rows.
 
@@ -216,6 +256,12 @@ class ViTImageEncoder(nn.Module):
     # the camera cannot: a hand holding the ball above the basket and a hand
     # passing over it look alike, and tactile does not.
     grounding_tactile_conditioned: bool = False
+    # Derive the conditioning from the operator's gaze position instead. Unlike
+    # tactile, this is the same signal the attention target is built from, so
+    # the question being asked and the answer being taught can never disagree --
+    # the 2026-08-28 tactile run failed exactly there, with 14.7% of frames
+    # holding the ball while the sensor read nothing.
+    grounding_gaze_conditioned: bool = False
     dropout_rate: float = 0.0
     attention_dropout_rate: float = 0.0
     normalize_method: Literal["imagenet", "unit", "none"] = "unit"
@@ -246,11 +292,14 @@ class ViTImageEncoder(nn.Module):
         encode: bool = True,
         return_spatial: bool = False,
         return_grounding: bool = False,
+        return_query_phase: bool = False,
         phase: Optional[jnp.ndarray] = None,
         tactile: Optional[jnp.ndarray] = None,
+        gaze_xy: Optional[jnp.ndarray] = None,
     ):
         spatial_features = None
         grounding_logits = None
+        resolved_query_phase = None
         if not encode:
             x = observations
         else:
@@ -321,6 +370,16 @@ class ViTImageEncoder(nn.Module):
             if self.use_grounding_query:
                 query_phase = phase
                 if (
+                    self.grounding_gaze_conditioned
+                    and self.grounding_phase_dim > 0
+                    and gaze_xy is not None
+                ):
+                    query_phase = GazeQueryConditioner(
+                        out_dim=self.grounding_phase_dim,
+                        dtype=self.dtype,
+                        name="gaze_conditioner",
+                    )(gaze_xy)
+                elif (
                     self.grounding_tactile_conditioned
                     and self.grounding_phase_dim > 0
                     and tactile is not None
@@ -335,6 +394,7 @@ class ViTImageEncoder(nn.Module):
                     if query_phase.ndim == 1:
                         # An unbatched observation carries an unbatched phase.
                         query_phase = query_phase[None]
+                resolved_query_phase = query_phase
                 query_summary, grounding_logits = ViTGroundingQuery(
                     feature_dim=self.hidden_dim,
                     num_heads=self.num_heads,
@@ -389,6 +449,8 @@ class ViTImageEncoder(nn.Module):
                 raise ValueError(
                     "return_grounding=True requires use_grounding_query=True."
                 )
+            if return_query_phase:
+                return x, spatial_features, grounding_logits, resolved_query_phase
             return x, spatial_features, grounding_logits
         if return_spatial:
             if spatial_features is None:
